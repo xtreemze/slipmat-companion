@@ -68,6 +68,14 @@ public class HigherOrderAudioAnalysisTests
     }
 
     [Fact]
+    public void RhythmGridAnalyzer_TiedPhaseMatchesRustLastMaximumRule()
+    {
+        Assert.Equal(
+            1,
+            RhythmGridAnalyzer.BestPhase([1d, 1d, 1d, 1d], 2));
+    }
+
+    [Fact]
     public void HarmonicAccumulator_MapsDetectedMajorKeyToCamelot()
     {
         const int sampleRate = 48_000;

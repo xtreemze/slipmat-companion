@@ -14,4 +14,4 @@ category: "General"
 owner: "xtreemze"
 artifacts:
 - "Jellyfin.Plugin.AudioGateway.dll"
-changelog: "Match Slipmat Rust spectral tier max-pooling for partial trailing visual frames so 100 Hz to 10 Hz and 1 Hz SLWS bytes remain deterministic across implementations."
+changelog: "Match Slipmat Rust spectral tier pooling for partial trailing frames and align rhythm tie-breaking, floating-point epsilon, and f32 BPM rounding for deterministic SLWS/SRHY parity."

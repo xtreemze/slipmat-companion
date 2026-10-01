@@ -195,7 +195,10 @@ internal static class RhythmGridAnalyzer
             scored.Add((lag, NormalizedAutocorrelation(onset, lag)));
         }
 
-        scored.Sort((left, right) => right.Score.CompareTo(left.Score));
+        scored = scored
+            .OrderByDescending(item => item.Score)
+            .ThenBy(item => item.Lag)
+            .ToList();
         if (scored.Count == 0)
         {
             return Empty();
@@ -235,8 +238,12 @@ internal static class RhythmGridAnalyzer
             return Empty();
         }
 
-        var bpm = framesPerSecond * 60d / best.Lag;
-        bpm = Math.Round(bpm, 2, MidpointRounding.AwayFromZero);
+        // Rust casts the derived tempo to f32 before rounding to two decimals.
+        // Preserve that width so SRHY's f32 BPM bytes remain cross-language stable.
+        var bpm = (float)(framesPerSecond * 60d / best.Lag);
+        bpm = MathF.Round(
+            bpm * 100f,
+            MidpointRounding.AwayFromZero) / 100f;
         var downbeats = InferDownbeats(
             frames,
             beats,
@@ -305,7 +312,10 @@ internal static class RhythmGridAnalyzer
             rightEnergy += right * right;
         }
 
-        if (leftEnergy <= double.Epsilon || rightEnergy <= double.Epsilon)
+        // Rust f64::EPSILON is machine epsilon, not C# double.Epsilon (the
+        // smallest positive subnormal).
+        const double RustF64Epsilon = 2.220_446_049_250_313_1e-16;
+        if (leftEnergy <= RustF64Epsilon || rightEnergy <= RustF64Epsilon)
         {
             return 0d;
         }
@@ -329,7 +339,7 @@ internal static class RhythmGridAnalyzer
         return Math.Abs(nearest - value) <= 1;
     }
 
-    private static int BestPhase(IReadOnlyList<double> onset, int lag)
+    internal static int BestPhase(IReadOnlyList<double> onset, int lag)
     {
         var bestPhase = 0;
         var bestScore = double.NegativeInfinity;
@@ -341,7 +351,8 @@ internal static class RhythmGridAnalyzer
                 score += onset[index];
             }
 
-            if (score > bestScore)
+            // Rust Iterator::max_by returns the last equal maximum.
+            if (score >= bestScore)
             {
                 bestScore = score;
                 bestPhase = phase;
