@@ -256,6 +256,25 @@ public class HigherOrderAudioAnalysisTests
         Assert.Equal(0.25f, HigherOrderAudioAnalysisBuilder.MonoProjection([0.5f, 0f]));
         Assert.Equal(-0.8f, IntegratedAudioAnalyzer.AmplitudeProjection([0.2f, -0.8f]));
         Assert.Equal(0.5f, IntegratedAudioAnalyzer.AmplitudeProjection([0.5f, float.NaN]));
+
+        var mono = new IntegratedAudioAnalyzer.SourceAudioFormat(2, 44_100, 1, 1);
+        var stereo = new IntegratedAudioAnalyzer.SourceAudioFormat(3, 48_000, 2, 2);
+        var surround = new IntegratedAudioAnalyzer.SourceAudioFormat(5, 96_000, 6, 2);
+
+        Assert.Equal(
+            "aformat=sample_fmts=flt:channel_layouts=mono",
+            IntegratedAudioAnalyzer.BuildAnalysisProjection(mono));
+        Assert.Equal(
+            "aformat=sample_fmts=flt:channel_layouts=stereo",
+            IntegratedAudioAnalyzer.BuildAnalysisProjection(stereo));
+        Assert.StartsWith(
+            "pan=stereo|c0=c0|c1=c1",
+            IntegratedAudioAnalyzer.BuildAnalysisProjection(surround));
+        Assert.StartsWith(
+            "[0:5]asplit=2[loud][analysis];",
+            IntegratedAudioAnalyzer.BuildFilterGraph(
+                surround,
+                IntegratedAudioAnalyzer.BuildAnalysisProjection(surround)));
     }
 
     [Fact]

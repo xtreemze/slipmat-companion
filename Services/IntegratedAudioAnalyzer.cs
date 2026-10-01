@@ -234,12 +234,8 @@ public sealed class IntegratedAudioAnalyzer
         SourceAudioFormat sourceFormat,
         CancellationToken cancellationToken)
     {
-        var projection = sourceFormat.SourceChannels switch
-        {
-            1 => "aformat=sample_fmts=flt:channel_layouts=mono",
-            2 => "aformat=sample_fmts=flt:channel_layouts=stereo",
-            _ => "pan=stereo|c0=c0|c1=c1,aformat=sample_fmts=flt:channel_layouts=stereo",
-        };
+        var projection = BuildAnalysisProjection(sourceFormat);
+        var filterGraph = BuildFilterGraph(sourceFormat, projection);
 
         var startInfo = new ProcessStartInfo
         {
@@ -257,10 +253,7 @@ public sealed class IntegratedAudioAnalyzer
             "-loglevel", "info",
             "-i", audio.Path,
             "-filter_complex",
-            $"[0:a:0]asplit=2[loud][analysis];" +
-            $"[loud]loudnorm=print_format=json[loudout];" +
-            $"[loudout]anullsink;" +
-            $"[analysis]{projection}[pcmout]",
+            filterGraph,
             "-map", "[pcmout]",
             "-vn",
             "-sn",
@@ -381,18 +374,41 @@ public sealed class IntegratedAudioAnalyzer
     internal static SourceAudioFormat? ResolveSourceFormat(Audio audio)
     {
         var stream = audio.GetMediaStreams()
-            .FirstOrDefault(value => value.Type == MediaStreamType.Audio);
-        if (stream?.SampleRate is not > 0 ||
-            stream.Channels is not > 0)
+            .Where(value =>
+                value.Type == MediaStreamType.Audio &&
+                value.Index >= 0 &&
+                value.SampleRate is > 0 &&
+                value.Channels is > 0)
+            .OrderByDescending(value => value.IsDefault)
+            .ThenBy(value => value.Index)
+            .FirstOrDefault();
+        if (stream is null)
         {
             return null;
         }
 
         return new SourceAudioFormat(
-            stream.SampleRate.Value,
-            stream.Channels.Value,
+            stream.Index,
+            stream.SampleRate!.Value,
+            stream.Channels!.Value,
             Math.Clamp(stream.Channels.Value, 1, 2));
     }
+
+    internal static string BuildAnalysisProjection(SourceAudioFormat sourceFormat)
+        => sourceFormat.SourceChannels switch
+        {
+            1 => "aformat=sample_fmts=flt:channel_layouts=mono",
+            2 => "aformat=sample_fmts=flt:channel_layouts=stereo",
+            _ => "pan=stereo|c0=c0|c1=c1,aformat=sample_fmts=flt:channel_layouts=stereo",
+        };
+
+    internal static string BuildFilterGraph(
+        SourceAudioFormat sourceFormat,
+        string projection)
+        => $"[0:{sourceFormat.StreamIndex}]asplit=2[loud][analysis];" +
+            "[loud]loudnorm=print_format=json[loudout];" +
+            "[loudout]anullsink;" +
+            $"[analysis]{projection}[pcmout]";
 
     internal static float AmplitudeProjection(ReadOnlySpan<float> frame)
     {
@@ -516,6 +532,7 @@ public sealed class IntegratedAudioAnalyzer
         => $"audio-gateway/{typeof(Plugin).Assembly.GetName().Version?.ToString() ?? "unknown"}";
 
     internal sealed record SourceAudioFormat(
+        int StreamIndex,
         int SampleRate,
         int SourceChannels,
         int AnalysisChannels);
