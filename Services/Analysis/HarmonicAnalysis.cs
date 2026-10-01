@@ -151,7 +151,9 @@ internal sealed class HarmonicAccumulator
 
         Fft(real, imag);
 
-        for (var bin = 0; bin < FrameSize / 2; bin++)
+        // Rust fft() returns N/2 magnitudes and detect_key() then takes half
+        // of that vector again. Mirror the current implementation literally.
+        for (var bin = 0; bin < FrameSize / 4; bin++)
         {
             var frequency = bin * _sampleRate / (float)FrameSize;
             if (frequency < 40f || frequency > 5_000f)
