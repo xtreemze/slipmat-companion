@@ -230,17 +230,36 @@ internal static class SpectralArtifactEncoder
         int sourceFps,
         int targetFps)
     {
-        if (targetFps <= 0 || sourceFps % targetFps != 0)
+        if (targetFps <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(targetFps));
         }
 
-        var factor = sourceFps / targetFps;
-        var output = new List<SpectralPeakFrame>((source.Count + factor - 1) / factor);
-        for (var start = 0; start < source.Count; start += factor)
+        if (targetFps >= sourceFps || source.Count == 0)
         {
+            return source;
+        }
+
+        // Match Slipmat's canonical Rust pooling exactly. Destination ranges are
+        // proportional to the actual source frame count, not fixed-size chunks.
+        // That distinction is observable when a track ends in a partial 100 Hz
+        // visual frame: e.g. 101 source frames pooled to 10 Hz become 11 ranges
+        // whose widths are distributed across the whole source.
+        var targetCount = Math.Max(
+            1,
+            checked((int)Math.Ceiling(
+                source.Count * (double)targetFps / sourceFps)));
+        var output = new List<SpectralPeakFrame>(targetCount);
+
+        for (var destination = 0; destination < targetCount; destination++)
+        {
+            var start = destination * source.Count / targetCount;
+            var end = Math.Max(
+                start + 1,
+                (destination + 1) * source.Count / targetCount);
+            end = Math.Min(end, source.Count);
+
             var frame = source[start];
-            var end = Math.Min(source.Count, start + factor);
             for (var index = start + 1; index < end; index++)
             {
                 frame = frame.Max(source[index]);
