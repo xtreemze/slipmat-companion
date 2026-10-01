@@ -22,9 +22,7 @@ public class ModelRoundTripTests
     /// <summary>Resolves schema/examples/ relative to the repo root from the test binary location.</summary>
     private static string ExamplePath(string filename)
     {
-        var dir = AppContext.BaseDirectory;
-        var repoRoot = Path.GetFullPath(Path.Combine(dir, "..", "..", "..", "..", "..", ".."));
-        return Path.Combine(repoRoot, "schema", "examples", filename);
+        return TestRepositoryPaths.Example(filename);
     }
 
     private static T Deserialize<T>(string path)

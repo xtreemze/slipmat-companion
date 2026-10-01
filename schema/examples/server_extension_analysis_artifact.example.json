@@ -1,0 +1,26 @@
+{
+  "protocolVersion": "1.0.0",
+  "subject": {
+    "version": 1,
+    "storeKey": "asv1-45babe3bb1fb2875c1a1185d168399d182a45f0bc2bfef66be054439121570e4"
+  },
+  "sourceFingerprint": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "sidecarSchemaVersion": "2.0.0",
+  "producerVersion": "0.1.0",
+  "durationMs": 562000,
+  "artifacts": [
+    {
+      "kind": "waveform",
+      "variant": "awf_v1_native_mono_b8",
+      "ratePerSecond": 10,
+      "etag": "\"etag-10\""
+    },
+    {
+      "kind": "spectral-waveform",
+      "variant": "slws_v2_stereo_u8_max_5band",
+      "ratePerSecond": 100,
+      "etag": "\"spectral-etag-100\"",
+      "analysisVersion": 2
+    }
+  ]
+}

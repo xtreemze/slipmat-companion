@@ -20,9 +20,7 @@ public class PortableAnalysisProtocolTests
 
     private static string ExamplePath(string filename)
     {
-        var dir = AppContext.BaseDirectory;
-        var repoRoot = Path.GetFullPath(Path.Combine(dir, "..", "..", "..", "..", "..", ".."));
-        return Path.Combine(repoRoot, "schema", "examples", filename);
+        return TestRepositoryPaths.Example(filename);
     }
 
     private static T Read<T>(string filename)

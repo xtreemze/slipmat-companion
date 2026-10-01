@@ -1,0 +1,41 @@
+{
+  "album": {
+    "id": "alb456",
+    "title": "Kind of Blue",
+    "year": 1959,
+    "artistNames": ["Miles Davis"]
+  },
+  "artists": [
+    { "id": "art789", "name": "Miles Davis", "avatarUrl": "/Plugins/AudioGateway/artifacts/artwork/art789?type=avatar&maxWidth=400" }
+  ],
+  "artwork": {
+    "albumCoverFront": "/Plugins/AudioGateway/artifacts/artwork/alb456?type=cover_front&maxWidth=4000",
+    "albumCoverBack":  "/Plugins/AudioGateway/artifacts/artwork/alb456?type=cover_back&maxWidth=4000",
+    "albumBackdrops":  [],
+    "artistAvatars":   { "art789": "/Plugins/AudioGateway/artifacts/artwork/art789?type=avatar&maxWidth=400" },
+    "artistBackdrops": { "art789": [] }
+  },
+  "tracks": [
+    { "itemId": "abc123", "title": "So What",            "durationMs": 562000, "trackNumber": 1, "discNumber": 1, "container": "flac" },
+    { "itemId": "abc124", "title": "Freddie Freeloader",  "durationMs": 584000, "trackNumber": 2, "discNumber": 1, "container": "flac" },
+    { "itemId": "abc125", "title": "Blue in Green",       "durationMs": 327000, "trackNumber": 3, "discNumber": 1, "container": "flac" },
+    { "itemId": "abc126", "title": "All Blues",           "durationMs": 693000, "trackNumber": 4, "discNumber": 1, "container": "flac" },
+    { "itemId": "abc127", "title": "Flamenco Sketches",   "durationMs": 566000, "trackNumber": 5, "discNumber": 1, "container": "flac" }
+  ],
+  "credits": {
+    "entries": [
+      { "role": "Producer",           "names": ["Teo Macero"] },
+      { "role": "Recording Engineer", "names": ["Fred Plaut"] },
+      { "role": "Trumpet",            "names": ["Miles Davis"] },
+      { "role": "Alto Saxophone",     "names": ["Cannonball Adderley"] },
+      { "role": "Tenor Saxophone",    "names": ["John Coltrane"] },
+      { "role": "Piano",              "names": ["Bill Evans", "Wynton Kelly"] },
+      { "role": "Bass",               "names": ["Paul Chambers"] },
+      { "role": "Drums",              "names": ["Jimmy Cobb"] }
+    ],
+    "studios": [{ "name": "Columbia 30th Street Studio", "location": "New York, NY" }],
+    "linerNotes": { "text": "Kind of Blue was recorded in two sessions on March 2 and April 22, 1959.", "language": "en" },
+    "mbReleaseId": "f3f3c6d1-9c2c-4b7a-8c3a-1a2b3c4d5e6f"
+  },
+  "cacheToken": "eyJlIjoiYWxiNDU2IiwidCI6MTczOTg0MDAwMH0"
+}

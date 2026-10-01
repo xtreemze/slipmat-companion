@@ -1,0 +1,19 @@
+{
+  "protocolVersion": "1.0.0",
+  "mode": "optional-acceleration",
+  "authoritative": false,
+  "supportedJellyfinVersion": "12.1.0",
+  "modules": {
+    "analysisArtifacts": true,
+    "trackMetadataBatching": true,
+    "atlasProjectionCache": false,
+    "acquisitionSearch": false,
+    "podcastDirectorySearch": true,
+    "podcastSubscriptions": true,
+    "podcastFeedRefresh": true,
+    "podcastSnapshotCache": false
+  },
+  "analyzerHealthy": true,
+  "storeWritable": true,
+  "degradedReasons": []
+}

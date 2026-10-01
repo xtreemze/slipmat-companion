@@ -1,0 +1,31 @@
+[
+  {
+    "name": "jellyfin-basic",
+    "subject": {
+      "hostKind": "jellyfin",
+      "providerInstanceId": "server-a",
+      "resourceId": "00112233445566778899aabbccddeeff"
+    },
+    "storeKey": "asv1-70c36d24b7e4e60ff8c651c662a75406fb7d90b2d5bff7ae5e7631bec3461c91"
+  },
+  {
+    "name": "jellyfin-representation",
+    "subject": {
+      "hostKind": "jellyfin",
+      "providerInstanceId": "server-a",
+      "resourceId": "00112233445566778899aabbccddeeff",
+      "representationId": "media-source-a"
+    },
+    "storeKey": "asv1-b982f15f5fc82bdc10997a03bfe36daed45ad9a24e9aee251f246de6aa082f42"
+  },
+  {
+    "name": "unicode-and-secret-looking-input",
+    "subject": {
+      "hostKind": "music-assistant",
+      "providerInstanceId": "bibliothèque",
+      "resourceId": "音楽/../track.flac?token=secret",
+      "representationId": "versión-α"
+    },
+    "storeKey": "asv1-06a9be22420997209aeaefc80f5bd9a82d63cf5f4f52916fe9c0615edc0b96a3"
+  }
+]

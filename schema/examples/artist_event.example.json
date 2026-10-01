@@ -1,0 +1,29 @@
+{
+  "artist": {
+    "id": "art789",
+    "name": "Miles Davis",
+    "avatarUrl": "/Plugins/AudioGateway/artifacts/artwork/art789?type=avatar&maxWidth=400"
+  },
+  "artwork": {
+    "albumBackdrops":  [],
+    "artistAvatars":   { "art789": "/Plugins/AudioGateway/artifacts/artwork/art789?type=avatar&maxWidth=400" },
+    "artistBackdrops": { "art789": [
+      "/Plugins/AudioGateway/artifacts/artwork/art789?type=backdrop&index=0&maxWidth=4000",
+      "/Plugins/AudioGateway/artifacts/artwork/art789?type=backdrop&index=1&maxWidth=4000"
+    ]}
+  },
+  "bio": "Miles Dewey Davis III (May 26, 1926 – September 28, 1991) was an American trumpeter, bandleader, and composer.",
+  "discography": [
+    { "id": "alb456", "title": "Kind of Blue",     "year": 1959, "artistNames": ["Miles Davis"] },
+    { "id": "alb457", "title": "Bitches Brew",      "year": 1970, "artistNames": ["Miles Davis"] },
+    { "id": "alb458", "title": "Sketches of Spain", "year": 1960, "artistNames": ["Miles Davis"] }
+  ],
+  "credits": {
+    "entries": [
+      { "role": "Trumpet",  "names": ["Miles Davis"] },
+      { "role": "Composer", "names": ["Miles Davis"] }
+    ],
+    "studios": []
+  },
+  "cacheToken": "eyJlIjoiYXJ0Nzg5IiwidCI6MTczOTg0MDAwMH0"
+}

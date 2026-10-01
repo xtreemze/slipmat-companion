@@ -1,0 +1,29 @@
+{
+  "track": {
+    "itemId": "abc123",
+    "title": "So What",
+    "durationMs": 562000,
+    "trackNumber": 1,
+    "container": "flac"
+  },
+  "album": {
+    "id": "alb456",
+    "title": "Kind of Blue",
+    "year": 1959,
+    "artistNames": ["Miles Davis"]
+  },
+  "artists": [
+    {
+      "id": "art789",
+      "name": "Miles Davis"
+    }
+  ],
+  "artwork": {
+    "albumCoverFront": "/Plugins/AudioGateway/artifacts/artwork/alb456?type=cover_front&maxWidth=4000",
+    "albumBackdrops":  [],
+    "artistAvatars":   {},
+    "artistBackdrops": {}
+  },
+  "cacheToken": "eyJlIjoiYWJjMTIzIiwidCI6MTczOTg0MDAwMH0",
+  "analysisAvailable": false
+}

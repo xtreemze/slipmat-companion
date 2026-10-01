@@ -1,0 +1,40 @@
+{
+  "protocolVersion": "1.0.0",
+  "items": [
+    {
+      "subject": {
+        "version": 1,
+        "storeKey": "asv1-45babe3bb1fb2875c1a1185d168399d182a45f0bc2bfef66be054439121570e4"
+      },
+      "status": "ready",
+      "observedSourceFingerprint": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "sidecarSchemaVersion": "2.0.0",
+      "producerVersion": "0.1.0"
+    },
+    {
+      "subject": {
+        "version": 1,
+        "storeKey": "asv1-0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "status": "missing"
+    },
+    {
+      "subject": {
+        "version": 1,
+        "storeKey": "asv1-1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "status": "stale",
+      "observedSourceFingerprint": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "sidecarSchemaVersion": "2.0.0",
+      "producerVersion": "0.1.0",
+      "reason": "source-fingerprint-mismatch"
+    }
+  ],
+  "counts": {
+    "ready": 1,
+    "missing": 1,
+    "stale": 1,
+    "unsupported": 0,
+    "failed": 0
+  }
+}

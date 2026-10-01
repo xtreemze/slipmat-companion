@@ -1,0 +1,22 @@
+{
+  "protocolVersion": "1.0.0",
+  "mode": "optional-acceleration",
+  "authoritative": false,
+  "supportedJellyfinVersion": "12.1.0",
+  "modules": {
+    "analysisArtifacts": false,
+    "trackMetadataBatching": true,
+    "atlasProjectionCache": false,
+    "acquisitionSearch": false,
+    "podcastDirectorySearch": false,
+    "podcastSubscriptions": false,
+    "podcastFeedRefresh": true,
+    "podcastSnapshotCache": false
+  },
+  "analyzerHealthy": false,
+  "storeWritable": false,
+  "degradedReasons": [
+    "analyzer_unreachable: HttpRequestException",
+    "store_not_writable: UnauthorizedAccessException"
+  ]
+}
