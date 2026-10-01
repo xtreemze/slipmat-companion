@@ -145,7 +145,7 @@ internal sealed class SpectralAccumulator
 internal static class SpectralArtifactEncoder
 {
     public const string Variant = "slws_v2_stereo_u8_max_5band";
-    public const int FormatVersion = 2;
+    public const ushort FormatVersion = 2;
     public static readonly int[] Tiers = [1, 10, 100];
 
     private const ushort BaseHeaderLength = 52;

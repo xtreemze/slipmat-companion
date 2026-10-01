@@ -49,17 +49,17 @@ internal static partial class FfmpegLoudnessParser
     }
 
     [GeneratedRegex(
-        "\\"input_i\\"\\s*:\\s*\\"(?<value>[-+0-9.eE]+)\\"",
+        "\\\"input_i\\\"\\s*:\\s*\\\"(?<value>[-+0-9.eE]+)\\\"",
         RegexOptions.CultureInvariant)]
     private static partial Regex InputIntegratedRegex();
 
     [GeneratedRegex(
-        "\\"input_tp\\"\\s*:\\s*\\"(?<value>[-+0-9.eE]+)\\"",
+        "\\\"input_tp\\\"\\s*:\\s*\\\"(?<value>[-+0-9.eE]+)\\\"",
         RegexOptions.CultureInvariant)]
     private static partial Regex InputTruePeakRegex();
 
     [GeneratedRegex(
-        "\\"input_lra\\"\\s*:\\s*\\"(?<value>[-+0-9.eE]+)\\"",
+        "\\\"input_lra\\\"\\s*:\\s*\\\"(?<value>[-+0-9.eE]+)\\\"",
         RegexOptions.CultureInvariant)]
     private static partial Regex InputLraRegex();
 }

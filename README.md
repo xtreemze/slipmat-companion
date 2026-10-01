@@ -85,7 +85,7 @@ The plugin uses Jellyfin's native plugin surfaces rather than treating the serve
 
 - `ServiceRegistrator` implements `IPluginServiceRegistrator` and registers reusable gateway services in Jellyfin's dependency-injection container;
 - artifact and track-event controllers consume those services through constructor injection;
-- `Plugin` implements `IHasWebPages` and exposes a native Jellyfin dashboard configuration page for the analyzer URL and artifact-store root;
+- `Plugin` implements `IHasWebPages` and exposes a native Jellyfin dashboard configuration page for the optional artifact-store override and integrated-analyzer status;
 - the configuration page reports current analyzer/store health through the existing non-authoritative capabilities endpoint.
 
 ### Host-neutral artifact identity
@@ -210,7 +210,7 @@ For an installable development build:
 dotnet publish -c Release -o ./dist/publish
 ```
 
-Mount/copy the resulting plugin files into a dedicated Audio Gateway subdirectory under Jellyfin's plugin directory and restart Jellyfin. The plugin provisions its own managed store by default. External analyzer deployment remains optional.
+Mount/copy the resulting plugin files into a dedicated Audio Gateway subdirectory under Jellyfin's plugin directory and restart Jellyfin. The plugin provisions its own managed store and analyzer pipeline by default; no external analyzer deployment is required.
 
 This standalone companion repository is licensed under GNU GPL v3. Public plugin distribution is approved in `distribution-policy.json`. CI runs automatically on pull requests and pushes; a successful `main` build automatically publishes a new plugin version when that reviewed four-part version has not already been released.
 
