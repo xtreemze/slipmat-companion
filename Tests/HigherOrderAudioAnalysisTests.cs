@@ -204,6 +204,41 @@ public class HigherOrderAudioAnalysisTests
     }
 
     [Fact]
+    public void BoundaryAccumulator_SilenceEdgesMatchSharedSourceVector()
+    {
+        const int sampleRate = 100;
+        var analyzer = new BoundaryAccumulator(sampleRate, 1);
+
+        for (var index = 0; index < sampleRate * 10; index++)
+        {
+            var seconds = index / (double)sampleRate;
+            analyzer.PushFrame([
+                seconds >= 1d && seconds < 9d ? 0.5f : 0f,
+            ]);
+        }
+
+        var result = analyzer.Complete();
+
+        Assert.NotNull(result);
+        Assert.True(Math.Abs(result!.AudibleStartSeconds - 1d) < 1e-12);
+        Assert.True(Math.Abs(result.AudibleEndSeconds - 9d) < 1e-12);
+        Assert.Equal(IntroBoundaryKind.GradualEntry, result.Intro.Kind);
+        Assert.True(Math.Abs(result.Intro.StartSeconds - 1d) < 1e-12);
+        Assert.True(Math.Abs(result.Intro.EndSeconds - 1d) < 1e-12);
+        Assert.True(Math.Abs(result.Intro.Confidence - 0.65f) < 1e-6f);
+        Assert.Equal(OutroBoundaryKind.HardEnd, result.Outro.Kind);
+        Assert.True(Math.Abs(result.Outro.StartSeconds - 9d) < 1e-12);
+        Assert.True(Math.Abs(result.Outro.EndSeconds - 9d) < 1e-12);
+        Assert.True(Math.Abs(result.Outro.Confidence - 0.8f) < 1e-6f);
+        Assert.Null(result.QuickFade);
+        Assert.True(Math.Abs(result.NoiseFloorRms - 0.025f) < 1e-6f);
+        Assert.Equal((ushort)6, BoundaryArtifactEncoder.AnalyzerVersion);
+        Assert.Equal(
+            "sha256:5863dda9f9cd436b89d373b09124810be5ae31e15a85fa544fdda994ed285327",
+            BoundaryArtifactEncoder.AnalyzerConfigurationDigest);
+    }
+
+    [Fact]
     public void BoundaryClassifier_DetectsCanonicalAuthoredFade()
     {
         const double duration = 240d;
