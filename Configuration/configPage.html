@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Audio Gateway</title>
+</head>
+<body>
+    <div id="AudioGatewayConfigPage"
+         data-role="page"
+         class="page type-interior pluginConfigurationPage"
+         data-require="emby-input,emby-button">
+        <div data-role="content">
+            <div class="content-primary">
+                <form id="AudioGatewayConfigForm">
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="AnalyzerBaseUrl">Analyzer URL</label>
+                        <input id="AnalyzerBaseUrl"
+                               name="AnalyzerBaseUrl"
+                               type="url"
+                               is="emby-input"
+                               autocomplete="off" required />
+                        <div class="fieldDescription">
+                            Base URL for the optional Slipmat audio analyzer.
+                            SLIPMAT_ANALYZER_URL takes precedence when set by the Jellyfin host environment.
+                        </div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="StoreRoot">Artifact store root</label>
+                        <input id="StoreRoot"
+                               name="StoreRoot"
+                               type="text"
+                               is="emby-input"
+                               autocomplete="off" required />
+                        <div class="fieldDescription">
+                            Local path shared with the analyzer for precomputed analysis artifacts and companion state.
+                        </div>
+                    </div>
+
+                    <div class="verticalSection">
+                        <h3 class="sectionTitle">Status</h3>
+                        <div id="AudioGatewayStatus">Checking extension health…</div>
+                    </div>
+
+                    <div>
+                        <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                            <span>Save</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <script type="text/javascript">
+            var AudioGatewayConfig = {
+                pluginUniqueId: 'd3a2b1c0-e4f5-6789-abcd-ef0123456789'
+            };
+
+            async function loadAudioGatewayStatus() {
+                const status = document.querySelector('#AudioGatewayStatus');
+                try {
+                    const response = await ApiClient.getJSON(
+                        ApiClient.getUrl('Plugins/AudioGateway/diagnostics/capabilities')
+                    );
+
+                    const analyzer = response.analyzerHealthy ? 'healthy' : 'unavailable';
+                    const store = response.storeWritable ? 'writable' : 'unavailable';
+                    const degraded = Array.isArray(response.degradedReasons) && response.degradedReasons.length > 0
+                        ? ` — ${response.degradedReasons.join(', ')}`
+                        : '';
+                    status.textContent = `Analyzer: ${analyzer}; artifact store: ${store}${degraded}`;
+                } catch {
+                    status.textContent = 'Unable to read Audio Gateway health.';
+                }
+            }
+
+            document.querySelector('#AudioGatewayConfigPage')
+                .addEventListener('pageshow', function() {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(AudioGatewayConfig.pluginUniqueId)
+                        .then(function(config) {
+                            document.querySelector('#AnalyzerBaseUrl').value = config.AnalyzerBaseUrl || '';
+                            document.querySelector('#StoreRoot').value = config.StoreRoot || '';
+                            return loadAudioGatewayStatus();
+                        })
+                        .finally(function() {
+                            Dashboard.hideLoadingMsg();
+                        });
+                });
+
+            document.querySelector('#AudioGatewayConfigForm')
+                .addEventListener('submit', function(e) {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(AudioGatewayConfig.pluginUniqueId)
+                        .then(function(config) {
+                            config.AnalyzerBaseUrl = document.querySelector('#AnalyzerBaseUrl').value.trim();
+                            config.StoreRoot = document.querySelector('#StoreRoot').value.trim();
+                            return ApiClient.updatePluginConfiguration(AudioGatewayConfig.pluginUniqueId, config);
+                        })
+                        .then(function(result) {
+                            Dashboard.processPluginConfigurationUpdateResult(result);
+                            return loadAudioGatewayStatus();
+                        })
+                        .finally(function() {
+                            Dashboard.hideLoadingMsg();
+                        });
+
+                    e.preventDefault();
+                    return false;
+                });
+        </script>
+    </div>
+</body>
+</html>

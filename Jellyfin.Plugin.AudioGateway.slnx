@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Jellyfin.Plugin.AudioGateway.csproj" />
+  <Project Path="Tests/Jellyfin.Plugin.AudioGateway.Tests.csproj" />
+</Solution>

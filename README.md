@@ -1,0 +1,241 @@
+# Jellyfin Audio Gateway Plugin
+
+Audio Gateway is an **optional acceleration and enrichment extension** for Slipmat. Jellyfin remains the media server and Slipmat remains fully capable without this plugin.
+
+The plugin may precompute, cache, batch, synchronize, or enrich information that Slipmat can also obtain or own through its client/Rust paths. It must never become the sole owner of a user-visible Slipmat capability.
+
+## Compatibility policy
+
+This repository is unreleased and carries no legacy plugin/API compatibility surface.
+
+- Supported Jellyfin server: **12.1.0**, the current Jellyfin 12 release targeted by this plugin contract.
+- Plugin package references must match that server release exactly.
+- `/Plugins/AudioGateway/v1` is removed; there is no v1 compatibility shim.
+- When Jellyfin support moves to a new certified release, update and certify the plugin rather than accumulating old-server compatibility code.
+- If the plugin is absent, incompatible, unhealthy, or partially configured, Slipmat continues through its canonical client-side path.
+
+## Shipping capability boundary
+
+The current build advertises and ships only capabilities that are already client-owned:
+
+- `analysisArtifacts` — optional precomputed waveform/spectral/analysis artifacts;
+- `trackMetadataBatching` — optional reduction of Jellyfin metadata request fan-out;
+- `podcastDirectorySearch` — optional authenticated server-side Podcast Index search; API credentials never leave the Jellyfin process;
+- `podcastSubscriptions` — optional authenticated per-user replica of Slipmat podcast subscription intent for cross-device continuity;
+- `podcastFeedRefresh` — optional authenticated bounded server fetch for podcast feeds, chapters, and transcripts when direct browser acquisition is blocked by CORS.
+
+The following protocol slots intentionally advertise `false`:
+
+- `atlasProjectionCache` — the existing C# Atlas implementation still contains resolver and product-semantic decisions;
+- `acquisitionSearch` — the experimental streamrip implementation has no production client-owned equivalent yet;
+- `podcastSnapshotCache` — normalized feed snapshots remain client/provider-owned; the companion fetcher does not persist or normalize them.
+
+Those Atlas/provider sources remain in the repository as refactoring material, but they are excluded from the shipping plugin assembly in `Jellyfin.Plugin.AudioGateway.csproj`. The test project compiles them separately so their behavioral tests remain available while the implementations are reduced to pure cache/adapter behavior. Their controllers also retain `[NonController]` as a second guard.
+
+Presence of experimental source code does not grant product authority. The capability response declares `authoritative: false`, and a Slipmat client rejects an extension that claims authority or exposes an incompatible protocol/server version.
+
+## Active endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/Plugins/AudioGateway/diagnostics/capabilities` | Public extension protocol/module negotiation |
+| GET | `/Plugins/AudioGateway/artifacts/analysis/{itemId}` | Authenticated precomputed analyzer sidecar with ETag / 304 support |
+| GET | `/Plugins/AudioGateway/artifacts/waveform/{itemId}?variant=awf_v1_native_mono_b8&pps=10` | Authenticated waveform/spectral artifact with ETag / 304 support |
+| GET | `/Plugins/AudioGateway/events/track/{itemId}?include=waveform,sidecar&waveformPps=10` | Authenticated optional track metadata composition |
+| POST | `/Plugins/AudioGateway/events/track/batch` | Authenticated batch track metadata lookup |
+| GET | `/Plugins/AudioGateway/podcasts/subscriptions` | Authenticated current-user podcast subscription replica |
+| POST | `/Plugins/AudioGateway/podcasts/subscriptions/sync` | Authenticated deterministic merge of the current user's client/server subscription replicas |
+| POST | `/Plugins/AudioGateway/podcasts/resources/fetch` | Authenticated bounded feed/chapter/transcript acquisition for browser CORS fallback |
+| POST | `/Plugins/AudioGateway/podcasts/directory/search` | Authenticated bounded Podcast Index search using server-side credentials |
+
+Podcast routes never accept a user ID parameter. The Jellyfin `Jellyfin-UserId` authentication claim selects the storage namespace for subscription replication; a client payload cannot address another user's subscriptions.
+
+Atlas concept/catalog/request routes and streamrip status/search routes do not exist in the shipping plugin assembly.
+
+## Capability contract
+
+`GET /Plugins/AudioGateway/diagnostics/capabilities` returns:
+
+- `protocolVersion`: extension protocol understood by this build;
+- `mode`: `optional-acceleration`;
+- `authoritative`: always `false`;
+- `supportedJellyfinVersion`: exact stable server release targeted by the plugin;
+- `modules`: individually negotiable optional modules;
+- analyzer/store health and degraded reasons.
+
+A module being unavailable is not a product failure. It means Slipmat uses its canonical local/client implementation.
+
+## Jellyfin host integration
+
+The plugin uses Jellyfin's native plugin surfaces rather than treating the server only as an HTTP host:
+
+- `ServiceRegistrator` implements `IPluginServiceRegistrator` and registers reusable gateway services in Jellyfin's dependency-injection container;
+- artifact and track-event controllers consume those services through constructor injection;
+- `Plugin` implements `IHasWebPages` and exposes a native Jellyfin dashboard configuration page for the analyzer URL and artifact-store root;
+- the configuration page reports current analyzer/store health through the existing non-authoritative capabilities endpoint.
+
+### Host-neutral artifact identity
+
+Jellyfin item IDs are request-layer identities, not artifact-store keys. The adapter projects each Jellyfin item into the shared `AnalysisSubjectV1` contract:
+
+```text
+hostKind = jellyfin
+providerInstanceId = IServerApplicationHost.SystemId
+resourceId = Jellyfin item GUID in N format
+representationId = absent until an exact media-source identity is available
+```
+
+Rust and C# implement the same length-prefixed SHA-256 key derivation and pin the same compatibility vector. Artifacts are stored under opaque `asv1-<sha256>` keys:
+
+```text
+analysis/{subjectStoreKey}.json
+waveforms/{subjectStoreKey}/{variant}/pps_{pps}.dat
+```
+
+V2 sidecars carry the subject/store schema versions, the derived subject key, complete-source fingerprint, producer version, and artifact references. They do not carry a Jellyfin item ID. The plugin derives the expected subject key independently and treats a missing, corrupt, schema-incompatible, or mismatched sidecar as ordinary artifact absence. Client-facing track events add the Jellyfin item ID only at the host-adapter boundary.
+
+Because Slipmat is unreleased, the former raw-`itemId` artifact layout is regenerated rather than dual-written or retained behind an indefinite compatibility shim.
+
+Background analysis scheduling and library-change observation remain separate work. Host-neutral identity is now the prerequisite foundation; bounded scheduling and coverage state must still land before Jellyfin proactively prewarms artifacts.
+
+## Podcast Index directory search
+
+Podcast Index is optional and complements the public gpodder.net client adapter. The browser never receives the Podcast Index API key, API secret, signing input, or authorization digest.
+
+Configure the Jellyfin host process with:
+
+```text
+SLIPMAT_PODCAST_INDEX_API_KEY=<your Podcast Index API key>
+SLIPMAT_PODCAST_INDEX_API_SECRET=<your Podcast Index API secret>
+SLIPMAT_PODCAST_INDEX_USER_AGENT=Slipmat-AudioGateway/1.0
+```
+
+The user-agent variable is optional. Both key values must be present before `podcastDirectorySearch` is advertised. Search is bounded to 50 results, uses only the official `search/byterm` endpoint, and returns normalized publisher-feed evidence. Subscription still passes through the client-owned RSS preflight and subscription repository.
+
+Do not put these values in Slipmat browser settings, query parameters, logs, source control, or capability payloads. For Docker, inject them as container environment variables or secrets at deployment time.
+
+## Podcast subscription replica
+
+The companion persists only the portable subscription contract defined by Slipmat. It does not turn feeds into Jellyfin shows, episodes, or `AudioPodcast` library items.
+
+- canonical feed/subscription identity remains defined by Slipmat's provider contracts;
+- user identity is not embedded in the portable record;
+- records use logical revisions and durable unsubscribe tombstones so stale clients cannot resurrect old subscriptions;
+- merge batches are bounded and deterministic;
+- credential-bearing/query-bearing feed locators are rejected from the portable record;
+- files are stored per authenticated Jellyfin user under the configured plugin store root using atomic replacement;
+- listening progress, queue state, downloads, Playback Rail state, and playback generations are not stored here.
+
+## Podcast CORS fallback fetch
+
+`POST /Plugins/AudioGateway/podcasts/resources/fetch` is a narrow execution adapter for cases where the browser cannot directly acquire a podcast resource. It does **not** parse feeds, create normalized snapshots, or become a generic HTTP proxy.
+
+The request contains only:
+
+- `url`;
+- `kind`: `feed`, `chapters`, or `transcript`;
+- optional `etag` and `lastModified` validators.
+
+The companion performs only GET requests and returns the exact bounded response bytes as base64 with the final URL, content type, validators, and byte length. Upstream `304 Not Modified` becomes `status: "not-modified"` with no body.
+
+Security and resource bounds are enforced in the transport:
+
+- HTTP/HTTPS only; URL credentials and fragments are rejected;
+- DNS is resolved at connection time and **every** resolved address must be globally routable;
+- loopback, private, link-local, carrier-NAT, documentation, benchmark, multicast, ULA/site-local, and equivalent special ranges are rejected, including mapped/embedded private addresses;
+- system proxies and cookies are disabled;
+- no Jellyfin authorization, browser cookie, or caller-defined target header is forwarded upstream;
+- redirects are manual, capped at five, and each location is revalidated before connection;
+- HTTPS-to-HTTP redirects are rejected;
+- connection/request timeouts are bounded;
+- decoded response ceilings are 4 MiB for feeds, 1 MiB for chapters, and 2 MiB for transcripts.
+
+`podcastFeedRefresh` therefore means “the companion can safely execute bounded podcast resource acquisition.” The client still owns refresh generations, feed parsing, identity, last-known-good snapshot replacement, and all presentation/playback semantics. `podcastSnapshotCache` remains false.
+
+## Authority rules
+
+The plugin may expose facts, reusable artifacts, bounded execution adapters, and optional replicas of client-owned user intent. It does not own:
+
+- playback source/transport authority;
+- queue, seek, crossfade, or Playback Rail semantics;
+- normalization policy or gain application;
+- realtime visualizer state;
+- Atlas concept/edition/artifact/playback semantics or resolver decisions;
+- podcast feed/show/episode identity semantics;
+- normalized podcast feed snapshots or acceptance of refresh generations;
+- podcast listening progress or offline-retention policy;
+- acquisition/provider semantics without an equivalent client-owned implementation.
+
+Atlas acquisition requests are persisted canonically in the client request store. Optional server synchronization may later cache those requests, but plugin absence or failure leaves them valid and `local-only` rather than producing a product error.
+
+## Authentication
+
+- `diagnostics/capabilities` is intentionally public for opportunistic discovery;
+- all active data/artifact/subscription/podcast-resource routes require an authenticated Jellyfin session/token;
+- podcast subscription storage derives the namespace from the authenticated Jellyfin user claim and accepts no user selector from request payload/query parameters;
+- the podcast resource fetcher never forwards the Jellyfin token or ambient browser credentials to an upstream podcast host;
+- the client uses Jellyfin's current `Authorization: MediaBrowser ...` mechanism rather than deprecated legacy token headers.
+
+## Local prerequisites
+
+- **.NET 10 SDK 10.0.401** (pinned by `global.json`)
+- NuGet access to `nuget.org` (configured in `NuGet.Config`)
+
+## Local build
+
+```bash
+# From repository root
+dotnet restore
+dotnet build --configuration Release
+dotnet test Tests/ --logger "console;verbosity=normal"
+```
+
+For an installable development build:
+
+```bash
+dotnet publish -c Release -o ./dist/publish
+```
+
+Mount/copy the resulting plugin files into a dedicated Audio Gateway subdirectory under Jellyfin's plugin directory and restart Jellyfin. The analyzer service and artifact store are optional modules; configure them only when server-side precomputation is desired.
+
+This standalone companion repository is licensed under GNU GPL v3. Public plugin distribution is approved in `distribution-policy.json`; releases remain explicit, versioned actions and must pass the repository's build, test, metadata, packaging, and manifest checks.
+
+A host installation defaults to `http://localhost:8765` for the optional analyzer. Container deployments can set `SLIPMAT_ANALYZER_URL`; the repository Compose stack sets it to `http://audio-analyzer:8765` so Jellyfin reaches the analyzer through service discovery rather than its own loopback interface.
+
+## Directory layout
+
+```text
+./
+  Jellyfin.Plugin.AudioGateway.csproj   — shipping Jellyfin 12.1.0 / net10.0 plugin boundary
+  Plugin.cs                              — BasePlugin<PluginConfiguration> entry point
+  Configuration/                        — optional analyzer/store configuration
+  Models/                               — serialized optional-extension contracts
+  Api/                                  — active fact/artifact/user-replica adapters plus excluded experimental source
+  Services/                             — active adapters plus excluded Atlas/provider refactoring material
+  Tests/                                — contract tests and test-only compilation of quarantined code
+```
+
+## Naming conventions
+
+- all time values use milliseconds (`durationMs`, `timeMs`, `startMs`, ...);
+- `year` is an integer;
+- artwork URLs use bounded `maxWidth` values;
+- analysis/provider payloads describe facts and provenance; playback policy stays in Slipmat.
+
+
+## Releases and Jellyfin repository manifest
+
+This is the standalone Slipmat companion repository. Slipmat remains authoritative for product semantics; the plugin is an optional Jellyfin-side acceleration, enrichment, batching, precomputation, synchronization, and bounded server-adapter layer.
+
+- `global.json` pins the supported .NET SDK.
+- `Directory.Build.props` carries the reviewed four-part plugin version used for local builds and releases.
+- `Jellyfin.Plugin.AudioGateway.slnx` builds the shipping plugin and its test project from the repository root.
+- `build.yaml` carries Jellyfin plugin repository metadata, including the stable plugin GUID and target ABI.
+- `scripts/verify_release_metadata.py` rejects drift between the Jellyfin target ABI, package references, plugin GUID, assembly artifact, target framework, and reviewed release version.
+- `distribution-policy.json` records the owner-approved GPL-3.0-only public-distribution policy.
+- `scripts/package_plugin.py` creates the deterministic plugin ZIP.
+- `scripts/generate_manifest.py` emits the Jellyfin repository JSON containing the release URL and package checksum.
+- `.github/workflows/ci.yml` validates metadata, builds, tests, packages, and exercises manifest generation.
+- `.github/workflows/release.yml` performs an explicit versioned GitHub Release and publishes the resulting repository manifest through GitHub Pages.
+
+The generated Pages artifact contains `manifest.json`. GitHub Pages is a distribution surface only; Slipmat must continue to work with stock Jellyfin when this companion is absent or unavailable.

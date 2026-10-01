@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Jellyfin.Plugin.AudioGateway</AssemblyName>
+    <RootNamespace>Jellyfin.Plugin.AudioGateway</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Audio Gateway deliberately targets only the current stable Jellyfin server.
+      Host assemblies are compile-time references only: Jellyfin owns them at runtime.
+    -->
+    <PackageReference Include="Jellyfin.Controller" Version="12.1.0">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+    <PackageReference Include="Jellyfin.Model" Version="12.1.0">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="Configuration/configPage.html" />
+    <EmbeddedResource Include="Configuration/configPage.html" />
+
+    <Compile Remove="Tests/**/*.cs" />
+    <EmbeddedResource Remove="Tests/**" />
+    <None Remove="Tests/**" />
+
+    <!--
+      Atlas/provider implementations below still contain resolver and product-semantic
+      decisions. Keep them in the repository as refactoring material, but exclude them
+      from the shipping plugin assembly until they are reduced to pure cache/adapter
+      behavior behind client-owned contracts.
+    -->
+    <Compile Remove="Api/AtlasController.cs" />
+    <Compile Remove="Api/AtlasRequestsController.cs" />
+    <Compile Remove="Api/StreamripController.cs" />
+    <Compile Remove="Services/AtlasCatalogStoreService.cs" />
+    <Compile Remove="Services/AtlasConceptPayloadFactory.cs" />
+    <Compile Remove="Services/AtlasRequestMaterializationService.cs" />
+    <Compile Remove="Services/AtlasRequestStoreService.cs" />
+    <Compile Remove="Services/StreamripCliService.cs" />
+  </ItemGroup>
+</Project>

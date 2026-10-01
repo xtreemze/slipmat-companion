@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Jellyfin.Plugin.AudioGateway.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <!-- Main plugin project — shipping assembly under contract. -->
+    <ProjectReference Include="../Jellyfin.Plugin.AudioGateway.csproj" />
+    <!--
+      The plugin excludes these at runtime because the Jellyfin host supplies
+      them. Tests have no host, so they must carry the assemblies themselves:
+      types such as Plugin (BasePlugin<>) fail to load otherwise, even when a
+      test passes an explicit store-root override.
+    -->
+    <PackageReference Include="Jellyfin.Controller" Version="12.1.0" />
+    <PackageReference Include="Jellyfin.Model" Version="12.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Authority-bearing Atlas/provider implementations are excluded from the shipping
+      plugin assembly. Compile them only into the test assembly so their existing
+      behavioral tests remain useful while the code is refactored toward pure
+      cache/adapter semantics.
+    -->
+    <Compile Include="../Api/AtlasController.cs" Link="Experimental/Api/AtlasController.cs" />
+    <Compile Include="../Api/AtlasRequestsController.cs" Link="Experimental/Api/AtlasRequestsController.cs" />
+    <Compile Include="../Api/StreamripController.cs" Link="Experimental/Api/StreamripController.cs" />
+    <Compile Include="../Services/AtlasCatalogStoreService.cs" Link="Experimental/Services/AtlasCatalogStoreService.cs" />
+    <Compile Include="../Services/AtlasConceptPayloadFactory.cs" Link="Experimental/Services/AtlasConceptPayloadFactory.cs" />
+    <Compile Include="../Services/AtlasRequestMaterializationService.cs" Link="Experimental/Services/AtlasRequestMaterializationService.cs" />
+    <Compile Include="../Services/AtlasRequestStoreService.cs" Link="Experimental/Services/AtlasRequestStoreService.cs" />
+    <Compile Include="../Services/StreamripCliService.cs" Link="Experimental/Services/StreamripCliService.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Fixtures/**" CopyToOutputDirectory="Always" />
+  </ItemGroup>
+</Project>
