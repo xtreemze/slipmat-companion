@@ -76,10 +76,19 @@ public sealed class AmplitudeEnvelopeBuilder
             throw new ArgumentOutOfRangeException(nameof(pointsPerSecond));
         }
 
+        // Keep one standard 8-byte-payload JUNK chunk between fmt and data.
+        // This remains valid RIFF and is readable by both the corrected parser
+        // (which scans from the first post-fmt chunk) and the pre-fix Slipmat
+        // parser that historically began scanning 16 bytes too late.
+        const int junkPayloadLength = 8;
+        const int dataHeaderOffset = 52;
+        const int dataPayloadOffset = 60;
+
         var dataLength = checked((uint)peaks.Length);
         var padding = dataLength % 2;
-        var riffSize = checked(36u + dataLength + padding);
-        var bytes = new byte[checked(44 + peaks.Length + (int)padding)];
+        var totalLength = checked(dataPayloadOffset + peaks.Length + (int)padding);
+        var riffSize = checked((uint)(totalLength - 8));
+        var bytes = new byte[totalLength];
         var span = bytes.AsSpan();
 
         "RIFF"u8.CopyTo(span);
@@ -93,9 +102,15 @@ public sealed class AmplitudeEnvelopeBuilder
         BinaryPrimitives.WriteUInt32LittleEndian(span[28..32], checked((uint)pointsPerSecond));
         BinaryPrimitives.WriteUInt16LittleEndian(span[32..34], 1);
         BinaryPrimitives.WriteUInt16LittleEndian(span[34..36], 8);
-        "data"u8.CopyTo(span[36..40]);
-        BinaryPrimitives.WriteUInt32LittleEndian(span[40..44], dataLength);
-        peaks.CopyTo(span[44..]);
+
+        "JUNK"u8.CopyTo(span[36..40]);
+        BinaryPrimitives.WriteUInt32LittleEndian(span[40..44], junkPayloadLength);
+
+        "data"u8.CopyTo(span[dataHeaderOffset..(dataHeaderOffset + 4)]);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            span[(dataHeaderOffset + 4)..dataPayloadOffset],
+            dataLength);
+        peaks.CopyTo(span[dataPayloadOffset..]);
 
         return bytes;
     }

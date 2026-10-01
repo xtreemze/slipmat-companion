@@ -42,10 +42,12 @@ public class AmplitudeEnvelopeBuilderTests
         Assert.Equal((ushort)1, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(22, 2)));
         Assert.Equal(10u, BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(24, 4)));
         Assert.Equal((ushort)8, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(34, 2)));
-        Assert.Equal("data", System.Text.Encoding.ASCII.GetString(bytes, 36, 4));
-        Assert.Equal(3u, BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(40, 4)));
-        Assert.Equal(new byte[] { 0, 128, 255 }, bytes.Skip(44).Take(3).ToArray());
-        Assert.Equal(48, bytes.Length);
+        Assert.Equal("JUNK", System.Text.Encoding.ASCII.GetString(bytes, 36, 4));
+        Assert.Equal(8u, BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(40, 4)));
+        Assert.Equal("data", System.Text.Encoding.ASCII.GetString(bytes, 52, 4));
+        Assert.Equal(3u, BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(56, 4)));
+        Assert.Equal(new byte[] { 0, 128, 255 }, bytes.Skip(60).Take(3).ToArray());
+        Assert.Equal(64, bytes.Length);
     }
 
     [Fact]
