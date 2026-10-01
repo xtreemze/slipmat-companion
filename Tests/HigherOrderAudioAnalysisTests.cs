@@ -98,6 +98,19 @@ public class HigherOrderAudioAnalysisTests
         Assert.InRange(result.Confidence, 0d, 1d);
     }
 
+    [Theory]
+    [InlineData(0, false, "5A")]
+    [InlineData(2, false, "7A")]
+    [InlineData(9, false, "8A")]
+    [InlineData(11, false, "10A")]
+    public void HarmonicAccumulator_UsesCanonicalCamelotMinorWheel(
+        int rootIndex,
+        bool major,
+        string expected)
+    {
+        Assert.Equal(expected, HarmonicAccumulator.ToCamelot(rootIndex, major));
+    }
+
     [Fact]
     public void HarmonicAccumulator_UsesRustStrictFrameBoundary()
     {
@@ -351,6 +364,68 @@ public class HigherOrderAudioAnalysisTests
         Assert.Equal((ushort)6, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(62, 2)));
         Assert.Equal("SRHY", Encoding.ASCII.GetString(bytes, 156, 4));
         Assert.Equal(0xAD98_B5E9u, SpectralArtifactEncoder.Crc32(bytes));
+    }
+
+    [Fact]
+    public void SlwsHarmonicParityFixture_MatchesCanonicalRustShrmContainer()
+    {
+        var frames = Enumerable.Repeat(
+            new SpectralPeakFrame(default, default),
+            1_000).ToArray();
+        var detailed = new SpectralWaveformData(
+            SampleRate: 100,
+            FramesPerSecond: 100,
+            ChannelCount: 1,
+            SourceFrameCount: 1_000,
+            Frames: frames);
+        var boundaries = new TrackBoundaryAnalysis(
+            AudibleStartSeconds: 0.5d,
+            AudibleEndSeconds: 9.5d,
+            Intro: new IntroBoundary(
+                IntroBoundaryKind.FadeIn,
+                0.5d,
+                2d,
+                0.82f),
+            Outro: new OutroBoundary(
+                OutroBoundaryKind.FadeOut,
+                7d,
+                9.5d,
+                0.91f),
+            QuickFade: null,
+            NoiseFloorRms: 0.01f);
+        var rhythm = new RhythmAnalysisResult(
+            120d,
+            0.9d,
+            Enumerable.Range(0, 20).Select(index => index * 0.5d).ToArray(),
+            Enumerable.Range(0, 5).Select(index => index * 2d).ToArray(),
+            4);
+        var harmonic = new HarmonicAnalysisResult(
+            "C Major",
+            "8B",
+            0.82d,
+            0,
+            true);
+
+        var bytes = SpectralArtifactEncoder.EncodeTiers(
+            detailed,
+            boundaries,
+            rhythm,
+            harmonic)[10];
+
+        Assert.Equal(908, bytes.Length);
+        Assert.Equal((ushort)308, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(6, 2)));
+        Assert.Equal("SBND", Encoding.ASCII.GetString(bytes, 52, 4));
+        Assert.Equal("SRHY", Encoding.ASCII.GetString(bytes, 156, 4));
+        Assert.Equal("SHRM", Encoding.ASCII.GetString(bytes, 284, 4));
+        Assert.Equal((ushort)1, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(288, 2)));
+        Assert.Equal((ushort)24, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(290, 2)));
+        Assert.Equal((byte)0, bytes[296]);
+        Assert.Equal((byte)0, bytes[297]);
+        Assert.Equal(
+            0.82f,
+            BitConverter.Int32BitsToSingle(
+                BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(300, 4))));
+        Assert.Equal(0xF403_4280u, SpectralArtifactEncoder.Crc32(bytes));
     }
 
     [Fact]
