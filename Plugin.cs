@@ -23,6 +23,7 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     public Plugin(IApplicationPaths applicationPaths, IXmlSerializer xmlSerializer)
         : base(applicationPaths, xmlSerializer)
     {
+        ApplicationPaths = applicationPaths;
         Instance = this;
     }
 
@@ -36,6 +37,9 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     public override string Description =>
         "Optional Slipmat metadata batching and precomputed audio-artifact acceleration. " +
         "Slipmat remains fully functional without this plugin.";
+
+    /// <summary>Gets the Jellyfin-owned application paths used for managed storage.</summary>
+    public IApplicationPaths ApplicationPaths { get; }
 
     /// <summary>Gets the singleton instance.</summary>
     public static Plugin? Instance { get; private set; }

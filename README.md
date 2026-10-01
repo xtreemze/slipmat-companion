@@ -4,6 +4,20 @@ Audio Gateway is an **optional acceleration and enrichment extension** for Slipm
 
 The plugin may precompute, cache, batch, synchronize, or enrich information that Slipmat can also obtain or own through its client/Rust paths. It must never become the sole owner of a user-visible Slipmat capability.
 
+## Jellyfin catalog installation
+
+For a normal Jellyfin installation, adding the repository and installing **Audio Gateway** is sufficient:
+
+1. Add `https://xtreemze.github.io/slipmat-companion/manifest.json` under **Dashboard → Plugins → Repositories**.
+2. Install **Audio Gateway**.
+3. Restart Jellyfin.
+
+No separate artifact-store mount or analyzer service is required for the plugin's core batching, podcast acquisition, or subscription-replica capabilities. The plugin creates a writable store under Jellyfin's own data directory automatically.
+
+The dashboard's **Artifact store override** is advanced configuration only. Existing deployments with a real `/store` mount remain compatible, and `SLIPMAT_ARTIFACT_STORE_ROOT` can override the managed path.
+
+The external analyzer is also optional and disabled by default. `SLIPMAT_ANALYZER_URL` or an explicitly entered analyzer URL enables its health check. The current Rust analyzer HTTP mode only provides health diagnostics; background library scheduling and automated artifact generation are tracked separately in issue #2. An absent analyzer is therefore not a degraded plugin state.
+
 ## Compatibility policy
 
 This repository carries no legacy plugin/API compatibility surface.
@@ -196,11 +210,11 @@ For an installable development build:
 dotnet publish -c Release -o ./dist/publish
 ```
 
-Mount/copy the resulting plugin files into a dedicated Audio Gateway subdirectory under Jellyfin's plugin directory and restart Jellyfin. The analyzer service and artifact store are optional modules; configure them only when server-side precomputation is desired.
+Mount/copy the resulting plugin files into a dedicated Audio Gateway subdirectory under Jellyfin's plugin directory and restart Jellyfin. The plugin provisions its own managed store by default. External analyzer deployment remains optional.
 
 This standalone companion repository is licensed under GNU GPL v3. Public plugin distribution is approved in `distribution-policy.json`. CI runs automatically on pull requests and pushes; a successful `main` build automatically publishes a new plugin version when that reviewed four-part version has not already been released.
 
-A host installation defaults to `http://localhost:8765` for the optional analyzer. Container deployments can set `SLIPMAT_ANALYZER_URL`; the repository Compose stack sets it to `http://audio-analyzer:8765` so Jellyfin reaches the analyzer through service discovery rather than its own loopback interface.
+An analyzer is not enabled by default. Deployments that intentionally run one can set `SLIPMAT_ANALYZER_URL`; `SLIPMAT_ARTIFACT_STORE_ROOT` can override the Jellyfin-managed companion store. The historical `/store` path is retained automatically when that mount actually exists.
 
 ## Directory layout
 

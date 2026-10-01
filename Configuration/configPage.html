@@ -12,34 +12,49 @@
         <div data-role="content">
             <div class="content-primary">
                 <form id="AudioGatewayConfigForm">
+                    <div class="verticalSection">
+                        <h3 class="sectionTitle">Installation</h3>
+                        <div class="fieldDescription">
+                            The Jellyfin plugin is usable immediately after installation and restart.
+                            It provisions its own persistent companion store inside Jellyfin.
+                            No analyzer service or /store mount is required for core companion features.
+                        </div>
+                    </div>
+
                     <div class="inputContainer">
-                        <label class="inputLabel inputLabelUnfocused" for="AnalyzerBaseUrl">Analyzer URL</label>
+                        <label class="inputLabel inputLabelUnfocused" for="AnalyzerBaseUrl">External analyzer URL (optional)</label>
                         <input id="AnalyzerBaseUrl"
                                name="AnalyzerBaseUrl"
                                type="url"
                                is="emby-input"
-                               autocomplete="off" required />
+                               autocomplete="off"
+                               placeholder="Leave blank unless an analyzer is deployed" />
                         <div class="fieldDescription">
-                            Base URL for the optional Slipmat audio analyzer.
+                            Optional health endpoint for a separately deployed Slipmat audio analyzer.
+                            Leaving this blank is normal and is not a degraded state.
                             SLIPMAT_ANALYZER_URL takes precedence when set by the Jellyfin host environment.
                         </div>
                     </div>
 
                     <div class="inputContainer">
-                        <label class="inputLabel inputLabelUnfocused" for="StoreRoot">Artifact store root</label>
+                        <label class="inputLabel inputLabelUnfocused" for="StoreRoot">Artifact store override (optional)</label>
                         <input id="StoreRoot"
                                name="StoreRoot"
                                type="text"
                                is="emby-input"
-                               autocomplete="off" required />
+                               autocomplete="off"
+                               placeholder="Automatic Jellyfin-managed storage" />
                         <div class="fieldDescription">
-                            Local path shared with the analyzer for precomputed analysis artifacts and companion state.
+                            Leave blank to use a writable directory managed under Jellyfin's data path.
+                            Existing deployments with a mounted /store remain compatible.
+                            If /store is an untouched 0.1.0.0 default and no mount exists, it is ignored in favor of managed storage.
+                            SLIPMAT_ARTIFACT_STORE_ROOT can provide an environment override.
                         </div>
                     </div>
 
                     <div class="verticalSection">
                         <h3 class="sectionTitle">Status</h3>
-                        <div id="AudioGatewayStatus">Checking extension health…</div>
+                        <div id="AudioGatewayStatus">Checking companion health…</div>
                     </div>
 
                     <div>
@@ -63,12 +78,21 @@
                         ApiClient.getUrl('Plugins/AudioGateway/diagnostics/capabilities')
                     );
 
-                    const analyzer = response.analyzerHealthy ? 'healthy' : 'unavailable';
-                    const store = response.storeWritable ? 'writable' : 'unavailable';
-                    const degraded = Array.isArray(response.degradedReasons) && response.degradedReasons.length > 0
-                        ? ` — ${response.degradedReasons.join(', ')}`
+                    const reasons = Array.isArray(response.degradedReasons)
+                        ? response.degradedReasons
+                        : [];
+                    const analyzerFailure = reasons.some(reason => reason.startsWith('analyzer_'));
+                    const analyzer = response.analyzerHealthy
+                        ? 'healthy'
+                        : analyzerFailure
+                            ? 'configured but unavailable'
+                            : 'not configured (optional)';
+                    const store = response.storeWritable ? 'ready' : 'unavailable';
+                    const overall = reasons.length > 0 ? 'degraded' : 'ready';
+                    const degraded = reasons.length > 0
+                        ? ` — ${reasons.join(', ')}`
                         : '';
-                    status.textContent = `Analyzer: ${analyzer}; artifact store: ${store}${degraded}`;
+                    status.textContent = `Core companion: ${overall}; analyzer: ${analyzer}; store: ${store}${degraded}`;
                 } catch {
                     status.textContent = 'Unable to read Audio Gateway health.';
                 }
@@ -79,7 +103,8 @@
                     Dashboard.showLoadingMsg();
                     ApiClient.getPluginConfiguration(AudioGatewayConfig.pluginUniqueId)
                         .then(function(config) {
-                            document.querySelector('#AnalyzerBaseUrl').value = config.AnalyzerBaseUrl || '';
+                            document.querySelector('#AnalyzerBaseUrl').value =
+                                config.AnalyzerEnabled === true ? (config.AnalyzerBaseUrl || '') : '';
                             document.querySelector('#StoreRoot').value = config.StoreRoot || '';
                             return loadAudioGatewayStatus();
                         })
@@ -93,7 +118,9 @@
                     Dashboard.showLoadingMsg();
                     ApiClient.getPluginConfiguration(AudioGatewayConfig.pluginUniqueId)
                         .then(function(config) {
-                            config.AnalyzerBaseUrl = document.querySelector('#AnalyzerBaseUrl').value.trim();
+                            const analyzerUrl = document.querySelector('#AnalyzerBaseUrl').value.trim();
+                            config.AnalyzerEnabled = analyzerUrl.length > 0;
+                            config.AnalyzerBaseUrl = analyzerUrl;
                             config.StoreRoot = document.querySelector('#StoreRoot').value.trim();
                             return ApiClient.updatePluginConfiguration(AudioGatewayConfig.pluginUniqueId, config);
                         })
