@@ -147,7 +147,8 @@ internal sealed class HarmonicAccumulator
     private static void Fft(double[] real, double[] imag)
     {
         var n = real.Length;
-        for (var index = 1, reversed = 0; index < n; index++)
+        var reversed = 0;
+        for (var index = 1; index < n; index++)
         {
             var bit = n >> 1;
             for (; (reversed & bit) != 0; bit >>= 1)
