@@ -14,7 +14,7 @@ public static class RuntimeSettings
     public static string ResolveStoreRoot(PluginConfiguration config)
         => ResolveStoreRoot(
             config,
-            Plugin.Instance?.ApplicationPaths.DataPath,
+            Plugin.Instance?.HostApplicationPaths.DataPath,
             Environment.GetEnvironmentVariable(StoreRootEnvironmentVariable),
             Directory.Exists(LegacyStoreRoot));
 
