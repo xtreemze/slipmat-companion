@@ -7,12 +7,9 @@ namespace Jellyfin.Plugin.AudioGateway.Tests;
 public class RuntimeSettingsTests
 {
     [Fact]
-    public void Defaults_RequireNoExternalAnalyzerOrStoreOverride()
+    public void Defaults_RequireNoStoreOverride()
     {
         var config = new PluginConfiguration();
-
-        Assert.False(config.AnalyzerEnabled);
-        Assert.Equal(string.Empty, config.AnalyzerBaseUrl);
         Assert.Equal(string.Empty, config.StoreRoot);
     }
 
@@ -72,46 +69,5 @@ public class RuntimeSettingsTests
             legacyStoreAvailable: true);
 
         Assert.Equal(Path.GetFullPath(environmentRoot), resolved);
-    }
-
-    [Fact]
-    public void ResolveAnalyzerEndpoint_Default_IsNotConfigured()
-    {
-        var endpoint = RuntimeSettings.ResolveAnalyzerEndpoint(
-            new PluginConfiguration(),
-            environmentUrl: null);
-
-        Assert.False(endpoint.ExplicitlyConfigured);
-        Assert.Null(endpoint.BaseUrl);
-    }
-
-    [Fact]
-    public void ResolveAnalyzerEndpoint_ConfigRequiresExplicitEnablement()
-    {
-        var disabled = RuntimeSettings.ResolveAnalyzerEndpoint(
-            new PluginConfiguration { AnalyzerBaseUrl = "http://localhost:8765" },
-            environmentUrl: null);
-        var enabled = RuntimeSettings.ResolveAnalyzerEndpoint(
-            new PluginConfiguration
-            {
-                AnalyzerEnabled = true,
-                AnalyzerBaseUrl = "http://localhost:8765",
-            },
-            environmentUrl: null);
-
-        Assert.False(disabled.ExplicitlyConfigured);
-        Assert.True(enabled.ExplicitlyConfigured);
-        Assert.Equal("http://localhost:8765", enabled.BaseUrl);
-    }
-
-    [Fact]
-    public void ResolveAnalyzerEndpoint_EnvironmentOverrideEnablesAnalyzer()
-    {
-        var endpoint = RuntimeSettings.ResolveAnalyzerEndpoint(
-            new PluginConfiguration(),
-            "http://audio-analyzer:8765");
-
-        Assert.True(endpoint.ExplicitlyConfigured);
-        Assert.Equal("http://audio-analyzer:8765", endpoint.BaseUrl);
     }
 }

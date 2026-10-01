@@ -23,7 +23,7 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     public Plugin(IApplicationPaths applicationPaths, IXmlSerializer xmlSerializer)
         : base(applicationPaths, xmlSerializer)
     {
-        ApplicationPaths = applicationPaths;
+        HostApplicationPaths = applicationPaths;
         Instance = this;
     }
 
@@ -39,7 +39,7 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         "Slipmat remains fully functional without this plugin.";
 
     /// <summary>Gets the Jellyfin-owned application paths used for managed storage.</summary>
-    public IApplicationPaths ApplicationPaths { get; }
+    public IApplicationPaths HostApplicationPaths { get; }
 
     /// <summary>Gets the singleton instance.</summary>
     public static Plugin? Instance { get; private set; }

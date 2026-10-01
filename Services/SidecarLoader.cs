@@ -5,7 +5,7 @@ using Jellyfin.Plugin.AudioGateway.Models;
 namespace Jellyfin.Plugin.AudioGateway.Services;
 
 /// <summary>
-/// Reads analysis sidecars written by the Rust audio-analyzer.
+/// Reads host-neutral V2 analysis sidecars written by any compatible analyzer.
 /// Missing, corrupt, incompatible, or subject-mismatched sidecars are all
 /// treated as ordinary artifact absence.
 /// </summary>
