@@ -16,7 +16,7 @@ internal sealed record HarmonicAnalysisResult(
 }
 
 /// <summary>
-/// Streaming projection of Slipmat's Rust/WASM key detector.
+/// Streaming projection of Slipmat's canonical harmonic-key analyzer.
 ///
 /// Preserves channel-independent analyzer details: 4096-sample frames advance
 /// by 2048 samples, the final frame is analyzed only when at least one later
