@@ -1,7 +1,7 @@
 ---
 name: "Audio Gateway"
 guid: "d3a2b1c0-e4f5-6789-abcd-ef0123456789"
-version: "0.2.2.0"
+version: "0.2.3.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 overview: "Optional Jellyfin companion that accelerates and enriches Slipmat."
@@ -14,4 +14,4 @@ category: "General"
 owner: "xtreemze"
 artifacts:
 - "Jellyfin.Plugin.AudioGateway.dll"
-changelog: "Align harmonic key and Camelot analysis with Slipmat Rust/WASM channel, framing, Hann-window, single-precision FFT, chroma, and profile-scoring semantics."
+changelog: "Match Slipmat Rust spectral tier max-pooling for partial trailing visual frames so 100 Hz to 10 Hz and 1 Hz SLWS bytes remain deterministic across implementations."

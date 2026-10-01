@@ -170,6 +170,32 @@ public class HigherOrderAudioAnalysisTests
     }
 
     [Fact]
+    public void SpectralDownsample_MatchesRustProportionalPoolingForPartialTail()
+    {
+        var frames = Enumerable.Range(0, 101)
+            .Select(index => new SpectralPeakFrame(
+                new SpectralLanePeak((byte)index, 0, 0, 0, 0, 0),
+                default))
+            .ToArray();
+        var detailed = new SpectralWaveformData(
+            SampleRate: 100,
+            FramesPerSecond: 100,
+            ChannelCount: 1,
+            SourceFrameCount: 101,
+            Frames: frames);
+
+        var bytes = SpectralArtifactEncoder.EncodeTiers(
+            detailed,
+            null,
+            EmptyRhythm())[10];
+
+        Assert.Equal(11u, BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(16, 4)));
+        Assert.Equal((ushort)52, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(6, 2)));
+        Assert.Equal((byte)8, bytes[52]);
+        Assert.Equal((byte)100, bytes[52 + 10 * 6]);
+    }
+
+    [Fact]
     public void BoundaryClassifier_DetectsCanonicalAuthoredFade()
     {
         const double duration = 240d;
