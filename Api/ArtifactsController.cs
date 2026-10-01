@@ -64,13 +64,14 @@ public class ArtifactsController : ControllerBase
         }
 
         var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
-        var sidecarPath = StorePaths.SidecarPath(config.StoreRoot, subjectStoreKey);
-        if (!StorePaths.IsWithinRoot(config.StoreRoot, sidecarPath))
+        var storeRoot = RuntimeSettings.ResolveStoreRoot(config);
+        var sidecarPath = StorePaths.SidecarPath(storeRoot, subjectStoreKey);
+        if (!StorePaths.IsWithinRoot(storeRoot, sidecarPath))
         {
             return BadRequest("Resolved sidecar path escaped the configured store root.");
         }
 
-        var sidecar = _sidecarLoader.LoadSidecarFromStore(config.StoreRoot, subjectStoreKey);
+        var sidecar = _sidecarLoader.LoadSidecarFromStore(storeRoot, subjectStoreKey);
         if (sidecar is null)
         {
             _logger.LogDebug(
@@ -121,8 +122,9 @@ public class ArtifactsController : ControllerBase
             return BadRequest($"Invalid pps={pps}. Accepted: 1, 10, 100.");
 
         var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
-        var datPath = StorePaths.WaveformDatPath(config.StoreRoot, subjectStoreKey, variant, pps);
-        if (!StorePaths.IsWithinRoot(config.StoreRoot, datPath))
+        var storeRoot = RuntimeSettings.ResolveStoreRoot(config);
+        var datPath = StorePaths.WaveformDatPath(storeRoot, subjectStoreKey, variant, pps);
+        if (!StorePaths.IsWithinRoot(storeRoot, datPath))
         {
             return BadRequest("Resolved waveform path escaped the configured store root.");
         }
@@ -133,7 +135,7 @@ public class ArtifactsController : ControllerBase
             return NotFound();
         }
 
-        var sidecar = _sidecarLoader.LoadSidecarFromStore(config.StoreRoot, subjectStoreKey);
+        var sidecar = _sidecarLoader.LoadSidecarFromStore(storeRoot, subjectStoreKey);
         if (sidecar is null)
         {
             _logger.LogDebug(

@@ -51,11 +51,12 @@ public class EventsController : ControllerBase
         }
 
         var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+        var storeRoot = RuntimeSettings.ResolveStoreRoot(config);
         var trackEvent = _trackPlaybackEventService.ComposeTrackEvent(
             itemGuid,
             ParseInclude(include),
             waveformPps,
-            config.StoreRoot);
+            storeRoot);
 
         if (trackEvent is null)
         {
@@ -87,11 +88,12 @@ public class EventsController : ControllerBase
         }
 
         var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+        var storeRoot = RuntimeSettings.ResolveStoreRoot(config);
         var items = _trackPlaybackEventService.ComposeTrackEvents(
             request.ItemIds,
             ParseInclude(request.Include),
             request.WaveformPps,
-            config.StoreRoot);
+            storeRoot);
 
         return Ok(new BatchTrackPlaybackEventResponse(items));
     }

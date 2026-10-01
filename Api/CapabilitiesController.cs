@@ -23,7 +23,6 @@ public class CapabilitiesController : ControllerBase
     public const string ProtocolVersion = "1.0.0";
     public const string ExtensionMode = "optional-acceleration";
     public const string SupportedJellyfinVersion = "12.1.0";
-    public const string AnalyzerUrlEnvironmentVariable = "SLIPMAT_ANALYZER_URL";
 
     private static readonly object CacheLock = new();
     private static readonly TimeSpan CacheDuration = TimeSpan.FromSeconds(15);
@@ -59,11 +58,13 @@ public class CapabilitiesController : ControllerBase
         var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
         var degradedReasons = new List<string>();
 
+        var analyzerEndpoint = RuntimeSettings.ResolveAnalyzerEndpoint(config);
         var analyzerHealthy = await ProbeAnalyzerHealthAsync(
-                ResolveAnalyzerBaseUrl(config),
+                analyzerEndpoint,
                 degradedReasons)
             .ConfigureAwait(false);
-        var storeWritable = ProbeStoreWritable(config.StoreRoot, degradedReasons);
+        var storeRoot = RuntimeSettings.ResolveStoreRoot(config);
+        var storeWritable = ProbeStoreWritable(storeRoot, degradedReasons);
 
         var response = new CapabilitiesResponse(
             ProtocolVersion: ProtocolVersion,
@@ -101,19 +102,6 @@ public class CapabilitiesController : ControllerBase
         return Ok(response);
     }
 
-    /// <summary>
-    /// Resolves the analyzer endpoint for the current deployment. Environment
-    /// configuration wins so container/service discovery does not require
-    /// mutating Jellyfin's persisted plugin configuration.
-    /// </summary>
-    public static string ResolveAnalyzerBaseUrl(PluginConfiguration config)
-    {
-        var environmentUrl = Environment.GetEnvironmentVariable(AnalyzerUrlEnvironmentVariable);
-        return string.IsNullOrWhiteSpace(environmentUrl)
-            ? config.AnalyzerBaseUrl
-            : environmentUrl;
-    }
-
     private static CapabilitiesResponse? TryGetCachedResponse()
     {
         lock (CacheLock)
@@ -138,9 +126,16 @@ public class CapabilitiesController : ControllerBase
         }
     }
 
-    private async Task<bool> ProbeAnalyzerHealthAsync(string baseUrl, List<string> degradedReasons)
+    private async Task<bool> ProbeAnalyzerHealthAsync(
+        AnalyzerEndpoint endpoint,
+        List<string> degradedReasons)
     {
-        var url = baseUrl.TrimEnd('/') + "/health";
+        if (!endpoint.ExplicitlyConfigured || string.IsNullOrWhiteSpace(endpoint.BaseUrl))
+        {
+            return false;
+        }
+
+        var url = endpoint.BaseUrl.TrimEnd('/') + "/health";
         try
         {
             var response = await _http.GetAsync(url).ConfigureAwait(false);
@@ -173,6 +168,7 @@ public class CapabilitiesController : ControllerBase
         var probe = Path.Combine(storeRoot, ".write_probe");
         try
         {
+            Directory.CreateDirectory(storeRoot);
             System.IO.File.WriteAllText(probe, "probe");
             System.IO.File.Delete(probe);
             return true;

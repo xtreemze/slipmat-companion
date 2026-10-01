@@ -74,5 +74,8 @@ public class PodcastSubscriptionsController : ControllerBase
     }
 
     private static string ResolveStoreRoot()
-        => Plugin.Instance?.Configuration.StoreRoot ?? new PluginConfiguration().StoreRoot;
+    {
+        var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+        return RuntimeSettings.ResolveStoreRoot(config);
+    }
 }
