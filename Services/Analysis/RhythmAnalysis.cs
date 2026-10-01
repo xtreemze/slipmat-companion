@@ -26,36 +26,55 @@ internal sealed class RhythmAccumulator
     public const int FramesPerSecond = 20;
 
     private readonly int _sampleRate;
-    private readonly AnalysisBandSplitter _splitter;
+    private readonly AnalysisBandSplitter[] _splitters;
     private readonly List<RhythmEnergyFrame> _frames = [];
     private long _sourceFrameIndex;
     private long _analysisFrameIndex;
     private EnergySums _current;
     private bool _frameHasData;
 
-    public RhythmAccumulator(int sampleRate)
+    public RhythmAccumulator(int sampleRate, int channelCount)
     {
         _sampleRate = sampleRate;
-        _splitter = new AnalysisBandSplitter(AnalysisCrossover.Rhythm, sampleRate);
+        var lanes = Math.Clamp(channelCount, 1, 2);
+        _splitters = new AnalysisBandSplitter[lanes];
+        for (var lane = 0; lane < lanes; lane++)
+        {
+            _splitters[lane] = new AnalysisBandSplitter(AnalysisCrossover.Rhythm, sampleRate);
+        }
     }
 
     public IReadOnlyList<RhythmEnergyFrame> Frames => _frames;
 
-    public void Push(float sample)
+    public void PushFrame(ReadOnlySpan<float> samples)
     {
+        if (samples.IsEmpty)
+        {
+            return;
+        }
+
         while (_sourceFrameIndex >= Boundary(_analysisFrameIndex + 1))
         {
             Emit();
         }
 
-        var value = double.IsFinite(sample) ? sample : 0d;
-        var bands = _splitter.Process(value);
-        _current.Observe(value, bands.Bass, bands.Mid, bands.Presence, bands.Air);
+        for (var lane = 0; lane < _splitters.Length; lane++)
+        {
+            var value = samples[Math.Min(lane, samples.Length - 1)];
+            if (!float.IsFinite(value))
+            {
+                value = 0f;
+            }
+
+            var bands = _splitters[lane].Process(value);
+            _current.Observe(value, bands.Bass, bands.Mid, bands.Presence, bands.Air);
+        }
+
         _frameHasData = true;
         _sourceFrameIndex++;
     }
 
-    public RhythmAnalysisResult Complete()
+    public RhythmAnalysisResult Complete(TrackBoundaryAnalysis? boundaries)
     {
         if (_frameHasData)
         {
@@ -65,7 +84,14 @@ internal sealed class RhythmAccumulator
         var durationSeconds = _sampleRate > 0
             ? _sourceFrameIndex / (double)_sampleRate
             : 0d;
-        return RhythmGridAnalyzer.Analyze(_frames, FramesPerSecond, durationSeconds);
+        var audibleStartSeconds = boundaries?.AudibleStartSeconds ?? 0d;
+        var audibleEndSeconds = boundaries?.AudibleEndSeconds ?? durationSeconds;
+        return RhythmGridAnalyzer.Analyze(
+            _frames,
+            FramesPerSecond,
+            durationSeconds,
+            audibleStartSeconds,
+            audibleEndSeconds);
     }
 
     private long Boundary(long index)
@@ -130,12 +156,18 @@ internal static class RhythmGridAnalyzer
     public static RhythmAnalysisResult Analyze(
         IReadOnlyList<RhythmEnergyFrame> frames,
         int framesPerSecond,
-        double durationSeconds)
+        double durationSeconds,
+        double audibleStartSeconds = 0d,
+        double? audibleEndSeconds = null)
     {
+        var audibleEnd = audibleEndSeconds ?? durationSeconds;
         if (framesPerSecond <= 0 ||
             !double.IsFinite(durationSeconds) ||
             durationSeconds < MinTrackSeconds ||
-            frames.Count < framesPerSecond * MinTrackSeconds)
+            frames.Count < framesPerSecond * MinTrackSeconds ||
+            !double.IsFinite(audibleStartSeconds) ||
+            !double.IsFinite(audibleEnd) ||
+            audibleEnd <= audibleStartSeconds)
         {
             return Empty();
         }
@@ -189,7 +221,9 @@ internal static class RhythmGridAnalyzer
             phase,
             best.Lag,
             framesPerSecond,
-            durationSeconds);
+            durationSeconds,
+            audibleStartSeconds,
+            audibleEnd);
         if (beats.Count < 8)
         {
             return Empty();
@@ -321,7 +355,9 @@ internal static class RhythmGridAnalyzer
         int phase,
         int lag,
         int framesPerSecond,
-        double durationSeconds)
+        double durationSeconds,
+        double audibleStartSeconds,
+        double audibleEndSeconds)
     {
         var result = new List<double>();
         for (var frame = phase; ; frame += lag)
@@ -332,7 +368,11 @@ internal static class RhythmGridAnalyzer
                 break;
             }
 
-            result.Add(seconds);
+            if (seconds + 1e-6 >= audibleStartSeconds &&
+                seconds <= audibleEndSeconds + 1e-6)
+            {
+                result.Add(seconds);
+            }
         }
 
         return result;

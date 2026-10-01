@@ -7,35 +7,47 @@ namespace Jellyfin.Plugin.AudioGateway.Services.Analysis;
 
 internal sealed record HigherOrderAnalysisResult(
     IReadOnlyDictionary<int, byte[]> SpectralTiers,
-    AnalysisBlocks? Analysis);
+    AnalysisBlocks? Analysis,
+    TrackBoundaryAnalysis? Boundaries);
 
 internal sealed class HigherOrderAudioAnalysisBuilder
 {
     private const int EnergyCurveMaximumPoints = 1_024;
 
     private readonly SpectralAccumulator _spectral;
+    private readonly BoundaryAccumulator _boundary;
     private readonly RhythmAccumulator _rhythm;
     private readonly HarmonicAccumulator _harmonic;
 
-    public HigherOrderAudioAnalysisBuilder(int sampleRate)
+    public HigherOrderAudioAnalysisBuilder(int sampleRate, int channelCount)
     {
-        _spectral = new SpectralAccumulator(sampleRate);
-        _rhythm = new RhythmAccumulator(sampleRate);
+        _spectral = new SpectralAccumulator(sampleRate, channelCount);
+        _boundary = new BoundaryAccumulator(sampleRate, channelCount);
+        _rhythm = new RhythmAccumulator(sampleRate, channelCount);
         _harmonic = new HarmonicAccumulator(sampleRate);
     }
 
-    public void Push(float sample)
+    public void PushFrame(ReadOnlySpan<float> samples)
     {
-        var finite = float.IsFinite(sample) ? sample : 0f;
-        _spectral.Push(finite);
-        _rhythm.Push(finite);
-        _harmonic.Push(finite);
+        if (samples.IsEmpty)
+        {
+            return;
+        }
+
+        _spectral.PushFrame(samples);
+        _boundary.PushFrame(samples);
+        _rhythm.PushFrame(samples);
+        _harmonic.Push(MonoProjection(samples));
     }
 
     public HigherOrderAnalysisResult Complete(LoudnessAnalysis? loudness)
     {
-        var rhythm = _rhythm.Complete();
-        var spectral = SpectralArtifactEncoder.EncodeTiers(_spectral.Complete(), rhythm);
+        var boundaries = _boundary.Complete();
+        var rhythm = _rhythm.Complete(boundaries);
+        var spectral = SpectralArtifactEncoder.EncodeTiers(
+            _spectral.Complete(),
+            boundaries,
+            rhythm);
         var harmonic = _harmonic.Complete();
 
         AnalysisBlocks? blocks = null;
@@ -70,7 +82,27 @@ internal sealed class HigherOrderAudioAnalysisBuilder
                 Transitions: null);
         }
 
-        return new HigherOrderAnalysisResult(spectral, blocks);
+        return new HigherOrderAnalysisResult(
+            spectral,
+            blocks,
+            boundaries);
+    }
+
+    internal static float MonoProjection(ReadOnlySpan<float> samples)
+    {
+        if (samples.IsEmpty)
+        {
+            return 0f;
+        }
+
+        var lanes = Math.Min(samples.Length, 2);
+        var sum = 0d;
+        for (var lane = 0; lane < lanes; lane++)
+        {
+            sum += float.IsFinite(samples[lane]) ? samples[lane] : 0f;
+        }
+
+        return (float)(sum / lanes);
     }
 
     private static List<EnergyCurvePoint>? BuildEnergyCurve(
