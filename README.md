@@ -249,7 +249,7 @@ This is the standalone Slipmat companion repository. Slipmat remains authoritati
 - `distribution-policy.json` records the owner-approved GPL-3.0-only public-distribution policy.
 - `scripts/package_plugin.py` creates the deterministic plugin ZIP.
 - `scripts/generate_manifest.py` emits the Jellyfin repository JSON containing the release URL and package checksum.
-- `.github/workflows/ci.yml` validates metadata, builds, tests, packages, exercises manifest generation, and uploads the exact tested release candidate for successful `main` pushes.
+- `.github/workflows/ci.yml` validates metadata, builds, runs unit/contract tests plus the shared source-boundary media corpus through the runner FFmpeg decoder, packages, exercises manifest generation, and uploads the exact tested release candidate for successful `main` pushes.
 - `.github/workflows/release.yml` runs only after successful `main` CI, consumes that exact tested artifact, creates a GitHub Release for an unreleased version, and publishes the Jellyfin repository manifest through GitHub Pages.
 
 To publish a new version, update the same four-part version in `build.yaml` and `Directory.Build.props`, update the quoted `changelog` in `build.yaml`, and merge to `main`. CI and release publication then proceed automatically. Commits that keep an already-published version still run CI but do not create or replace a release. The Pages manifest preserves previously published versions for Jellyfin compatibility selection.
