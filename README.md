@@ -16,7 +16,7 @@ No separate artifact-store mount or analyzer service is required for the plugin'
 
 The dashboard's **Artifact store override** is advanced configuration only. Existing deployments with a real `/store` mount remain compatible, and `SLIPMAT_ARTIFACT_STORE_ROOT` can override the managed path.
 
-The external analyzer is also optional and disabled by default. `SLIPMAT_ANALYZER_URL` or an explicitly entered analyzer URL enables its health check. The current Rust analyzer HTTP mode only provides health diagnostics; background library scheduling and automated artifact generation are tracked separately in issue #2. An absent analyzer is therefore not a degraded plugin state.
+Audio analysis is integrated into the plugin and uses the FFmpeg binary already managed by Jellyfin. No second analyzer service, URL, container, or media mount is required. Missing amplitude artifacts are queued asynchronously from normal companion requests and Jellyfin library changes; the dashboard also exposes a daily **Slipmat audio analysis** scheduled task for idempotent backfill. The integrated analyzer writes only the established amplitude-envelope portion of the V2 artifact contract. Spectral, rhythm, harmonic, and other higher-order facts remain absent unless produced by a parity-certified canonical analyzer, so the client continues its normal local fallback for those facts.
 
 ## Compatibility policy
 
@@ -110,7 +110,7 @@ V2 sidecars carry the subject/store schema versions, the derived subject key, co
 
 Because Slipmat is unreleased, the former raw-`itemId` artifact layout is regenerated rather than dual-written or retained behind an indefinite compatibility shim.
 
-Background analysis scheduling and library-change observation remain separate work. Host-neutral identity is now the prerequisite foundation; bounded scheduling and coverage state must still land before Jellyfin proactively prewarms artifacts.
+Integrated amplitude analysis observes Jellyfin audio additions/updates through a bounded single-worker queue, and the scheduled backfill reconciles existing local audio without blocking playback. Host-neutral subject identity remains canonical. Higher-order spectral/rhythm analysis remains client/Rust-owned until parity is explicitly certified.
 
 ## Podcast Index directory search
 
@@ -214,7 +214,7 @@ Mount/copy the resulting plugin files into a dedicated Audio Gateway subdirector
 
 This standalone companion repository is licensed under GNU GPL v3. Public plugin distribution is approved in `distribution-policy.json`. CI runs automatically on pull requests and pushes; a successful `main` build automatically publishes a new plugin version when that reviewed four-part version has not already been released.
 
-An analyzer is not enabled by default. Deployments that intentionally run one can set `SLIPMAT_ANALYZER_URL`; `SLIPMAT_ARTIFACT_STORE_ROOT` can override the Jellyfin-managed companion store. The historical `/store` path is retained automatically when that mount actually exists.
+`SLIPMAT_ARTIFACT_STORE_ROOT` can override the Jellyfin-managed companion store. The historical `/store` path is retained automatically when that mount actually exists. The former external analyzer URL is no longer required for catalog installs.
 
 ## Directory layout
 

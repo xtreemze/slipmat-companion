@@ -15,17 +15,20 @@ public class TrackPlaybackEventService
     private readonly JellyfinMetadataAdapter _metadataAdapter;
     private readonly SidecarLoader _sidecarLoader;
     private readonly JellyfinAnalysisSubjectFactory _subjectFactory;
+    private readonly IntegratedAnalysisWorker _analysisWorker;
 
     public TrackPlaybackEventService(
         ILibraryManager library,
         JellyfinMetadataAdapter metadataAdapter,
         SidecarLoader sidecarLoader,
-        JellyfinAnalysisSubjectFactory subjectFactory)
+        JellyfinAnalysisSubjectFactory subjectFactory,
+        IntegratedAnalysisWorker analysisWorker)
     {
         _library = library;
         _metadataAdapter = metadataAdapter;
         _sidecarLoader = sidecarLoader;
         _subjectFactory = subjectFactory;
+        _analysisWorker = analysisWorker;
     }
 
     public TrackPlaybackEvent? ComposeTrackEvent(
@@ -49,6 +52,10 @@ public class TrackPlaybackEventService
         var artifactItemId = itemGuid.ToString("N");
         var subjectStoreKey = _subjectFactory.ForItem(itemGuid).StoreKey();
         var sidecar = _sidecarLoader.LoadSidecarFromStore(storeRoot, subjectStoreKey);
+        if (sidecar is null)
+        {
+            _analysisWorker.TryEnqueue(itemGuid);
+        }
 
         return TrackPlaybackEventComposer.Compose(
             track,

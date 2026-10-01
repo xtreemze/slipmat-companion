@@ -15,24 +15,9 @@
                     <div class="verticalSection">
                         <h3 class="sectionTitle">Installation</h3>
                         <div class="fieldDescription">
-                            The Jellyfin plugin is usable immediately after installation and restart.
-                            It provisions its own persistent companion store inside Jellyfin.
-                            No analyzer service or /store mount is required for core companion features.
-                        </div>
-                    </div>
-
-                    <div class="inputContainer">
-                        <label class="inputLabel inputLabelUnfocused" for="AnalyzerBaseUrl">External analyzer URL (optional)</label>
-                        <input id="AnalyzerBaseUrl"
-                               name="AnalyzerBaseUrl"
-                               type="url"
-                               is="emby-input"
-                               autocomplete="off"
-                               placeholder="Leave blank unless an analyzer is deployed" />
-                        <div class="fieldDescription">
-                            Optional health endpoint for a separately deployed Slipmat audio analyzer.
-                            Leaving this blank is normal and is not a degraded state.
-                            SLIPMAT_ANALYZER_URL takes precedence when set by the Jellyfin host environment.
+                            Audio analysis is built into the plugin and uses Jellyfin's managed FFmpeg.
+                            No analyzer URL, second container, or shared media mount is required.
+                            Missing artifacts are generated asynchronously and a daily Jellyfin scheduled task reconciles the library.
                         </div>
                     </div>
 
@@ -47,7 +32,6 @@
                         <div class="fieldDescription">
                             Leave blank to use a writable directory managed under Jellyfin's data path.
                             Existing deployments with a mounted /store remain compatible.
-                            If /store is an untouched 0.1.0.0 default and no mount exists, it is ignored in favor of managed storage.
                             SLIPMAT_ARTIFACT_STORE_ROOT can provide an environment override.
                         </div>
                     </div>
@@ -81,12 +65,7 @@
                     const reasons = Array.isArray(response.degradedReasons)
                         ? response.degradedReasons
                         : [];
-                    const analyzerFailure = reasons.some(reason => reason.startsWith('analyzer_'));
-                    const analyzer = response.analyzerHealthy
-                        ? 'healthy'
-                        : analyzerFailure
-                            ? 'configured but unavailable'
-                            : 'not configured (optional)';
+                    const analyzer = response.analyzerHealthy ? 'integrated / ready' : 'unavailable';
                     const store = response.storeWritable ? 'ready' : 'unavailable';
                     const overall = reasons.length > 0 ? 'degraded' : 'ready';
                     const degraded = reasons.length > 0
@@ -103,8 +82,6 @@
                     Dashboard.showLoadingMsg();
                     ApiClient.getPluginConfiguration(AudioGatewayConfig.pluginUniqueId)
                         .then(function(config) {
-                            document.querySelector('#AnalyzerBaseUrl').value =
-                                config.AnalyzerEnabled === true ? (config.AnalyzerBaseUrl || '') : '';
                             document.querySelector('#StoreRoot').value = config.StoreRoot || '';
                             return loadAudioGatewayStatus();
                         })
@@ -118,9 +95,6 @@
                     Dashboard.showLoadingMsg();
                     ApiClient.getPluginConfiguration(AudioGatewayConfig.pluginUniqueId)
                         .then(function(config) {
-                            const analyzerUrl = document.querySelector('#AnalyzerBaseUrl').value.trim();
-                            config.AnalyzerEnabled = analyzerUrl.length > 0;
-                            config.AnalyzerBaseUrl = analyzerUrl;
                             config.StoreRoot = document.querySelector('#StoreRoot').value.trim();
                             return ApiClient.updatePluginConfiguration(AudioGatewayConfig.pluginUniqueId, config);
                         })

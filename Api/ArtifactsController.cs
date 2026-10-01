@@ -32,15 +32,18 @@ public class ArtifactsController : ControllerBase
     private readonly ILogger<ArtifactsController> _logger;
     private readonly SidecarLoader _sidecarLoader;
     private readonly JellyfinAnalysisSubjectFactory _subjectFactory;
+    private readonly IntegratedAnalysisWorker _analysisWorker;
 
     public ArtifactsController(
         ILogger<ArtifactsController> logger,
         SidecarLoader sidecarLoader,
-        JellyfinAnalysisSubjectFactory subjectFactory)
+        JellyfinAnalysisSubjectFactory subjectFactory,
+        IntegratedAnalysisWorker analysisWorker)
     {
         _logger = logger;
         _sidecarLoader = sidecarLoader;
         _subjectFactory = subjectFactory;
+        _analysisWorker = analysisWorker;
     }
 
     /// <summary>
@@ -78,6 +81,11 @@ public class ArtifactsController : ControllerBase
                 "Compatible sidecar not found for itemId={ItemId} subject={SubjectStoreKey}",
                 itemId,
                 subjectStoreKey);
+            if (Guid.TryParse(itemId, out var missingItemId))
+            {
+                _analysisWorker.TryEnqueue(missingItemId);
+            }
+
             return NotFound();
         }
 
@@ -132,6 +140,15 @@ public class ArtifactsController : ControllerBase
         if (!System.IO.File.Exists(datPath))
         {
             _logger.LogDebug("Waveform not found: itemId={ItemId} variant={Variant} pps={Pps}", itemId, variant, pps);
+            if (string.Equals(
+                    variant,
+                    IntegratedAudioAnalyzer.AmplitudeVariant,
+                    StringComparison.Ordinal) &&
+                Guid.TryParse(itemId, out var missingItemId))
+            {
+                _analysisWorker.TryEnqueue(missingItemId);
+            }
+
             return NotFound();
         }
 
