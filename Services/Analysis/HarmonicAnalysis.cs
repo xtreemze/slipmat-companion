@@ -8,40 +8,59 @@ internal sealed record HarmonicAnalysisResult(
     string CamelotKey,
     double Confidence);
 
+/// <summary>
+/// Streaming projection of Slipmat's Rust/WASM key detector.
+///
+/// Preserves channel-independent analyzer details: 4096-sample frames advance
+/// by 2048 samples, the final frame is analyzed only when at least one later
+/// sample exists, the Hann denominator is exactly FrameSize, and FFT/chroma/
+/// profile scoring use single precision.
+/// </summary>
 internal sealed class HarmonicAccumulator
 {
-    private const int FrameSize = 4096;
-    private const int HopSize = 2048;
+    internal const int FrameSize = 4096;
+    internal const int HopSize = 2048;
 
-    private static readonly double[] MajorProfile =
+    private static readonly float[] MajorProfile =
     [
-        6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88,
+        6.35f, 2.23f, 3.48f, 2.33f, 4.38f, 4.09f,
+        2.52f, 5.19f, 2.39f, 3.66f, 2.29f, 2.88f,
     ];
 
-    private static readonly double[] MinorProfile =
+    private static readonly float[] MinorProfile =
     [
-        6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17,
+        6.33f, 2.68f, 3.52f, 5.38f, 2.60f, 3.53f,
+        2.54f, 4.75f, 3.98f, 2.69f, 3.34f, 3.17f,
     ];
 
     private static readonly string[] KeyNames =
     [
-        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+        "C", "C#", "D", "D#", "E", "F",
+        "F#", "G", "G#", "A", "A#", "B",
     ];
 
     private readonly int _sampleRate;
-    private readonly List<float> _buffer = new(FrameSize);
-    private readonly double[] _chroma = new double[12];
+    private readonly List<float> _buffer = new(FrameSize + 1);
+    private readonly float[] _chroma = new float[12];
     private int _framesAnalyzed;
 
     public HarmonicAccumulator(int sampleRate)
     {
+        if (sampleRate <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(sampleRate));
+        }
+
         _sampleRate = sampleRate;
     }
 
     public void Push(float sample)
     {
         _buffer.Add(float.IsFinite(sample) ? sample : 0f);
-        if (_buffer.Count < FrameSize)
+
+        // Rust iterates 0..samples.len().saturating_sub(FrameSize), excluding
+        // a frame whose last sample is also the final source sample.
+        if (_buffer.Count <= FrameSize)
         {
             return;
         }
@@ -57,23 +76,26 @@ internal sealed class HarmonicAccumulator
             return Unknown();
         }
 
-        var chromaMax = 0d;
+        var chromaMax = 0f;
         foreach (var value in _chroma)
         {
-            chromaMax = Math.Max(chromaMax, value);
+            chromaMax = MathF.Max(chromaMax, value);
         }
 
-        if (!double.IsFinite(chromaMax) || chromaMax <= 1e-12)
+        if (!float.IsFinite(chromaMax) || chromaMax <= 0f)
         {
             return Unknown();
         }
 
-        var bestMajor = (Root: 0, Score: double.NegativeInfinity);
-        var bestMinor = (Root: 0, Score: double.NegativeInfinity);
+        var bestMajorRoot = 0;
+        var bestMajorScore = -1f;
+        var bestMinorRoot = 0;
+        var bestMinorScore = -1f;
+
         for (var root = 0; root < 12; root++)
         {
-            var major = 0d;
-            var minor = 0d;
+            var major = 0f;
+            var minor = 0f;
             for (var index = 0; index < 12; index++)
             {
                 var chromaIndex = (index + root) % 12;
@@ -81,133 +103,154 @@ internal sealed class HarmonicAccumulator
                 minor += _chroma[chromaIndex] * MinorProfile[index];
             }
 
-            if (major > bestMajor.Score)
+            if (major > bestMajorScore)
             {
-                bestMajor = (root, major);
+                bestMajorScore = major;
+                bestMajorRoot = root;
             }
 
-            if (minor > bestMinor.Score)
+            if (minor > bestMinorScore)
             {
-                bestMinor = (root, minor);
+                bestMinorScore = minor;
+                bestMinorRoot = root;
             }
         }
 
-        var majorConfidence =
-            bestMajor.Score / chromaMax / Sum(MajorProfile);
-        var minorConfidence =
-            bestMinor.Score / chromaMax / Sum(MinorProfile);
-
+        var majorConfidence = bestMajorScore / chromaMax / Sum(MajorProfile);
+        var minorConfidence = bestMinorScore / chromaMax / Sum(MinorProfile);
         var isMajor = majorConfidence > minorConfidence;
-        var rootIndex = isMajor ? bestMajor.Root : bestMinor.Root;
-        var confidence = Math.Clamp(
+        var rootIndex = isMajor ? bestMajorRoot : bestMinorRoot;
+        var confidence = MathF.Min(
             isMajor ? majorConfidence : minorConfidence,
-            0d,
-            1d);
-        if (!double.IsFinite(confidence))
+            1f);
+
+        if (!float.IsFinite(confidence))
         {
             return Unknown();
         }
 
         var key = $"{KeyNames[rootIndex]} {(isMajor ? "Major" : "Minor")}";
-        return new HarmonicAnalysisResult(key, ToCamelot(rootIndex, isMajor), confidence);
+        return new HarmonicAnalysisResult(
+            key,
+            ToCamelot(rootIndex, isMajor),
+            confidence);
     }
 
     private void AnalyzeFrame(IReadOnlyList<float> samples)
     {
-        var real = new double[FrameSize];
-        var imag = new double[FrameSize];
+        var real = new float[FrameSize];
+        var imag = new float[FrameSize];
 
         for (var index = 0; index < FrameSize; index++)
         {
             var window =
-                0.5d *
-                (1d - Math.Cos(2d * Math.PI * index / (FrameSize - 1d)));
+                0.5f *
+                (1f - MathF.Cos(2f * MathF.PI * index / FrameSize));
             real[index] = samples[index] * window;
         }
 
         Fft(real, imag);
-        var half = FrameSize / 2;
-        for (var bin = 1; bin < half; bin++)
+
+        // Rust fft() returns N/2 magnitudes and detect_key() then takes half
+        // of that vector again. Mirror the current implementation literally.
+        for (var bin = 0; bin < FrameSize / 4; bin++)
         {
-            var frequency = bin * _sampleRate / (double)FrameSize;
-            if (frequency < 40d || frequency > 5_000d)
+            var frequency = bin * _sampleRate / (float)FrameSize;
+            if (frequency < 40f || frequency > 5_000f)
             {
                 continue;
             }
 
-            var magnitude = Math.Sqrt(real[bin] * real[bin] + imag[bin] * imag[bin]);
-            var note = 12d * Math.Log2(frequency / 440d) + 69d;
-            var chromaIndex = ((int)Math.Round(note) % 12 + 12) % 12;
+            var magnitude = MathF.Sqrt(
+                real[bin] * real[bin] +
+                imag[bin] * imag[bin]);
+            var note = (12f * MathF.Log2(frequency / 440f) + 69f) % 12f;
+            var chromaIndex =
+                (int)MathF.Round(note, MidpointRounding.AwayFromZero) % 12;
+            if (chromaIndex < 0)
+            {
+                chromaIndex += 12;
+            }
+
             _chroma[chromaIndex] += magnitude;
         }
 
         _framesAnalyzed++;
     }
 
-    private static void Fft(double[] real, double[] imag)
+    private static void Fft(float[] real, float[] imag)
     {
         var n = real.Length;
         var reversed = 0;
+
         for (var index = 1; index < n; index++)
         {
             var bit = n >> 1;
-            for (; (reversed & bit) != 0; bit >>= 1)
+            while ((reversed & bit) != 0)
             {
                 reversed ^= bit;
+                bit >>= 1;
             }
 
             reversed ^= bit;
             if (index < reversed)
             {
                 (real[index], real[reversed]) = (real[reversed], real[index]);
-                (imag[index], imag[reversed]) = (imag[reversed], imag[index]);
             }
         }
 
-        for (var width = 2; width <= n; width <<= 1)
+        for (var width = 2; ; width *= 2)
         {
-            var half = width >> 1;
-            var angle = -2d * Math.PI / width;
-            var stepReal = Math.Cos(angle);
-            var stepImag = Math.Sin(angle);
+            var half = width / 2;
+            var angleStep = -2f * MathF.PI / width;
+            var stepCos = MathF.Cos(angleStep);
+            var stepSin = MathF.Sin(angleStep);
 
             for (var start = 0; start < n; start += width)
             {
-                var twiddleReal = 1d;
-                var twiddleImag = 0d;
+                var twiddleReal = 1f;
+                var twiddleImag = 0f;
+
                 for (var offset = 0; offset < half; offset++)
                 {
                     var even = start + offset;
                     var odd = even + half;
-                    var oddReal =
-                        twiddleReal * real[odd] -
-                        twiddleImag * imag[odd];
-                    var oddImag =
-                        twiddleReal * imag[odd] +
-                        twiddleImag * real[odd];
+                    var oddReal = real[odd];
+                    var oddImag = imag[odd];
+                    var productReal =
+                        twiddleReal * oddReal -
+                        twiddleImag * oddImag;
+                    var productImag =
+                        twiddleReal * oddImag +
+                        twiddleImag * oddReal;
                     var evenReal = real[even];
                     var evenImag = imag[even];
 
-                    real[even] = evenReal + oddReal;
-                    imag[even] = evenImag + oddImag;
-                    real[odd] = evenReal - oddReal;
-                    imag[odd] = evenImag - oddImag;
+                    real[even] = evenReal + productReal;
+                    imag[even] = evenImag + productImag;
+                    real[odd] = evenReal - productReal;
+                    imag[odd] = evenImag - productImag;
 
                     var nextReal =
-                        twiddleReal * stepReal -
-                        twiddleImag * stepImag;
+                        twiddleReal * stepCos -
+                        twiddleImag * stepSin;
                     twiddleImag =
-                        twiddleReal * stepImag +
-                        twiddleImag * stepReal;
+                        twiddleReal * stepSin +
+                        twiddleImag * stepCos;
                     twiddleReal = nextReal;
                 }
+            }
+
+            if (width == n)
+            {
+                break;
             }
         }
     }
 
-    private static double Sum(double[] values)
+    private static float Sum(float[] values)
     {
-        var sum = 0d;
+        var sum = 0f;
         foreach (var value in values)
         {
             sum += value;
@@ -228,6 +271,7 @@ internal sealed class HarmonicAccumulator
             "8A", "3A", "10A", "5A", "12A", "7A",
             "2A", "9A", "4A", "11A", "6A", "1A",
         ];
+
         return major ? majorKeys[rootIndex] : minorKeys[rootIndex];
     }
 
