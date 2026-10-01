@@ -152,25 +152,112 @@ public sealed class SourceBoundaryMediaCorpusTests
             "recovered tail audible end");
     }
 
+
+    [Theory]
+    [InlineData("flac")]
+    [InlineData("mp3")]
+    [InlineData("aac")]
+    [InlineData("vorbis")]
+    public async Task CompressedCodec_LocalizesSilenceEdges(string codec)
+    {
+        var tolerance = CodecBoundaryTolerance(codec);
+        var boundaries = await AnalyzeFixtureAsync(
+            $"compressed-silence-{codec}",
+            seconds => seconds >= 1.5d && seconds < 10.5d ? 0.62f : 0f,
+            codec);
+
+        AssertSecondsClose(
+            boundaries.AudibleStartSeconds,
+            1.5d,
+            tolerance,
+            $"{codec} audible start");
+        AssertSecondsClose(
+            boundaries.AudibleEndSeconds,
+            10.5d,
+            tolerance,
+            $"{codec} audible end");
+        Assert.Equal(OutroBoundaryKind.HardEnd, boundaries.Outro.Kind);
+    }
+
+    [Theory]
+    [InlineData("flac")]
+    [InlineData("mp3")]
+    [InlineData("aac")]
+    [InlineData("vorbis")]
+    public async Task CompressedCodec_PreservesAuthoredFadeClassification(string codec)
+    {
+        const double fadeStart = 7d;
+        var boundaries = await AnalyzeFixtureAsync(
+            $"compressed-fade-{codec}",
+            seconds =>
+            {
+                if (seconds < fadeStart)
+                {
+                    return 0.62f;
+                }
+
+                var progress = Math.Clamp(
+                    (seconds - fadeStart) / (DurationSeconds - fadeStart),
+                    0d,
+                    1d);
+                return (float)(0.62d * (1d - progress) + 0.05d * progress);
+            },
+            codec);
+
+        Assert.Equal(OutroBoundaryKind.FadeOut, boundaries.Outro.Kind);
+        AssertSecondsClose(
+            boundaries.Outro.StartSeconds,
+            fadeStart,
+            CodecFadeTolerance(codec),
+            $"{codec} authored-fade onset");
+        AssertSecondsClose(
+            boundaries.AudibleEndSeconds,
+            DurationSeconds,
+            CodecBoundaryTolerance(codec),
+            $"{codec} authored-fade audible end");
+    }
+
     private static async Task<TrackBoundaryAnalysis> AnalyzeFixtureAsync(
         string name,
-        Func<double, float> amplitude)
+        Func<double, float> amplitude,
+        string? codec = null)
     {
         var ffmpeg = Environment.GetEnvironmentVariable("SLIPMAT_PARITY_FFMPEG");
         Assert.False(
             string.IsNullOrWhiteSpace(ffmpeg),
             "SLIPMAT_PARITY_FFMPEG must point to the FFmpeg binary for decoder-parity certification.");
 
-        var path = Path.Combine(
+        var sourcePath = Path.Combine(
             Path.GetTempPath(),
             $"slipmat-{name}-{Guid.NewGuid():N}.wav");
+        string? encodedPath = null;
         try
         {
-            WritePcm16MonoWav(path, amplitude);
-            var decoded = await DecodeWithProductionFilterGraphAsync(ffmpeg!, path);
-            Assert.Equal(
-                checked((int)(SampleRate * DurationSeconds * sizeof(float))),
-                decoded.Length);
+            WritePcm16MonoWav(sourcePath, amplitude);
+            var inputPath = sourcePath;
+            if (codec is not null)
+            {
+                encodedPath = Path.ChangeExtension(
+                    sourcePath,
+                    CodecExtension(codec));
+                await EncodeCompressedAsync(
+                    ffmpeg!,
+                    sourcePath,
+                    encodedPath,
+                    codec);
+                inputPath = encodedPath;
+            }
+
+            var decoded = await DecodeWithProductionFilterGraphAsync(ffmpeg!, inputPath);
+            var decodedSeconds = decoded.Length / (double)(SampleRate * sizeof(float));
+            if (codec is null)
+            {
+                Assert.Equal(DurationSeconds, decodedSeconds, 6);
+            }
+            else
+            {
+                Assert.InRange(decodedSeconds, DurationSeconds - 0.5d, DurationSeconds + 0.5d);
+            }
 
             var accumulator = new BoundaryAccumulator(SampleRate, 1);
             var frame = new float[1];
@@ -187,12 +274,90 @@ public sealed class SourceBoundaryMediaCorpusTests
         }
         finally
         {
-            if (File.Exists(path))
+            if (File.Exists(sourcePath))
             {
-                File.Delete(path);
+                File.Delete(sourcePath);
+            }
+
+            if (encodedPath is not null && File.Exists(encodedPath))
+            {
+                File.Delete(encodedPath);
             }
         }
     }
+
+
+    private static async Task EncodeCompressedAsync(
+        string ffmpeg,
+        string sourcePath,
+        string outputPath,
+        string codec)
+    {
+        var codecArguments = codec switch
+        {
+            "flac" => new[] { "-c:a", "flac", "-compression_level", "5" },
+            "mp3" => new[] { "-c:a", "libmp3lame", "-b:a", "192k" },
+            "aac" => new[] { "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart" },
+            "vorbis" => new[] { "-c:a", "libvorbis", "-q:a", "5" },
+            _ => throw new ArgumentOutOfRangeException(nameof(codec), codec, "Unsupported parity codec."),
+        };
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = ffmpeg,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+        foreach (var argument in new[]
+        {
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel", "error",
+            "-y",
+            "-i", sourcePath,
+        })
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        foreach (var argument in codecArguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        startInfo.ArgumentList.Add(outputPath);
+
+        using var process = new Process { StartInfo = startInfo };
+        Assert.True(process.Start(), $"FFmpeg {codec} parity encoder did not start.");
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
+
+        Assert.True(
+            process.ExitCode == 0,
+            $"FFmpeg {codec} parity encode exited {process.ExitCode}: {stdout}\n{stderr}");
+        Assert.True(File.Exists(outputPath), $"FFmpeg {codec} parity output is missing.");
+    }
+
+    private static string CodecExtension(string codec)
+        => codec switch
+        {
+            "flac" => ".flac",
+            "mp3" => ".mp3",
+            "aac" => ".m4a",
+            "vorbis" => ".ogg",
+            _ => throw new ArgumentOutOfRangeException(nameof(codec), codec, "Unsupported parity codec."),
+        };
+
+    private static double CodecBoundaryTolerance(string codec)
+        => codec == "flac" ? BoundaryToleranceSeconds : 0.35d;
+
+    private static double CodecFadeTolerance(string codec)
+        => codec == "flac" ? FadeOnsetToleranceSeconds : 1.0d;
 
     private static async Task<byte[]> DecodeWithProductionFilterGraphAsync(
         string ffmpeg,
