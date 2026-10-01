@@ -129,7 +129,7 @@ internal sealed class HarmonicAccumulator
             return Unknown();
         }
 
-        var key = $"${KeyNames[rootIndex]} ${(isMajor ? "Major" : "Minor")}";
+        var key = $"{KeyNames[rootIndex]} {(isMajor ? "Major" : "Minor")}";
         return new HarmonicAnalysisResult(
             key,
             ToCamelot(rootIndex, isMajor),
