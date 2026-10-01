@@ -6,7 +6,7 @@ The plugin may precompute, cache, batch, synchronize, or enrich information that
 
 ## Compatibility policy
 
-This repository is unreleased and carries no legacy plugin/API compatibility surface.
+This repository carries no legacy plugin/API compatibility surface.
 
 - Supported Jellyfin server: **12.1.0**, the current Jellyfin 12 release targeted by this plugin contract.
 - Plugin package references must match that server release exactly.
@@ -198,7 +198,7 @@ dotnet publish -c Release -o ./dist/publish
 
 Mount/copy the resulting plugin files into a dedicated Audio Gateway subdirectory under Jellyfin's plugin directory and restart Jellyfin. The analyzer service and artifact store are optional modules; configure them only when server-side precomputation is desired.
 
-This standalone companion repository is licensed under GNU GPL v3. Public plugin distribution is approved in `distribution-policy.json`; releases remain explicit, versioned actions and must pass the repository's build, test, metadata, packaging, and manifest checks.
+This standalone companion repository is licensed under GNU GPL v3. Public plugin distribution is approved in `distribution-policy.json`. CI runs automatically on pull requests and pushes; a successful `main` build automatically publishes a new plugin version when that reviewed four-part version has not already been released.
 
 A host installation defaults to `http://localhost:8765` for the optional analyzer. Container deployments can set `SLIPMAT_ANALYZER_URL`; the repository Compose stack sets it to `http://audio-analyzer:8765` so Jellyfin reaches the analyzer through service discovery rather than its own loopback interface.
 
@@ -235,7 +235,9 @@ This is the standalone Slipmat companion repository. Slipmat remains authoritati
 - `distribution-policy.json` records the owner-approved GPL-3.0-only public-distribution policy.
 - `scripts/package_plugin.py` creates the deterministic plugin ZIP.
 - `scripts/generate_manifest.py` emits the Jellyfin repository JSON containing the release URL and package checksum.
-- `.github/workflows/ci.yml` validates metadata, builds, tests, packages, and exercises manifest generation.
-- `.github/workflows/release.yml` performs an explicit versioned GitHub Release and publishes the resulting repository manifest through GitHub Pages.
+- `.github/workflows/ci.yml` validates metadata, builds, tests, packages, exercises manifest generation, and uploads the exact tested release candidate for successful `main` pushes.
+- `.github/workflows/release.yml` runs only after successful `main` CI, consumes that exact tested artifact, creates a GitHub Release for an unreleased version, and publishes the Jellyfin repository manifest through GitHub Pages.
+
+To publish a new version, update the same four-part version in `build.yaml` and `Directory.Build.props`, update the quoted `changelog` in `build.yaml`, and merge to `main`. CI and release publication then proceed automatically. Commits that keep an already-published version still run CI but do not create or replace a release. The Pages manifest preserves previously published versions for Jellyfin compatibility selection.
 
 The generated Pages artifact contains `manifest.json`. GitHub Pages is a distribution surface only; Slipmat must continue to work with stock Jellyfin when this companion is absent or unavailable.

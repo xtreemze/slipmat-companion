@@ -14,5 +14,4 @@ category: "General"
 owner: "xtreemze"
 artifacts:
 - "Jellyfin.Plugin.AudioGateway.dll"
-changelog: >
-  Initial standalone companion repository preparation.
+changelog: "Initial standalone Slipmat companion release."
