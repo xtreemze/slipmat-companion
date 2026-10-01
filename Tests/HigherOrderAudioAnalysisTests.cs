@@ -1,9 +1,8 @@
 using System;
 using System.Buffers.Binary;
-using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using Jellyfin.Plugin.AudioGateway.Models;
+using Jellyfin.Plugin.AudioGateway.Services;
 using Jellyfin.Plugin.AudioGateway.Services.Analysis;
 using Xunit;
 
@@ -36,6 +35,22 @@ public class HigherOrderAudioAnalysisTests
         Assert.True(result.Beats.Count > 60);
         Assert.True(result.Downbeats.Count > 12);
         Assert.Equal((byte)4, result.BeatsPerBar);
+    }
+
+    [Fact]
+    public void RhythmGridAnalyzer_RestrictsGridToCanonicalAudibleBoundaries()
+    {
+        const int fps = 20;
+        var frames = Enumerable.Repeat(default(RhythmEnergyFrame), 40 * fps).ToArray();
+        for (var frame = 4; frame < frames.Length; frame += 10)
+        {
+            frames[frame] = new RhythmEnergyFrame(0.8f, 0.7f, 0.5f, 0.4f, 0.3f);
+        }
+
+        var result = RhythmGridAnalyzer.Analyze(frames, fps, 40d, 5d, 35d);
+
+        Assert.NotNull(result.Bpm);
+        Assert.All(result.Beats, value => Assert.InRange(value, 5d, 35d));
     }
 
     [Fact]
@@ -76,61 +91,144 @@ public class HigherOrderAudioAnalysisTests
     }
 
     [Fact]
-    public void SpectralArtifact_UsesCanonicalFiveBandSlwsV2Header()
+    public void SpectralArtifact_PreservesSourceRateAndStereoLanes()
     {
-        const int sampleRate = 48_000;
-        var spectral = new SpectralAccumulator(sampleRate);
+        const int sampleRate = 44_100;
+        var spectral = new SpectralAccumulator(sampleRate, 2);
         for (var index = 0; index < sampleRate * 2; index++)
         {
-            spectral.Push((float)(0.7d * Math.Sin(2d * Math.PI * 1_000d * index / sampleRate)));
+            var left = (float)(0.7d * Math.Sin(
+                2d * Math.PI * 1_000d * index / sampleRate));
+            var right = (float)(0.7d * Math.Sin(
+                2d * Math.PI * 60d * index / sampleRate));
+            spectral.PushFrame([left, right]);
         }
 
-        var emptyRhythm = new RhythmAnalysisResult(
+        var emptyRhythm = EmptyRhythm();
+        var bytes = SpectralArtifactEncoder.EncodeTiers(
+            spectral.Complete(),
             null,
-            0d,
-            Array.Empty<double>(),
-            Array.Empty<double>(),
-            null);
-        var tiers = SpectralArtifactEncoder.EncodeTiers(spectral.Complete(), emptyRhythm);
-        var bytes = tiers[100];
+            emptyRhythm)[100];
 
         Assert.Equal("SLWS", Encoding.ASCII.GetString(bytes, 0, 4));
         Assert.Equal((ushort)2, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(4, 2)));
         Assert.Equal((ushort)52, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(6, 2)));
         Assert.Equal((uint)sampleRate, BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(8, 4)));
         Assert.Equal(100u, BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(12, 4)));
-        Assert.Equal((byte)1, bytes[20]);
+        Assert.Equal((byte)2, bytes[20]);
         Assert.Equal((byte)5, bytes[23]);
-        Assert.Equal(80u, BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(24, 4)));
-        Assert.Equal(250u, BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(28, 4)));
-        Assert.Equal(2_000u, BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(32, 4)));
-        Assert.Equal(8_000u, BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(36, 4)));
 
         var payload = bytes.AsSpan(52);
-        byte maxSub = 0, maxBass = 0, maxMid = 0, maxPresence = 0, maxAir = 0;
-        for (var offset = 0; offset + 5 < payload.Length; offset += 6)
+        byte leftMid = 0;
+        byte leftSub = 0;
+        byte rightSub = 0;
+        byte rightMid = 0;
+        for (var offset = 0; offset + 11 < payload.Length; offset += 12)
         {
-            maxSub = Math.Max(maxSub, payload[offset + 1]);
-            maxBass = Math.Max(maxBass, payload[offset + 2]);
-            maxMid = Math.Max(maxMid, payload[offset + 3]);
-            maxPresence = Math.Max(maxPresence, payload[offset + 4]);
-            maxAir = Math.Max(maxAir, payload[offset + 5]);
+            leftSub = Math.Max(leftSub, payload[offset + 1]);
+            leftMid = Math.Max(leftMid, payload[offset + 3]);
+            rightSub = Math.Max(rightSub, payload[offset + 7]);
+            rightMid = Math.Max(rightMid, payload[offset + 9]);
         }
 
-        Assert.True(maxMid > maxSub);
-        Assert.True(maxMid > maxBass);
-        Assert.True(maxMid > maxPresence);
-        Assert.True(maxMid > maxAir);
+        Assert.True(leftMid > leftSub);
+        Assert.True(rightSub > rightMid);
     }
 
     [Fact]
-    public void SpectralArtifact_EmbedsCanonicalRhythmExtension()
+    public void BoundaryClassifier_DetectsCanonicalAuthoredFade()
     {
-        var waveform = new SpectralWaveformData(
-            100,
-            10,
-            1_000,
-            Enumerable.Repeat(default(SpectralPeakFrame), 100).ToArray());
+        const double duration = 240d;
+        var values = Enumerable.Repeat(0.6f, BoundaryAccumulator.EnvelopeBins).ToArray();
+        var fadeBins = (int)Math.Round(
+            20d / duration * BoundaryAccumulator.EnvelopeBins,
+            MidpointRounding.AwayFromZero);
+        var start = values.Length - fadeBins;
+        for (var offset = 0; offset < fadeBins; offset++)
+        {
+            var fraction = offset / (float)(fadeBins - 1);
+            values[start + offset] = 0.6f * (1f - fraction) + 0.04f * fraction;
+        }
+
+        var result = BoundaryClassifier.Derive(
+            duration,
+            values,
+            [values.ToArray(), values.ToArray(), values.ToArray(), values.ToArray()]);
+
+        Assert.NotNull(result);
+        Assert.Equal(OutroBoundaryKind.FadeOut, result!.Outro.Kind);
+        Assert.True(result.Outro.Confidence >= 0.9f);
+        Assert.InRange(result.Outro.StartSeconds, 218d, 222d);
+    }
+
+    [Fact]
+    public void BoundaryClassifier_DoesNotMislabelAbruptLevelStepAsFade()
+    {
+        var values = Enumerable.Repeat(0.6f, BoundaryAccumulator.EnvelopeBins).ToArray();
+        Array.Fill(values, 0.06f, values.Length - 150, 150);
+
+        var result = BoundaryClassifier.Derive(
+            240d,
+            values,
+            [values.ToArray(), values.ToArray(), values.ToArray(), values.ToArray()]);
+
+        Assert.NotNull(result);
+        Assert.NotEqual(OutroBoundaryKind.FadeOut, result!.Outro.Kind);
+    }
+
+    [Fact]
+    public void BoundaryClassifier_FullLevelMediaEndIsHardEnd()
+    {
+        var values = Enumerable.Repeat(0.5f, BoundaryAccumulator.EnvelopeBins).ToArray();
+
+        var result = BoundaryClassifier.Derive(240d, values);
+
+        Assert.NotNull(result);
+        Assert.Equal(OutroBoundaryKind.HardEnd, result!.Outro.Kind);
+    }
+
+    [Fact]
+    public void BoundaryClassifier_LeadingAndTrailingSilenceDefineAudibleRange()
+    {
+        var values = Enumerable.Repeat(0.001f, BoundaryAccumulator.EnvelopeBins).ToArray();
+        Array.Fill(values, 0.5f, 75, values.Length - 150);
+
+        var result = BoundaryClassifier.Derive(240d, values);
+
+        Assert.NotNull(result);
+        Assert.True(result!.AudibleStartSeconds > 9d);
+        Assert.True(result.AudibleEndSeconds < 231d);
+        Assert.Equal(IntroBoundaryKind.GradualEntry, result.Intro.Kind);
+        Assert.Equal(OutroBoundaryKind.HardEnd, result.Outro.Kind);
+    }
+
+    [Fact]
+    public void SlwsParityFixture_MatchesCanonicalRustSbndSrhyContainer()
+    {
+        var frames = Enumerable.Repeat(
+            new SpectralPeakFrame(default, default),
+            1_000).ToArray();
+        var detailed = new SpectralWaveformData(
+            SampleRate: 100,
+            FramesPerSecond: 100,
+            ChannelCount: 1,
+            SourceFrameCount: 1_000,
+            Frames: frames);
+        var boundaries = new TrackBoundaryAnalysis(
+            AudibleStartSeconds: 0.5d,
+            AudibleEndSeconds: 9.5d,
+            Intro: new IntroBoundary(
+                IntroBoundaryKind.FadeIn,
+                0.5d,
+                2d,
+                0.82f),
+            Outro: new OutroBoundary(
+                OutroBoundaryKind.FadeOut,
+                7d,
+                9.5d,
+                0.91f),
+            QuickFade: null,
+            NoiseFloorRms: 0.01f);
         var rhythm = new RhythmAnalysisResult(
             120d,
             0.9d,
@@ -139,19 +237,25 @@ public class HigherOrderAudioAnalysisTests
             4);
 
         var bytes = SpectralArtifactEncoder.EncodeTiers(
-            new SpectralWaveformData(
-                100,
-                100,
-                1_000,
-                Enumerable.Repeat(default(SpectralPeakFrame), 1_000).ToArray()),
+            detailed,
+            boundaries,
             rhythm)[10];
 
-        var headerLength = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(6, 2));
-        Assert.True(headerLength > 52);
-        Assert.Equal("SRHY", Encoding.ASCII.GetString(bytes, 52, 4));
-        Assert.Equal((ushort)1, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(56, 2)));
-        Assert.Equal(120f, BitConverter.Int32BitsToSingle(
-            BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(64, 4))));
+        Assert.Equal(884, bytes.Length);
+        Assert.Equal((ushort)284, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(6, 2)));
+        Assert.Equal("SBND", Encoding.ASCII.GetString(bytes, 52, 4));
+        Assert.Equal((ushort)2, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(56, 2)));
+        Assert.Equal((ushort)6, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(62, 2)));
+        Assert.Equal("SRHY", Encoding.ASCII.GetString(bytes, 156, 4));
+        Assert.Equal(0xAD98_B5E9u, SpectralArtifactEncoder.Crc32(bytes));
+    }
+
+    [Fact]
+    public void ExactSourceProjections_AreExplicitAndBounded()
+    {
+        Assert.Equal(0.25f, HigherOrderAudioAnalysisBuilder.MonoProjection([0.5f, 0f]));
+        Assert.Equal(-0.8f, IntegratedAudioAnalyzer.AmplitudeProjection([0.2f, -0.8f]));
+        Assert.Equal(0.5f, IntegratedAudioAnalyzer.AmplitudeProjection([0.5f, float.NaN]));
     }
 
     [Fact]
@@ -187,4 +291,12 @@ public class HigherOrderAudioAnalysisTests
             0xCBF4_3926u,
             SpectralArtifactEncoder.Crc32(Encoding.ASCII.GetBytes("123456789")));
     }
+
+    private static RhythmAnalysisResult EmptyRhythm()
+        => new(
+            null,
+            0d,
+            Array.Empty<double>(),
+            Array.Empty<double>(),
+            null);
 }

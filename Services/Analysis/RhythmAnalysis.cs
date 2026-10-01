@@ -180,10 +180,10 @@ internal static class RhythmGridAnalyzer
             return Empty();
         }
 
-        var minLag = Math.Max(2, (int)Math.Round(framesPerSecond * 60d / MaxBpm));
+        var minLag = Math.Max(2, (int)Math.Round(framesPerSecond * 60d / MaxBpm, MidpointRounding.AwayFromZero));
         var maxLag = Math.Min(
             frames.Count - 2,
-            Math.Max(minLag + 1, (int)Math.Round(framesPerSecond * 60d / MinBpm)));
+            Math.Max(minLag + 1, (int)Math.Round(framesPerSecond * 60d / MinBpm, MidpointRounding.AwayFromZero)));
         if (minLag >= maxLag)
         {
             return Empty();
@@ -325,7 +325,7 @@ internal static class RhythmGridAnalyzer
 
     private static bool IsNearMultiple(int value, int factor)
     {
-        var nearest = (int)Math.Round(value / (double)factor) * factor;
+        var nearest = (int)Math.Round(value / (double)factor, MidpointRounding.AwayFromZero) * factor;
         return Math.Abs(nearest - value) <= 1;
     }
 
@@ -393,7 +393,7 @@ internal static class RhythmGridAnalyzer
         var supported = 0;
         foreach (var seconds in beats)
         {
-            var center = (int)Math.Round(seconds * framesPerSecond);
+            var center = (int)Math.Round(seconds * framesPerSecond, MidpointRounding.AwayFromZero);
             var found = false;
             for (var offset = -1; offset <= 1; offset++)
             {
@@ -434,7 +434,7 @@ internal static class RhythmGridAnalyzer
 
         for (var beatIndex = 0; beatIndex < beats.Count; beatIndex++)
         {
-            var frame = (int)Math.Round(beats[beatIndex] * framesPerSecond);
+            var frame = (int)Math.Round(beats[beatIndex] * framesPerSecond, MidpointRounding.AwayFromZero);
             var value = frame >= 0 && frame < lowOnset.Count ? lowOnset[frame] : 0d;
             var phase = beatIndex % 4;
             phaseScores[phase] += value;

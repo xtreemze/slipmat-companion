@@ -16,7 +16,7 @@ No separate artifact-store mount or analyzer service is required for the plugin'
 
 The dashboard's **Artifact store override** is advanced configuration only. Existing deployments with a real `/store` mount remain compatible, and `SLIPMAT_ARTIFACT_STORE_ROOT` can override the managed path.
 
-Audio analysis is integrated into the plugin and uses the FFmpeg binary already managed by Jellyfin. No second analyzer service, URL, container, or media mount is required. Missing artifacts are queued asynchronously from normal companion requests and Jellyfin library changes; the dashboard also exposes a daily **Slipmat audio analysis** scheduled task for idempotent backfill. The integrated analyzer writes amplitude envelopes, SLWS v2 five-band spectral tiers with conservative rhythm evidence, and `AnalysisBlocks` containing timing, harmonic, EBU R128 loudness/true-peak/LRA, and an energy curve. Unsupported/weak evidence fails closed while Slipmat retains its local fallback.
+Audio analysis is integrated into the plugin and uses the FFmpeg binary already managed by Jellyfin. No second analyzer service, URL, container, or media mount is required. Missing artifacts are queued asynchronously from normal companion requests and Jellyfin library changes; the dashboard also exposes a daily **Slipmat audio analysis** scheduled task for idempotent backfill. The integrated analyzer preserves the source-declared sample rate and the first one or two source channels, matching Slipmat's canonical Rust accumulator topology. It writes amplitude envelopes, SLWS v2 five-band spectral tiers, canonical v6 `SBND` source-boundary evidence, conservative `SRHY` rhythm evidence, and `AnalysisBlocks` containing timing, harmonic, EBU R128 loudness/true-peak/LRA, and an energy curve. Multichannel sources select their first two lanes rather than downmixing. Missing source stream metadata or weak evidence fails closed while Slipmat retains its local fallback.
 
 ## Compatibility policy
 
@@ -110,7 +110,7 @@ V2 sidecars carry the subject/store schema versions, the derived subject key, co
 
 Because Slipmat is unreleased, the former raw-`itemId` artifact layout is regenerated rather than dual-written or retained behind an indefinite compatibility shim.
 
-Integrated analysis observes Jellyfin audio additions/updates through a bounded single-worker queue, and the scheduled backfill reconciles existing local audio without blocking playback. One Jellyfin-FFmpeg source decode feeds amplitude envelopes, five-band SLWS v2 spectral tiers, conservative beat/downbeat inference, harmonic key/Camelot analysis, a bounded energy curve, and EBU R128 loudness/true-peak/LRA measurement. Host-neutral subject identity remains canonical. Pairwise transition selection, playback policy, and client fallback remain Slipmat-owned.
+Integrated analysis observes Jellyfin audio additions/updates through a bounded single-worker queue, and the scheduled backfill reconciles existing local audio without blocking playback. One Jellyfin-FFmpeg source decode feeds exact-source-rate amplitude/spectral/source-boundary/rhythm analysis plus harmonic key/Camelot, a bounded energy curve, and EBU R128 loudness/true-peak/LRA measurement. `SBND` v6 is derived from the same 20 Hz four-band/RMS envelope contract and is embedded ahead of `SRHY` exactly as the client parser expects. Host-neutral subject identity remains canonical. Pairwise transition selection, playback policy, and client fallback remain Slipmat-owned.
 
 ## Podcast Index directory search
 

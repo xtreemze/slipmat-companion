@@ -51,6 +51,25 @@ public class AmplitudeEnvelopeBuilderTests
     }
 
     [Fact]
+    public void NonDivisibleSourceRate_UsesIntegerBucketBoundaries()
+    {
+        var builder = new AmplitudeEnvelopeBuilder(22_050);
+        for (var index = 0; index < 22_050; index++)
+        {
+            builder.Push(index == 22_049 ? 1f : 0f);
+        }
+
+        var tiers = builder.Complete();
+
+        Assert.Single(tiers[1]);
+        Assert.Equal(10, tiers[10].Length);
+        Assert.Equal(100, tiers[100].Length);
+        Assert.Equal(byte.MaxValue, tiers[1][0]);
+        Assert.Equal(byte.MaxValue, tiers[10][^1]);
+        Assert.Equal(byte.MaxValue, tiers[100][^1]);
+    }
+
+    [Fact]
     public void NonFiniteSamples_FailClosedToSilence()
     {
         var builder = new AmplitudeEnvelopeBuilder(100);
