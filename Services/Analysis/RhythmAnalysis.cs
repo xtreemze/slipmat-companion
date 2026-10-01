@@ -249,8 +249,8 @@ internal static class RhythmGridAnalyzer
     private static double PositiveLogDelta(float current, float previous)
         => Math.Max(
             0d,
-            Math.Log1p(Math.Max(0d, current) * 1_000d) -
-            Math.Log1p(Math.Max(0d, previous) * 1_000d));
+            Math.Log(1d + Math.Max(0d, current) * 1_000d) -
+            Math.Log(1d + Math.Max(0d, previous) * 1_000d));
 
     private static double NormalizedAutocorrelation(IReadOnlyList<double> values, int lag)
     {

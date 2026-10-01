@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Jellyfin.Plugin.AudioGateway.Models;
 
 namespace Jellyfin.Plugin.AudioGateway.Services.Analysis;
