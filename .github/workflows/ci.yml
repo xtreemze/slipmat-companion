@@ -55,7 +55,18 @@ jobs:
       - name: Build
         run: dotnet build Jellyfin.Plugin.AudioGateway.slnx --configuration Release --no-restore
 
+      - name: Resolve FFmpeg parity decoder
+        id: ffmpeg
+        shell: bash
+        run: |
+          path="$(command -v ffmpeg)"
+          test -n "$path"
+          "$path" -version
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+
       - name: Test
+        env:
+          SLIPMAT_PARITY_FFMPEG: ${{ steps.ffmpeg.outputs.path }}
         run: dotnet test Tests/Jellyfin.Plugin.AudioGateway.Tests.csproj --configuration Release --no-build --no-restore --logger "console;verbosity=minimal"
 
       - name: Package and exercise manifest tooling
