@@ -1,134 +1,141 @@
-name: Release plugin and Pages manifest
+name: Automatic release and Pages manifest
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: Four-part Jellyfin plugin version, for example 0.1.0.0
-        required: true
-        type: string
-      changelog:
-        description: Release notes written into the Jellyfin repository manifest
-        required: true
-        type: string
+  workflow_run:
+    workflows: ["Companion CI"]
+    types: [completed]
 
 permissions:
+  actions: read
   contents: write
   pages: write
   id-token: write
 
-env:
-  DOTNET_SDK_VERSION: "10.0.401"
+concurrency:
+  group: companion-release
+  cancel-in-progress: false
 
 jobs:
   release:
-    name: Build, publish release, and prepare Pages
+    name: Publish tested companion version
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    environment: plugin-release
+    timeout-minutes: 15
     outputs:
-      version: ${{ steps.version.outputs.version }}
+      published: ${{ steps.state.outputs.publish }}
     steps:
-      - name: Checkout
+      - name: Checkout tested commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.2.2
-
-      - name: Set up .NET SDK
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
-          dotnet-version: "10.0.401"
+          ref: ${{ github.event.workflow_run.head_sha }}
 
-      - name: Validate requested version
-        id: version
+      - name: Read reviewed release metadata
+        id: metadata
         shell: bash
-        env:
-          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
-          if [[ ! "$REQUESTED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "version must use four-part Jellyfin form" >&2
-            exit 1
-          fi
-          printf 'version=%s\n' "$REQUESTED_VERSION" >> "$GITHUB_OUTPUT"
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import pathlib
+          import re
 
-      - name: Verify release policy and reviewed metadata
+          text = pathlib.Path("build.yaml").read_text(encoding="utf-8")
+          match = re.search(r'^version:\s*"([^"]+)"\s*$', text, re.MULTILINE)
+          if match is None:
+              raise SystemExit("build.yaml: quoted version field not found")
+          print(f"version={match.group(1)}")
+          PY
+
+      - name: Verify distribution and metadata
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ steps.metadata.outputs.version }}
         run: |
-          test "$(dotnet --version)" = "$DOTNET_SDK_VERSION"
           python3 scripts/verify_distribution_policy.py --require-approved
           python3 scripts/verify_release_metadata.py --expected-version "$VERSION"
 
-      - name: Restore and test
-        run: |
-          dotnet restore Jellyfin.Plugin.AudioGateway.slnx
-          dotnet build Jellyfin.Plugin.AudioGateway.slnx --configuration Release --no-restore
-          dotnet test Tests/Jellyfin.Plugin.AudioGateway.Tests.csproj \
-            --configuration Release \
-            --no-build \
-            --no-restore \
-            --logger "console;verbosity=minimal"
-
-      - name: Publish and package
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          mkdir -p dist/publish site
-          dotnet publish Jellyfin.Plugin.AudioGateway.csproj \
-            --configuration Release \
-            --no-restore \
-            --output dist/publish \
-            -p:Version="$VERSION" \
-            -p:AssemblyVersion="$VERSION" \
-            -p:FileVersion="$VERSION"
-          python3 scripts/package_plugin.py \
-            --input dist/publish/Jellyfin.Plugin.AudioGateway.dll \
-            --output "dist/AudioGateway_$VERSION.zip" \
-            --version "$VERSION"
-
-      - name: Write changelog
-        env:
-          RELEASE_NOTES: ${{ inputs.changelog }}
-        run: printf '%s\n' "$RELEASE_NOTES" > dist/changelog.md
-
-      - name: Create or update GitHub Release
+      - name: Check whether version is already released
+        id: state
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ steps.metadata.outputs.version }}
         run: |
           if gh release view "v$VERSION" >/dev/null 2>&1; then
-            gh release upload "v$VERSION" "dist/AudioGateway_$VERSION.zip" --clobber
-            gh release edit "v$VERSION" \
-              --title "Audio Gateway $VERSION" \
-              --notes-file dist/changelog.md
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "Audio Gateway $VERSION is already released; nothing to publish."
           else
-            gh release create "v$VERSION" "dist/AudioGateway_$VERSION.zip" \
-              --title "Audio Gateway $VERSION" \
-              --notes-file dist/changelog.md
+            echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Generate Jellyfin repository manifest
+      - name: Download tested release candidate
+        if: steps.state.outputs.publish == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: companion-release-candidate-${{ steps.metadata.outputs.version }}
+          path: candidate
+          run-id: ${{ github.event.workflow_run.id }}
+          repository: ${{ github.repository }}
+          github-token: ${{ github.token }}
+
+      - name: Prepare Pages manifest
+        if: steps.state.outputs.publish == 'true'
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.metadata.outputs.version }}
+        shell: bash
         run: |
+          set -euo pipefail
+          ZIP="candidate/AudioGateway_$VERSION.zip"
+          CHANGELOG="candidate/changelog.md"
+          test -f "$ZIP"
+          test -s "$CHANGELOG"
+
+          mkdir -p site
           cp pages/index.html site/index.html
+
+          PREVIOUS_ARGS=()
+          if [ "$(gh release list --limit 1 --json tagName --jq 'length')" -gt 0 ]; then
+            REPOSITORY_NAME="${GITHUB_REPOSITORY#*/}"
+            PAGES_MANIFEST="https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPOSITORY_NAME}/manifest.json"
+            curl --fail --silent --show-error --location "$PAGES_MANIFEST" \
+              --output site/previous-manifest.json
+            PREVIOUS_ARGS=(--previous-manifest site/previous-manifest.json)
+          fi
+
           TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           SOURCE_URL="https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/AudioGateway_$VERSION.zip"
           python3 scripts/generate_manifest.py \
-            --zip "dist/AudioGateway_$VERSION.zip" \
+            --zip "$ZIP" \
             --version "$VERSION" \
             --source-url "$SOURCE_URL" \
             --timestamp "$TIMESTAMP" \
-            --changelog-file dist/changelog.md \
-            --output site/manifest.json
+            --changelog-file "$CHANGELOG" \
+            --output site/manifest.json \
+            "${PREVIOUS_ARGS[@]}"
           python3 -m json.tool site/manifest.json >/dev/null
 
       - name: Upload Pages artifact
+        if: steps.state.outputs.publish == 'true'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: site
 
+      - name: Create GitHub Release
+        if: steps.state.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.metadata.outputs.version }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          gh release create "v$VERSION" "candidate/AudioGateway_$VERSION.zip" \
+            --target "$SOURCE_SHA" \
+            --title "Audio Gateway $VERSION" \
+            --notes-file candidate/changelog.md
+
   deploy:
-    name: Deploy manifest to GitHub Pages
+    name: Deploy Jellyfin repository manifest
     needs: release
+    if: needs.release.outputs.published == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

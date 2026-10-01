@@ -51,7 +51,7 @@ def main() -> int:
     build = yaml_fields(ROOT / "build.yaml")
     project = ROOT / "Jellyfin.Plugin.AudioGateway.csproj"
 
-    for key in ("name", "guid", "version", "targetAbi", "framework", "owner"):
+    for key in ("name", "guid", "version", "targetAbi", "framework", "owner", "changelog"):
         if not build.get(key):
             errors.append(f"build.yaml missing {key}")
 
