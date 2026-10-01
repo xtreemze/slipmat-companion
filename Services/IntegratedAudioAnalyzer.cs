@@ -3,10 +3,12 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.AudioGateway.Configuration;
 using Jellyfin.Plugin.AudioGateway.Models;
 using Jellyfin.Plugin.AudioGateway.Services.Analysis;
@@ -31,17 +33,16 @@ public sealed record IntegratedAnalysisResult(
 
 /// <summary>
 /// Self-contained companion analyzer. Jellyfin's managed FFmpeg decodes the
-/// source exactly once. The resulting PCM stream feeds amplitude, spectral,
-/// rhythm, harmonic, and structure analyzers while a split FFmpeg filter branch
-/// measures EBU R128 loudness/true-peak/LRA.
+/// source once. The PCM analysis branch retains the source-declared sample rate
+/// and the first one or two source channels, matching Slipmat's canonical Rust
+/// accumulators. Multichannel sources select c0/c1 rather than downmixing.
 ///
-/// All artifacts are host-neutral and the sidecar is written last as the
-/// readiness gate. Playback remains independent of analysis success.
+/// The sidecar is written last as the readiness gate. Missing source stream
+/// metadata or analysis failure remains ordinary client fallback.
 /// </summary>
 public sealed class IntegratedAudioAnalyzer
 {
     public const string AmplitudeVariant = "awf_v1_native_mono_b8";
-    public const int DecodeSampleRate = 48_000;
 
     private static readonly JsonSerializerOptions SidecarJsonOptions =
         new(JsonSerializerDefaults.Web)
@@ -109,6 +110,14 @@ public sealed class IntegratedAudioAnalyzer
                 "Jellyfin FFmpeg or loudnorm support is unavailable.");
         }
 
+        var sourceFormat = ResolveSourceFormat(audio);
+        if (sourceFormat is null)
+        {
+            return new IntegratedAnalysisResult(
+                IntegratedAnalysisStatus.Unsupported,
+                "Jellyfin source audio metadata does not declare a valid sample rate/channel count.");
+        }
+
         var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
         var storeRoot = RuntimeSettings.ResolveStoreRoot(config);
         var subject = _subjectFactory.ForItem(audio.Id);
@@ -132,7 +141,10 @@ public sealed class IntegratedAudioAnalyzer
 
         try
         {
-            var decoded = await DecodeAndAnalyzeAsync(audio, cancellationToken).ConfigureAwait(false);
+            var decoded = await DecodeAndAnalyzeAsync(
+                audio,
+                sourceFormat,
+                cancellationToken).ConfigureAwait(false);
             if (decoded.Amplitude.SampleCount == 0)
             {
                 return new IntegratedAnalysisResult(
@@ -192,10 +204,12 @@ public sealed class IntegratedAudioAnalyzer
             await AtomicWriteAsync(sidecarPath, sidecarBytes, cancellationToken).ConfigureAwait(false);
 
             _logger.LogInformation(
-                "Generated integrated full-track analysis for Jellyfin item {ItemId} ({DurationMs} ms, {SpectralTierCount} spectral tiers)",
+                "Generated exact-source companion analysis for Jellyfin item {ItemId} ({SampleRate} Hz, {SourceChannels} source channels, {AnalysisChannels} analysis lanes, {DurationMs} ms)",
                 audio.Id,
-                decoded.Amplitude.DurationMs,
-                spectralRefs.Count);
+                sourceFormat.SampleRate,
+                sourceFormat.SourceChannels,
+                sourceFormat.AnalysisChannels,
+                decoded.Amplitude.DurationMs);
             return new IntegratedAnalysisResult(IntegratedAnalysisStatus.Generated);
         }
         catch (OperationCanceledException)
@@ -217,8 +231,16 @@ public sealed class IntegratedAudioAnalyzer
 
     private async Task<DecodedAnalysis> DecodeAndAnalyzeAsync(
         Audio audio,
+        SourceAudioFormat sourceFormat,
         CancellationToken cancellationToken)
     {
+        var projection = sourceFormat.SourceChannels switch
+        {
+            1 => "aformat=sample_fmts=flt:channel_layouts=mono",
+            2 => "aformat=sample_fmts=flt:channel_layouts=stereo",
+            _ => "pan=stereo|c0=c0|c1=c1,aformat=sample_fmts=flt:channel_layouts=stereo",
+        };
+
         var startInfo = new ProcessStartInfo
         {
             FileName = _mediaEncoder.EncoderPath,
@@ -235,15 +257,16 @@ public sealed class IntegratedAudioAnalyzer
             "-loglevel", "info",
             "-i", audio.Path,
             "-filter_complex",
-            $"[0:a:0]asplit=2[loud][pcm];" +
+            $"[0:a:0]asplit=2[loud][analysis];" +
             $"[loud]loudnorm=print_format=json[loudout];" +
             $"[loudout]anullsink;" +
-            $"[pcm]aresample={DecodeSampleRate}," +
-            "aformat=sample_fmts=flt:channel_layouts=mono[pcmout]",
+            $"[analysis]{projection}[pcmout]",
             "-map", "[pcmout]",
             "-vn",
             "-sn",
             "-dn",
+            "-ar", sourceFormat.SampleRate.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            "-ac", sourceFormat.AnalysisChannels.ToString(System.Globalization.CultureInfo.InvariantCulture),
             "-f", "f32le",
             "-acodec", "pcm_f32le",
             "pipe:1",
@@ -286,10 +309,14 @@ public sealed class IntegratedAudioAnalyzer
             process);
 
         var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        var amplitude = new AmplitudeEnvelopeBuilder(DecodeSampleRate);
-        var higherOrder = new HigherOrderAudioAnalysisBuilder(DecodeSampleRate);
+        var amplitude = new AmplitudeEnvelopeBuilder(sourceFormat.SampleRate);
+        var higherOrder = new HigherOrderAudioAnalysisBuilder(
+            sourceFormat.SampleRate,
+            sourceFormat.AnalysisChannels);
         var stream = process.StandardOutput.BaseStream;
-        var buffer = new byte[64 * 1024 + sizeof(float)];
+        var frameBytes = sizeof(float) * sourceFormat.AnalysisChannels;
+        var buffer = new byte[64 * 1024 + frameBytes - 1];
+        var frame = new float[sourceFormat.AnalysisChannels];
         var carry = 0;
 
         while (true)
@@ -304,14 +331,19 @@ public sealed class IntegratedAudioAnalyzer
             }
 
             var total = carry + read;
-            var usable = total - (total % sizeof(float));
-            for (var offset = 0; offset < usable; offset += sizeof(float))
+            var usable = total - (total % frameBytes);
+            for (var offset = 0; offset < usable; offset += frameBytes)
             {
-                var bits = BinaryPrimitives.ReadInt32LittleEndian(
-                    buffer.AsSpan(offset, sizeof(float)));
-                var sample = BitConverter.Int32BitsToSingle(bits);
-                amplitude.Push(sample);
-                higherOrder.Push(sample);
+                for (var lane = 0; lane < sourceFormat.AnalysisChannels; lane++)
+                {
+                    var sampleOffset = offset + lane * sizeof(float);
+                    var bits = BinaryPrimitives.ReadInt32LittleEndian(
+                        buffer.AsSpan(sampleOffset, sizeof(float)));
+                    frame[lane] = BitConverter.Int32BitsToSingle(bits);
+                }
+
+                amplitude.Push(AmplitudeProjection(frame));
+                higherOrder.PushFrame(frame);
             }
 
             carry = total - usable;
@@ -323,7 +355,7 @@ public sealed class IntegratedAudioAnalyzer
 
         if (carry != 0)
         {
-            throw new InvalidDataException("FFmpeg returned a truncated float PCM sample.");
+            throw new InvalidDataException("FFmpeg returned a truncated interleaved PCM frame.");
         }
 
         await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
@@ -344,6 +376,46 @@ public sealed class IntegratedAudioAnalyzer
         return new DecodedAnalysis(
             amplitude,
             higherOrder.Complete(loudness));
+    }
+
+    internal static SourceAudioFormat? ResolveSourceFormat(Audio audio)
+    {
+        var stream = audio.GetMediaStreams()
+            .FirstOrDefault(value => value.Type == MediaStreamType.Audio);
+        if (stream?.SampleRate is not > 0 ||
+            stream.Channels is not > 0)
+        {
+            return null;
+        }
+
+        return new SourceAudioFormat(
+            stream.SampleRate.Value,
+            stream.Channels.Value,
+            Math.Clamp(stream.Channels.Value, 1, 2));
+    }
+
+    internal static float AmplitudeProjection(ReadOnlySpan<float> frame)
+    {
+        if (frame.IsEmpty)
+        {
+            return 0f;
+        }
+
+        var lanes = Math.Min(frame.Length, 2);
+        var selected = 0f;
+        var maximum = -1f;
+        for (var lane = 0; lane < lanes; lane++)
+        {
+            var sample = float.IsFinite(frame[lane]) ? frame[lane] : 0f;
+            var magnitude = Math.Abs(sample);
+            if (magnitude > maximum)
+            {
+                maximum = magnitude;
+                selected = sample;
+            }
+        }
+
+        return selected;
     }
 
     private static async Task<string> FingerprintAsync(
@@ -442,6 +514,11 @@ public sealed class IntegratedAudioAnalyzer
 
     private static string AnalyzerVersion()
         => $"audio-gateway/{typeof(Plugin).Assembly.GetName().Version?.ToString() ?? "unknown"}";
+
+    internal sealed record SourceAudioFormat(
+        int SampleRate,
+        int SourceChannels,
+        int AnalysisChannels);
 
     private sealed record DecodedAnalysis(
         AmplitudeEnvelopeBuilder Amplitude,

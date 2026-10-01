@@ -1,13 +1,13 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
-using System.IO;
 
 namespace Jellyfin.Plugin.AudioGateway.Services;
 
 /// <summary>
 /// Streaming max-peak envelope generator used by the integrated analyzer.
-/// It stores only one byte per visual bucket and never retains decoded PCM.
+/// Integer-derived bucket boundaries keep output stable at source rates that do
+/// not divide evenly by the requested points-per-second tier.
 /// </summary>
 public sealed class AmplitudeEnvelopeBuilder
 {
@@ -27,14 +27,7 @@ public sealed class AmplitudeEnvelopeBuilder
         _tiers = [];
         foreach (var pps in Tiers)
         {
-            if (sampleRate % pps != 0)
-            {
-                throw new ArgumentException(
-                    $"Sample rate {sampleRate} must be divisible by tier {pps}.",
-                    nameof(sampleRate));
-            }
-
-            _tiers.Add(pps, new TierAccumulator(sampleRate / pps));
+            _tiers.Add(pps, new TierAccumulator(sampleRate, pps));
         }
     }
 
@@ -76,10 +69,6 @@ public sealed class AmplitudeEnvelopeBuilder
             throw new ArgumentOutOfRangeException(nameof(pointsPerSecond));
         }
 
-        // Keep one standard 8-byte-payload JUNK chunk between fmt and data.
-        // This remains valid RIFF and is readable by both the corrected parser
-        // (which scans from the first post-fmt chunk) and the pre-fix Slipmat
-        // parser that historically began scanning 16 bytes too late.
         const int junkPayloadLength = 8;
         const int dataHeaderOffset = 52;
         const int dataPayloadOffset = 60;
@@ -117,29 +106,35 @@ public sealed class AmplitudeEnvelopeBuilder
 
     private sealed class TierAccumulator
     {
-        private readonly int _samplesPerBucket;
+        private readonly int _sampleRate;
+        private readonly int _pointsPerSecond;
         private readonly List<byte> _peaks = [];
-        private int _inBucket;
+        private long _sampleIndex;
+        private long _bucketIndex;
         private float _peak;
+        private bool _bucketHasData;
 
-        public TierAccumulator(int samplesPerBucket)
+        public TierAccumulator(int sampleRate, int pointsPerSecond)
         {
-            _samplesPerBucket = samplesPerBucket;
+            _sampleRate = sampleRate;
+            _pointsPerSecond = pointsPerSecond;
         }
 
         public void Push(float magnitude)
         {
-            _peak = Math.Max(_peak, magnitude);
-            _inBucket++;
-            if (_inBucket == _samplesPerBucket)
+            while (_sampleIndex >= Boundary(_bucketIndex + 1))
             {
                 Flush();
             }
+
+            _peak = Math.Max(_peak, magnitude);
+            _bucketHasData = true;
+            _sampleIndex++;
         }
 
         public byte[] Complete()
         {
-            if (_inBucket > 0)
+            if (_bucketHasData)
             {
                 Flush();
             }
@@ -147,14 +142,18 @@ public sealed class AmplitudeEnvelopeBuilder
             return _peaks.ToArray();
         }
 
+        private long Boundary(long index)
+            => index * _sampleRate / _pointsPerSecond;
+
         private void Flush()
         {
             _peaks.Add((byte)Math.Clamp(
                 (int)Math.Round(_peak * byte.MaxValue, MidpointRounding.AwayFromZero),
                 byte.MinValue,
                 byte.MaxValue));
-            _inBucket = 0;
-            _peak = 0;
+            _bucketIndex++;
+            _peak = 0f;
+            _bucketHasData = false;
         }
     }
 }
