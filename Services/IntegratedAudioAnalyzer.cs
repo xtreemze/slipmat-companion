@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.AudioGateway.Configuration;
 using Jellyfin.Plugin.AudioGateway.Models;
+using Jellyfin.Plugin.AudioGateway.Services.Analysis;
 using MediaBrowser.Controller.Entities.Audio;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaEncoding;
@@ -29,12 +30,13 @@ public sealed record IntegratedAnalysisResult(
     string? Reason = null);
 
 /// <summary>
-/// In-process companion analyzer adapter. Jellyfin's managed FFmpeg performs
-/// decoding; this service consumes bounded streaming mono PCM and writes the
-/// existing host-neutral V2 amplitude artifact contract.
+/// Self-contained companion analyzer. Jellyfin's managed FFmpeg decodes the
+/// source exactly once. The resulting PCM stream feeds amplitude, spectral,
+/// rhythm, harmonic, and structure analyzers while a split FFmpeg filter branch
+/// measures EBU R128 loudness/true-peak/LRA.
 ///
-/// It deliberately does not synthesize spectral/rhythm/harmonic facts. Those
-/// remain absent unless produced by a parity-certified canonical analyzer.
+/// All artifacts are host-neutral and the sidecar is written last as the
+/// readiness gate. Playback remains independent of analysis success.
 /// </summary>
 public sealed class IntegratedAudioAnalyzer
 {
@@ -68,7 +70,9 @@ public sealed class IntegratedAudioAnalyzer
         _logger = logger;
     }
 
-    public bool IsAvailable => !string.IsNullOrWhiteSpace(_mediaEncoder.EncoderPath);
+    public bool IsAvailable =>
+        !string.IsNullOrWhiteSpace(_mediaEncoder.EncoderPath) &&
+        _mediaEncoder.SupportsFilter("loudnorm");
 
     public async Task<IntegratedAnalysisResult> AnalyzeItemAsync(
         Guid itemId,
@@ -102,7 +106,7 @@ public sealed class IntegratedAudioAnalyzer
         {
             return new IntegratedAnalysisResult(
                 IntegratedAnalysisStatus.Failed,
-                "Jellyfin FFmpeg is unavailable.");
+                "Jellyfin FFmpeg or loudnorm support is unavailable.");
         }
 
         var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
@@ -116,7 +120,9 @@ public sealed class IntegratedAudioAnalyzer
             string.Equals(existing.SourceFingerprint, fingerprint, StringComparison.Ordinal)
                 ? existing
                 : null;
-        if (matchingExisting is not null && HasAllAmplitudeTiers(storeRoot, storeKey))
+        if (matchingExisting is not null &&
+            HasAllAmplitudeTiers(storeRoot, storeKey) &&
+            HasCompleteHigherOrderAnalysis(storeRoot, storeKey, matchingExisting))
         {
             return new IntegratedAnalysisResult(IntegratedAnalysisStatus.Skipped);
         }
@@ -126,28 +132,47 @@ public sealed class IntegratedAudioAnalyzer
 
         try
         {
-            var envelope = await DecodeEnvelopeAsync(audio, cancellationToken).ConfigureAwait(false);
-            if (envelope.SampleCount == 0)
+            var decoded = await DecodeAndAnalyzeAsync(audio, cancellationToken).ConfigureAwait(false);
+            if (decoded.Amplitude.SampleCount == 0)
             {
                 return new IntegratedAnalysisResult(
                     IntegratedAnalysisStatus.Failed,
                     "FFmpeg decoded no audio samples.");
             }
 
-            var tiers = envelope.Complete();
-            var refs = new List<StoredWaveformRef>(tiers.Count);
             var shortEtag = $"\"{fingerprint[..8]}\"";
-
+            var amplitudeTiers = decoded.Amplitude.Complete();
+            var waveformRefs = new List<StoredWaveformRef>(amplitudeTiers.Count);
             foreach (var pps in AmplitudeEnvelopeBuilder.Tiers)
             {
                 var path = StorePaths.WaveformDatPath(storeRoot, storeKey, AmplitudeVariant, pps);
-                var bytes = AmplitudeEnvelopeBuilder.EncodeRiff(pps, tiers[pps]);
+                var bytes = AmplitudeEnvelopeBuilder.EncodeRiff(pps, amplitudeTiers[pps]);
                 await AtomicWriteAsync(path, bytes, cancellationToken).ConfigureAwait(false);
-                refs.Add(new StoredWaveformRef(
+                waveformRefs.Add(new StoredWaveformRef(
                     AmplitudeVariant,
                     pps,
                     shortEtag,
                     $"waveforms/{storeKey}/{AmplitudeVariant}/pps_{pps}.dat"));
+            }
+
+            var spectralRefs =
+                new List<StoredWaveformRef>(decoded.HigherOrder.SpectralTiers.Count);
+            foreach (var pps in SpectralArtifactEncoder.Tiers)
+            {
+                var path = StorePaths.WaveformDatPath(
+                    storeRoot,
+                    storeKey,
+                    SpectralArtifactEncoder.Variant,
+                    pps);
+                await AtomicWriteAsync(
+                    path,
+                    decoded.HigherOrder.SpectralTiers[pps],
+                    cancellationToken).ConfigureAwait(false);
+                spectralRefs.Add(new StoredWaveformRef(
+                    SpectralArtifactEncoder.Variant,
+                    pps,
+                    shortEtag,
+                    $"waveforms/{storeKey}/{SpectralArtifactEncoder.Variant}/pps_{pps}.dat"));
             }
 
             var sidecar = new AnalysisSidecar(
@@ -155,21 +180,22 @@ public sealed class IntegratedAudioAnalyzer
                 SubjectVersion: AnalysisSubjectV1.SubjectVersion,
                 SubjectStoreKey: storeKey,
                 SourceFingerprint: fingerprint,
-                DurationMs: envelope.DurationMs,
-                WaveformRefs: refs,
+                DurationMs: decoded.Amplitude.DurationMs,
+                WaveformRefs: waveformRefs,
                 ProducerVersion: AnalyzerVersion(),
                 GeneratedAt: DateTimeOffset.UtcNow.ToString("O"),
-                Analysis: matchingExisting?.Analysis,
-                SpectralRefs: matchingExisting?.SpectralRefs,
-                SpectralAnalysisVersion: matchingExisting?.SpectralAnalysisVersion ?? 0);
+                Analysis: decoded.HigherOrder.Analysis,
+                SpectralRefs: spectralRefs,
+                SpectralAnalysisVersion: SpectralArtifactEncoder.FormatVersion);
 
             var sidecarBytes = JsonSerializer.SerializeToUtf8Bytes(sidecar, SidecarJsonOptions);
             await AtomicWriteAsync(sidecarPath, sidecarBytes, cancellationToken).ConfigureAwait(false);
 
             _logger.LogInformation(
-                "Generated integrated amplitude analysis for Jellyfin item {ItemId} ({DurationMs} ms)",
+                "Generated integrated full-track analysis for Jellyfin item {ItemId} ({DurationMs} ms, {SpectralTierCount} spectral tiers)",
                 audio.Id,
-                envelope.DurationMs);
+                decoded.Amplitude.DurationMs,
+                spectralRefs.Count);
             return new IntegratedAnalysisResult(IntegratedAnalysisStatus.Generated);
         }
         catch (OperationCanceledException)
@@ -189,7 +215,7 @@ public sealed class IntegratedAudioAnalyzer
         }
     }
 
-    private async Task<AmplitudeEnvelopeBuilder> DecodeEnvelopeAsync(
+    private async Task<DecodedAnalysis> DecodeAndAnalyzeAsync(
         Audio audio,
         CancellationToken cancellationToken)
     {
@@ -206,14 +232,18 @@ public sealed class IntegratedAudioAnalyzer
         {
             "-nostdin",
             "-hide_banner",
-            "-loglevel", "error",
+            "-loglevel", "info",
             "-i", audio.Path,
-            "-map", "0:a:0",
+            "-filter_complex",
+            $"[0:a:0]asplit=2[loud][pcm];" +
+            $"[loud]loudnorm=print_format=json[loudout];" +
+            $"[loudout]anullsink;" +
+            $"[pcm]aresample={DecodeSampleRate}," +
+            "aformat=sample_fmts=flt:channel_layouts=mono[pcmout]",
+            "-map", "[pcmout]",
             "-vn",
             "-sn",
             "-dn",
-            "-ac", "1",
-            "-ar", DecodeSampleRate.ToString(System.Globalization.CultureInfo.InvariantCulture),
             "-f", "f32le",
             "-acodec", "pcm_f32le",
             "pipe:1",
@@ -256,7 +286,8 @@ public sealed class IntegratedAudioAnalyzer
             process);
 
         var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        var envelope = new AmplitudeEnvelopeBuilder(DecodeSampleRate);
+        var amplitude = new AmplitudeEnvelopeBuilder(DecodeSampleRate);
+        var higherOrder = new HigherOrderAudioAnalysisBuilder(DecodeSampleRate);
         var stream = process.StandardOutput.BaseStream;
         var buffer = new byte[64 * 1024 + sizeof(float)];
         var carry = 0;
@@ -276,8 +307,11 @@ public sealed class IntegratedAudioAnalyzer
             var usable = total - (total % sizeof(float));
             for (var offset = 0; offset < usable; offset += sizeof(float))
             {
-                var bits = BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan(offset, sizeof(float)));
-                envelope.Push(BitConverter.Int32BitsToSingle(bits));
+                var bits = BinaryPrimitives.ReadInt32LittleEndian(
+                    buffer.AsSpan(offset, sizeof(float)));
+                var sample = BitConverter.Int32BitsToSingle(bits);
+                amplitude.Push(sample);
+                higherOrder.Push(sample);
             }
 
             carry = total - usable;
@@ -303,7 +337,13 @@ public sealed class IntegratedAudioAnalyzer
             throw new InvalidOperationException($"FFmpeg exited with code {process.ExitCode}.");
         }
 
-        return envelope;
+        var loudness = FfmpegLoudnessParser.Parse(stderr)
+            ?? throw new InvalidDataException(
+                "Jellyfin FFmpeg completed without parseable loudnorm input statistics.");
+
+        return new DecodedAnalysis(
+            amplitude,
+            higherOrder.Complete(loudness));
     }
 
     private static async Task<string> FingerprintAsync(
@@ -326,6 +366,35 @@ public sealed class IntegratedAudioAnalyzer
         foreach (var pps in AmplitudeEnvelopeBuilder.Tiers)
         {
             if (!File.Exists(StorePaths.WaveformDatPath(storeRoot, storeKey, AmplitudeVariant, pps)))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool HasCompleteHigherOrderAnalysis(
+        string storeRoot,
+        string storeKey,
+        AnalysisSidecar sidecar)
+    {
+        if (sidecar.Analysis is null ||
+            sidecar.SpectralAnalysisVersion != SpectralArtifactEncoder.FormatVersion ||
+            sidecar.SpectralRefs is null ||
+            sidecar.SpectralRefs.Count != SpectralArtifactEncoder.Tiers.Length)
+        {
+            return false;
+        }
+
+        foreach (var pps in SpectralArtifactEncoder.Tiers)
+        {
+            if (!File.Exists(
+                    StorePaths.WaveformDatPath(
+                        storeRoot,
+                        storeKey,
+                        SpectralArtifactEncoder.Variant,
+                        pps)))
             {
                 return false;
             }
@@ -373,4 +442,8 @@ public sealed class IntegratedAudioAnalyzer
 
     private static string AnalyzerVersion()
         => $"audio-gateway/{typeof(Plugin).Assembly.GetName().Version?.ToString() ?? "unknown"}";
+
+    private sealed record DecodedAnalysis(
+        AmplitudeEnvelopeBuilder Amplitude,
+        HigherOrderAnalysisResult HigherOrder);
 }

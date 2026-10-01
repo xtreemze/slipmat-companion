@@ -17,7 +17,7 @@ public record StoredWaveformRef(
 );
 
 /// <summary>
-/// Mirrors the host-neutral V2 sidecar written by the Rust audio-analyzer to
+/// Host-neutral V2 sidecar written by any compatible Slipmat analyzer to
 /// {store}/analysis/{subjectStoreKey}.json.
 /// </summary>
 public record AnalysisSidecar(
