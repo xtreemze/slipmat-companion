@@ -91,6 +91,40 @@ public class HigherOrderAudioAnalysisTests
     }
 
     [Fact]
+    public void HarmonicAccumulator_UsesRustStrictFrameBoundary()
+    {
+        const int sampleRate = 48_000;
+        var exactFrame = new HarmonicAccumulator(sampleRate);
+        for (var index = 0; index < HarmonicAccumulator.FrameSize; index++)
+        {
+            exactFrame.Push((float)Math.Sin(
+                2d * Math.PI * 261.625565d * index / sampleRate));
+        }
+
+        Assert.Equal("Unknown", exactFrame.Complete().Key);
+
+        var withLookahead = new HarmonicAccumulator(sampleRate);
+        for (var index = 0; index <= HarmonicAccumulator.FrameSize; index++)
+        {
+            withLookahead.Push((float)Math.Sin(
+                2d * Math.PI * 261.625565d * index / sampleRate));
+        }
+
+        Assert.NotEqual("Unknown", withLookahead.Complete().Key);
+    }
+
+    [Fact]
+    public void HarmonicProjection_UsesFirstChannelLikeLocalAnalyzer()
+    {
+        Assert.Equal(
+            0.75f,
+            HigherOrderAudioAnalysisBuilder.HarmonicProjection([0.75f, -0.75f]));
+        Assert.Equal(
+            0f,
+            HigherOrderAudioAnalysisBuilder.HarmonicProjection([float.NaN, 0.5f]));
+    }
+
+    [Fact]
     public void SpectralArtifact_PreservesSourceRateAndStereoLanes()
     {
         const int sampleRate = 44_100;
@@ -253,7 +287,7 @@ public class HigherOrderAudioAnalysisTests
     [Fact]
     public void ExactSourceProjections_AreExplicitAndBounded()
     {
-        Assert.Equal(0.25f, HigherOrderAudioAnalysisBuilder.MonoProjection([0.5f, 0f]));
+        Assert.Equal(0.5f, HigherOrderAudioAnalysisBuilder.HarmonicProjection([0.5f, 0f]));
         Assert.Equal(-0.8f, IntegratedAudioAnalyzer.AmplitudeProjection([0.2f, -0.8f]));
         Assert.Equal(0.5f, IntegratedAudioAnalyzer.AmplitudeProjection([0.5f, float.NaN]));
 

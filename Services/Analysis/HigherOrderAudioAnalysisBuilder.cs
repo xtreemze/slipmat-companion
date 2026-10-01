@@ -37,7 +37,7 @@ internal sealed class HigherOrderAudioAnalysisBuilder
         _spectral.PushFrame(samples);
         _boundary.PushFrame(samples);
         _rhythm.PushFrame(samples);
-        _harmonic.Push(MonoProjection(samples));
+        _harmonic.Push(HarmonicProjection(samples));
     }
 
     public HigherOrderAnalysisResult Complete(LoudnessAnalysis? loudness)
@@ -88,21 +88,16 @@ internal sealed class HigherOrderAudioAnalysisBuilder
             boundaries);
     }
 
-    internal static float MonoProjection(ReadOnlySpan<float> samples)
+    internal static float HarmonicProjection(ReadOnlySpan<float> samples)
     {
         if (samples.IsEmpty)
         {
             return 0f;
         }
 
-        var lanes = Math.Min(samples.Length, 2);
-        var sum = 0d;
-        for (var lane = 0; lane < lanes; lane++)
-        {
-            sum += float.IsFinite(samples[lane]) ? samples[lane] : 0f;
-        }
-
-        return (float)(sum / lanes);
+        // Slipmat's local AudioBuffer/Rust-WASM analyzers consume channel 0.
+        // Spectral, boundary, and rhythm analysis remain multi-lane.
+        return float.IsFinite(samples[0]) ? samples[0] : 0f;
     }
 
     private static List<EnergyCurvePoint>? BuildEnergyCurve(
