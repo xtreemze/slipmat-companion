@@ -8,28 +8,27 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.AudioGateway.Services;
 
 /// <summary>
-/// Periodically reconciles the operator-managed Jottacloud projection.
-/// The service itself fails closed when the projection is disabled or unhealthy.
+/// Periodically reconciles the configured rclone cloud projection.
 /// </summary>
-public sealed class JottacloudProjectionRefreshTask : IScheduledTask, IConfigurableScheduledTask
+public sealed class CloudProjectionRefreshTask : IScheduledTask, IConfigurableScheduledTask
 {
-    private readonly JottacloudProjectionService _projectionService;
-    private readonly ILogger<JottacloudProjectionRefreshTask> _logger;
+    private readonly CloudProjectionService _projectionService;
+    private readonly ILogger<CloudProjectionRefreshTask> _logger;
 
-    public JottacloudProjectionRefreshTask(
-        JottacloudProjectionService projectionService,
-        ILogger<JottacloudProjectionRefreshTask> logger)
+    public CloudProjectionRefreshTask(
+        CloudProjectionService projectionService,
+        ILogger<CloudProjectionRefreshTask> logger)
     {
         _projectionService = projectionService;
         _logger = logger;
     }
 
-    public string Name => "Refresh Jottacloud Media Projection";
+    public string Name => "Refresh Cloud Media Projection";
 
-    public string Key => "SlipmatJottacloudProjectionRefresh";
+    public string Key => "SlipmatRcloneCloudProjectionRefresh";
 
     public string Description =>
-        "Reconciles an operator-authenticated Jottacloud folder into the local Slipmat/Jellyfin projection.";
+        "Copies the configured rclone remote folder into the local Jellyfin cloud-media projection.";
 
     public string Category => "Slipmat";
 
@@ -50,7 +49,7 @@ public sealed class JottacloudProjectionRefreshTask : IScheduledTask, IConfigura
             .ConfigureAwait(false);
 
         _logger.LogInformation(
-            "Jottacloud projection reconcile completed with status {Status} ({Code})",
+            "Cloud projection reconcile completed with status {Status} ({Code})",
             result.Status,
             result.Code);
 
@@ -65,7 +64,7 @@ public sealed class JottacloudProjectionRefreshTask : IScheduledTask, IConfigura
             {
                 Type = TaskTriggerInfoType.IntervalTrigger,
                 IntervalTicks = TimeSpan.FromHours(6).Ticks,
-                MaxRuntimeTicks = TimeSpan.FromMinutes(10).Ticks,
+                MaxRuntimeTicks = TimeSpan.FromHours(12).Ticks,
             },
         ];
     }

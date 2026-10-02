@@ -58,27 +58,27 @@ public class JellyfinHostIntegrationTests
                 && descriptor.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(
             services,
-            descriptor => descriptor.ServiceType == typeof(IJottacloudCliProcessRunner)
-                && descriptor.ImplementationType == typeof(JottacloudCliProcessRunner)
+            descriptor => descriptor.ServiceType == typeof(IRcloneProcessRunner)
+                && descriptor.ImplementationType == typeof(RcloneProcessRunner)
                 && descriptor.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(
             services,
-            descriptor => descriptor.ServiceType == typeof(IJottacloudProjectionConfigurationSource)
-                && descriptor.ImplementationType == typeof(PluginJottacloudProjectionConfigurationSource)
+            descriptor => descriptor.ServiceType == typeof(ICloudProjectionConfigurationSource)
+                && descriptor.ImplementationType == typeof(PluginCloudProjectionConfigurationSource)
                 && descriptor.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(
             services,
-            descriptor => descriptor.ServiceType == typeof(IJottacloudLibraryProjection)
-                && descriptor.ImplementationType == typeof(JellyfinJottacloudLibraryProjection)
+            descriptor => descriptor.ServiceType == typeof(ICloudLibraryProjection)
+                && descriptor.ImplementationType == typeof(JellyfinCloudLibraryProjection)
                 && descriptor.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(
             services,
-            descriptor => descriptor.ServiceType == typeof(JottacloudProjectionService)
+            descriptor => descriptor.ServiceType == typeof(CloudProjectionService)
                 && descriptor.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(
             services,
             descriptor => descriptor.ServiceType == typeof(IScheduledTask)
-                && descriptor.ImplementationType == typeof(JottacloudProjectionRefreshTask)
+                && descriptor.ImplementationType == typeof(CloudProjectionRefreshTask)
                 && descriptor.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(
             typeof(ServiceRegistrator).GetInterfaces(),
@@ -105,7 +105,7 @@ public class JellyfinHostIntegrationTests
     }
 
     [Fact]
-    public void Plugin_CloudConfigurationPage_ContainsFolderManagerInsteadOfRawListing()
+    public void Plugin_CloudConfigurationPage_ContainsRcloneFolderManager()
     {
         var resourceName = "Jellyfin.Plugin.AudioGateway.Configuration.configPage.html";
         using var stream = typeof(Plugin).Assembly.GetManifestResourceStream(resourceName);
@@ -113,11 +113,15 @@ public class JellyfinHostIntegrationTests
         using var reader = new StreamReader(stream!);
         var html = reader.ReadToEnd();
 
-        Assert.Contains("JottacloudBrowserPath", html);
-        Assert.Contains("JottacloudBrowserEntries", html);
-        Assert.Contains("JottacloudUseFolderButton", html);
+        Assert.Contains("CloudBrowserPath", html);
+        Assert.Contains("CloudBrowserEntries", html);
+        Assert.Contains("CloudUseFolderButton", html);
         Assert.Contains("Use this folder", html);
-        Assert.DoesNotContain("JottacloudBrowseResults", html);
+        Assert.Contains("CloudRemoteName", html);
+        Assert.Contains("CloudCreateFolderButton", html);
+        Assert.Contains("rclone", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Jottacloud", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("jotta-cli", html, StringComparison.OrdinalIgnoreCase);
     }
 
 }

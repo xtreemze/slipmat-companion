@@ -29,10 +29,10 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<IptvOrgCatalogService>();
         serviceCollection.AddSingleton<ILiveTvService, IptvOrgLiveTvService>();
 
-        serviceCollection.AddSingleton<IJottacloudCliProcessRunner, JottacloudCliProcessRunner>();
-        serviceCollection.AddSingleton<IJottacloudProjectionConfigurationSource, PluginJottacloudProjectionConfigurationSource>();
-        serviceCollection.AddSingleton<IJottacloudLibraryProjection, JellyfinJottacloudLibraryProjection>();
-        serviceCollection.AddSingleton<JottacloudProjectionService>();
-        serviceCollection.AddSingleton<IScheduledTask, JottacloudProjectionRefreshTask>();
+        serviceCollection.AddSingleton<IRcloneProcessRunner, RcloneProcessRunner>();
+        serviceCollection.AddSingleton<ICloudProjectionConfigurationSource, PluginCloudProjectionConfigurationSource>();
+        serviceCollection.AddSingleton<ICloudLibraryProjection, JellyfinCloudLibraryProjection>();
+        serviceCollection.AddSingleton<CloudProjectionService>();
+        serviceCollection.AddSingleton<IScheduledTask, CloudProjectionRefreshTask>();
     }
 }

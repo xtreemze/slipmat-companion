@@ -9,21 +9,21 @@ using MediaBrowser.Model.Entities;
 
 namespace Jellyfin.Plugin.AudioGateway.Services;
 
-public sealed record JottacloudLibraryEnsureResult(
+public sealed record CloudLibraryEnsureResult(
     bool Ready,
     bool Created,
     string Code);
 
 /// <summary>
-/// Narrow Jellyfin-library projection boundary for a completed local Jottacloud materialization.
+/// Narrow Jellyfin-library projection boundary for a completed local Cloud materialization.
 /// </summary>
-public interface IJottacloudLibraryProjection
+public interface ICloudLibraryProjection
 {
     bool IsScanRunning { get; }
 
-    JottacloudLibraryEnsureResult Inspect(string libraryName, string projectionPath);
+    CloudLibraryEnsureResult Inspect(string libraryName, string projectionPath);
 
-    Task<JottacloudLibraryEnsureResult> EnsureAsync(
+    Task<CloudLibraryEnsureResult> EnsureAsync(
         string libraryName,
         CollectionTypeOptions collectionType,
         string projectionPath,
@@ -33,21 +33,21 @@ public interface IJottacloudLibraryProjection
 }
 
 /// <summary>
-/// Projects one completed local Jottacloud cache into Jellyfin's supported virtual-folder API.
+/// Projects one completed local cloud projection into Jellyfin's supported virtual-folder API.
 /// It never deletes libraries or remote/local media.
 /// </summary>
-public sealed class JellyfinJottacloudLibraryProjection : IJottacloudLibraryProjection
+public sealed class JellyfinCloudLibraryProjection : ICloudLibraryProjection
 {
     private readonly ILibraryManager _libraryManager;
 
-    public JellyfinJottacloudLibraryProjection(ILibraryManager libraryManager)
+    public JellyfinCloudLibraryProjection(ILibraryManager libraryManager)
     {
         _libraryManager = libraryManager;
     }
 
     public bool IsScanRunning => _libraryManager.IsScanRunning;
 
-    public JottacloudLibraryEnsureResult Inspect(string libraryName, string projectionPath)
+    public CloudLibraryEnsureResult Inspect(string libraryName, string projectionPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(libraryName);
         ArgumentException.ThrowIfNullOrWhiteSpace(projectionPath);
@@ -61,7 +61,7 @@ public sealed class JellyfinJottacloudLibraryProjection : IJottacloudLibraryProj
 
         if (pathOwner is not null)
         {
-            return new JottacloudLibraryEnsureResult(
+            return new CloudLibraryEnsureResult(
                 Ready: true,
                 Created: false,
                 Code: "library-ready");
@@ -72,19 +72,19 @@ public sealed class JellyfinJottacloudLibraryProjection : IJottacloudLibraryProj
 
         if (nameOwner is not null)
         {
-            return new JottacloudLibraryEnsureResult(
+            return new CloudLibraryEnsureResult(
                 Ready: false,
                 Created: false,
                 Code: "library-name-conflict");
         }
 
-        return new JottacloudLibraryEnsureResult(
+        return new CloudLibraryEnsureResult(
             Ready: false,
             Created: false,
             Code: "library-missing");
     }
 
-    public async Task<JottacloudLibraryEnsureResult> EnsureAsync(
+    public async Task<CloudLibraryEnsureResult> EnsureAsync(
         string libraryName,
         CollectionTypeOptions collectionType,
         string projectionPath,
@@ -111,7 +111,7 @@ public sealed class JellyfinJottacloudLibraryProjection : IJottacloudLibraryProj
             .AddVirtualFolder(libraryName, collectionType, options, refreshLibrary: false)
             .ConfigureAwait(false);
 
-        return new JottacloudLibraryEnsureResult(
+        return new CloudLibraryEnsureResult(
             Ready: true,
             Created: true,
             Code: "library-created");

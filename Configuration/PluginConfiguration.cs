@@ -23,34 +23,41 @@ public class PluginConfiguration : BasePluginConfiguration
     public string[] IptvOrgLiveTvChannelIds { get; set; } = Array.Empty<string>();
 
     /// <summary>
-    /// Gets or sets a value indicating whether the operator-managed Jottacloud
-    /// projection is enabled. Installation and login remain external SSH/admin work.
+    /// Gets or sets a value indicating whether the operator-managed rclone cloud
+    /// projection is enabled. rclone installation/authentication remain external.
     /// </summary>
-    public bool JottacloudProjectionEnabled { get; set; }
+    public bool CloudProjectionEnabled { get; set; }
 
     /// <summary>
-    /// Gets or sets the remote Jottacloud folder to materialize.
+    /// Gets or sets the configured rclone remote name, without the trailing colon.
     /// </summary>
-    public string JottacloudRemotePath { get; set; } = string.Empty;
+    public string CloudRemoteName { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the dedicated local projection root read by Jellyfin.
+    /// Gets or sets the selected folder path inside the rclone remote.
     /// </summary>
-    public string JottacloudProjectionPath { get; set; } = string.Empty;
+    public string CloudRemotePath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets an optional absolute local projection-root override.
+    /// Empty uses a Jellyfin-managed path.
+    /// </summary>
+    public string CloudProjectionPath { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets the Jellyfin library name created for the projection.
     /// </summary>
-    public string JottacloudLibraryName { get; set; } = "Jottacloud";
+    public string CloudLibraryName { get; set; } = "Cloud Media";
 
     /// <summary>
     /// Gets or sets the Jellyfin collection type for the managed projection.
     /// </summary>
-    public string JottacloudCollectionType { get; set; } = "music";
+    public string CloudCollectionType { get; set; } = "music";
 
     /// <summary>
     /// Gets or sets a value indicating whether the companion may create the
-    /// Jellyfin virtual folder after a completed projection exists.
+    /// Jellyfin virtual folder after a completed materialization.
     /// </summary>
-    public bool JottacloudAutoCreateLibrary { get; set; } = true;
+    public bool CloudAutoCreateLibrary { get; set; } = true;
+
 }

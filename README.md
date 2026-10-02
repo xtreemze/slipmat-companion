@@ -72,34 +72,42 @@ Presence of experimental source code does not grant product authority. The capab
 | POST | `/Plugins/AudioGateway/livetv/iptv-org/catalog/refresh` | Elevated provider refresh with last-known-good fallback |
 | POST | `/Plugins/AudioGateway/livetv/iptv-org/guide/fetch` | Authenticated bounded XMLTV fetch for catalog-listed guide URLs |
 | POST | `/Plugins/AudioGateway/livetv/iptv-org/refresh` | Elevated refresh of Jellyfin's native Live TV projection |
-| GET | `/Plugins/AudioGateway/cloud/jottacloud/status` | Elevated sanitized Jottacloud projection health |
-| GET | `/Plugins/AudioGateway/cloud/jottacloud/browse` | Elevated read-only Jottacloud remote browse |
-| POST | `/Plugins/AudioGateway/cloud/jottacloud/reconcile` | Elevated one-way Jottacloud projection reconciliation |
+| GET | `/Plugins/AudioGateway/cloud/rclone/status` | Elevated sanitized rclone/cloud projection health |
+| GET | `/Plugins/AudioGateway/cloud/rclone/remotes` | Elevated configured-rclone remote descriptors (no credentials) |
+| GET | `/Plugins/AudioGateway/cloud/rclone/browse` | Elevated structured browse of one configured rclone remote |
+| POST | `/Plugins/AudioGateway/cloud/rclone/mkdir` | Elevated creation of a folder within a configured rclone remote |
+| POST | `/Plugins/AudioGateway/cloud/rclone/reconcile` | Elevated one-way rclone copy into the Jellyfin projection |
 
 Podcast routes never accept a user ID parameter. The Jellyfin `Jellyfin-UserId` authentication claim selects the storage namespace for subscription replication; a client payload cannot address another user's subscriptions.
 
 Atlas concept/catalog/request routes and streamrip status/search routes do not exist in the shipping plugin assembly.
 
-## Operator-managed Jottacloud projection
+## Operator-managed rclone cloud projection
 
-Audio Gateway can manage a **pre-installed and pre-authenticated** first-party Jottacloud CLI/daemon as an optional Jellyfin-side media projection.
+Audio Gateway uses a **pre-installed and pre-configured rclone** as its generic cloud-storage adapter. The plugin does not implement provider authentication itself and does not read or expose the credential-bearing rclone configuration.
 
-The Jellyfin plugin settings include a server-side cloud folder browser. When the CLI/daemon is ready, an administrator can open the Jottacloud namespace, navigate remote entries, move to root/parent paths, and choose **Use this folder** to populate the managed media root. The local materialization directory is automatic by default under Jellyfin-managed data; an absolute local path is only an advanced override for deployments that want cloud cache bytes on another mounted volume.
+Configure remotes on the server with rclone first. Tele2 Cloud and other supported cloud providers then appear through the same plugin interface. rclone itself owns provider-specific OAuth/session behavior, token refresh, and backend semantics.
 
-The certified CLI documents remote browsing and download but does not document a remote mkdir command. Audio Gateway therefore does not fabricate cloud-folder creation through a private/undocumented API: create a new folder in Jottacloud/Telia/Tele2 first, then select it from the server-side browser.
+The Jellyfin plugin settings provide:
 
-The server administrator installs the supported CLI and completes `jotta-cli login` over SSH. The plugin never receives a Jottacloud password, Personal Login Token, OAuth token, cookie, or daemon credential file. It uses `jotta-cli` from Jellyfin's service `PATH`, or the operator-controlled `SLIPMAT_JOTTACLOUD_CLI` environment variable.
+- a selector populated from `rclone listremotes --long --json`;
+- a structured remote file manager backed by `rclone lsjson`;
+- remote folder creation through `rclone mkdir`;
+- **Use this folder** selection for the media root;
+- automatic Jellyfin-managed local materialization storage, with an advanced absolute-path override;
+- manual and six-hour scheduled reconciliation.
 
-The initial certified CLI is **0.17.176206**. Unsupported versions fail closed. The companion fingerprints the documented authenticated-account value with SHA-256 and binds that fingerprint plus the configured remote folder into the local projection marker; the raw account value is neither persisted nor returned.
+The executable is operator-owned. Audio Gateway invokes `rclone` from Jellyfin's service `PATH`, or `SLIPMAT_RCLONE` when explicitly provided by the host. rclone's own `RCLONE_CONFIG` mechanism may point the service at the intended config file. The plugin never calls `config dump`, `config show`, or any other command that returns provider secrets.
 
-Materialization is one-way:
+Audio Gateway intentionally does **not** start or expose rclone's remote-control API. rclone documents RC access as shell-equivalent and capable of reading stored credentials and running broad filesystem/command operations; that authority is too wide for this companion boundary.
+
+Materialization is one-way and additive:
 
 ```text
-operator-authenticated jottad
+operator-configured rclone remote
         |
-     jotta-cli
+     rclone copy
         |
-        | download REMOTE LOCAL --merge --mergemode=metadata
         v
 marker-owned local projection
         |
@@ -107,7 +115,7 @@ marker-owned local projection
 Jellyfin virtual folder + guarded library scan
 ```
 
-A non-empty unowned projection path is refused. Changing the remote folder or authenticated account against an existing marker fails closed. The plugin never deletes cloud objects or local projection media. Jellyfin scans only after `list downloads --json` is clear; retained failed-download entries therefore block automatic scanning until the operator resolves them. Re-authentication remains an SSH/operator action and does not erase existing materialized bytes.
+`rclone copy` updates/adds remote content without deleting destination files. Audio Gateway does not automatically delete cloud objects or local projected media. The projection marker binds to the configured rclone remote name/type and selected remote root; changing that source against an existing marker fails closed.
 
 This projection is optional server acceleration. It does not own Slipmat media identity, source selection, playback, queue, Rail, podcast identity, or offline-retention policy.
 
@@ -131,9 +139,9 @@ The plugin uses Jellyfin's native plugin surfaces rather than treating the serve
 - `ServiceRegistrator` implements `IPluginServiceRegistrator` and registers reusable gateway services in Jellyfin's dependency-injection container;
 - the integrated analyzer worker/backfill remains host-managed and non-authoritative;
 - `IptvOrgLiveTvService` is registered as Jellyfin's native `ILiveTvService`;
-- the operator-managed Jottacloud bridge registers its CLI/process boundary and six-hour reconciliation task;
+- the operator-managed rclone cloud bridge registers its narrow CLI/process boundary and six-hour reconciliation task;
 - artifact and track-event controllers consume reusable services through constructor injection;
-- `Plugin` implements `IHasWebPages` and exposes a native Jellyfin dashboard for store/analyzer health, iptv-org publication, and Jottacloud projection administration;
+- `Plugin` implements `IHasWebPages` and exposes a native Jellyfin dashboard for store/analyzer health, iptv-org publication, and generic rclone cloud projection administration;
 - the configuration page reports current health through bounded, non-authoritative endpoints.
 
 ### Host-neutral artifact identity

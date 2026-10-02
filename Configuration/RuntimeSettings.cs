@@ -58,27 +58,30 @@ public static class RuntimeSettings
             "Jellyfin.AudioGateway");
     }
     /// <summary>
-    /// Resolves the local materialization directory for one remote Jottacloud folder.
+    /// Resolves the local materialization directory for one configured rclone root.
     /// A configured absolute override wins. Fresh installs use a deterministic
-    /// Jellyfin-managed directory so cloud setup does not require filesystem knowledge.
+    /// Jellyfin-managed directory keyed by remote name + remote path.
     /// </summary>
-    public static string ResolveJottacloudProjectionPath(
+    public static string ResolveCloudProjectionPath(
         PluginConfiguration config,
+        string remoteName,
         string remotePath)
-        => ResolveJottacloudProjectionPath(
+        => ResolveCloudProjectionPath(
             config,
+            remoteName,
             remotePath,
             Plugin.Instance?.HostApplicationPaths.DataPath);
 
-    public static string ResolveJottacloudProjectionPath(
+    public static string ResolveCloudProjectionPath(
         PluginConfiguration config,
+        string remoteName,
         string remotePath,
         string? jellyfinDataPath)
     {
         ArgumentNullException.ThrowIfNull(config);
-        ArgumentException.ThrowIfNullOrWhiteSpace(remotePath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(remoteName);
 
-        var configuredRoot = config.JottacloudProjectionPath?.Trim();
+        var configuredRoot = config.CloudProjectionPath?.Trim();
         if (!string.IsNullOrWhiteSpace(configuredRoot))
         {
             return Path.GetFullPath(configuredRoot);
@@ -90,15 +93,19 @@ public static class RuntimeSettings
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "Jellyfin.AudioGateway");
 
-        var normalizedRemotePath = remotePath.Trim().Replace('\\', '/');
+        var normalizedIdentity = string.Concat(
+            remoteName.Trim().TrimEnd(':').ToLowerInvariant(),
+            "\n",
+            remotePath.Trim().Replace('\\', '/'));
+
         var digest = Convert.ToHexString(
-                SHA256.HashData(Encoding.UTF8.GetBytes(normalizedRemotePath)))
+                SHA256.HashData(Encoding.UTF8.GetBytes(normalizedIdentity)))
             .ToLowerInvariant()[..16];
 
         return Path.Combine(
             managedBase,
             "cloud",
-            "jottacloud",
+            "rclone",
             digest);
     }
 

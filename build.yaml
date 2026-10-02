@@ -1,7 +1,7 @@
 ---
 name: "Audio Gateway"
 guid: "d3a2b1c0-e4f5-6789-abcd-ef0123456789"
-version: "0.3.0.2"
+version: "0.4.0.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 overview: "Optional Jellyfin companion that accelerates and enriches Slipmat."
@@ -9,10 +9,10 @@ description: >
   Audio Gateway reduces Jellyfin request fan-out, serves precomputed audio-analysis
   artifacts, provides bounded podcast/directory/media acquisition when browser networking
   prevents direct access, projects selected iptv-org channels through Jellyfin Live TV,
-  and can materialize an operator-authenticated Jottacloud folder into a guarded Jellyfin
+  and can materialize an operator-configured rclone remote into a guarded Jellyfin
   library. Slipmat remains fully functional without the companion and retains all product authority.
 category: "General"
 owner: "xtreemze"
 artifacts:
 - "Jellyfin.Plugin.AudioGateway.dll"
-changelog: "Correct minor-key Camelot projection so companion harmonic facts map C minor to 5A and A minor to 8A."
+changelog: "Replace the Jottacloud-specific cloud bridge with a generic rclone adapter: discover configured remotes, browse structured remote entries, create folders, and copy selected cloud roots into guarded Jellyfin libraries without exposing rclone credentials or remote-control authority."
