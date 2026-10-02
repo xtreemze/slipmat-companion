@@ -471,11 +471,11 @@ public sealed partial class RcloneCliHost
             {
                 if (element.ValueKind == JsonValueKind.String)
                 {
-                    var name = element.GetString();
-                    if (!string.IsNullOrWhiteSpace(name))
+                    var remoteNameText = element.GetString();
+                    if (!string.IsNullOrWhiteSpace(remoteNameText))
                     {
                         values.Add(new RcloneRemoteDescriptor(
-                            NormalizeRemoteName(name),
+                            NormalizeRemoteName(remoteNameText),
                             null,
                             null,
                             null));
