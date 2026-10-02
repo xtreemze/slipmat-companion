@@ -41,7 +41,7 @@ public class TrackPlaybackEventService
         string storeRoot)
     {
         var item = _library.GetItemById(itemGuid);
-        if (item is not Audio)
+        if (item is not Audio audio)
         {
             return null;
         }
