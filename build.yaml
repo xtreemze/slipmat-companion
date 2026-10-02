@@ -1,17 +1,18 @@
 ---
 name: "Audio Gateway"
 guid: "d3a2b1c0-e4f5-6789-abcd-ef0123456789"
-version: "0.2.3.0"
+version: "0.3.0.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 overview: "Optional Jellyfin companion that accelerates and enriches Slipmat."
 description: >
   Audio Gateway reduces Jellyfin request fan-out, serves precomputed audio-analysis
-  artifacts, provides bounded podcast resource acquisition when browser CORS prevents
-  direct access, and can replicate portable client-owned subscription intent. Slipmat
-  remains fully functional without the companion and retains all product authority.
+  artifacts, provides bounded podcast/directory/media acquisition when browser networking
+  prevents direct access, projects selected iptv-org channels through Jellyfin Live TV,
+  and can materialize an operator-authenticated Jottacloud folder into a guarded Jellyfin
+  library. Slipmat remains fully functional without the companion and retains all product authority.
 category: "General"
 owner: "xtreemze"
 artifacts:
 - "Jellyfin.Plugin.AudioGateway.dll"
-changelog: "Match Slipmat Rust spectral tier pooling for partial trailing frames and align rhythm tie-breaking, floating-point epsilon, and f32 BPM rounding for deterministic SLWS/SRHY parity."
+changelog: "Add bounded public-directory and XMLTV fallback acquisition, native iptv-org Live TV publication, opaque remote-media relay, and an operator-authenticated Jottacloud-to-Jellyfin projection with account-bound cache ownership and fail-closed transfer/scan gating."
