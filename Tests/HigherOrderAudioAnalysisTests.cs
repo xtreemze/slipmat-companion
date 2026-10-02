@@ -2,6 +2,7 @@ using System;
 using System.Buffers.Binary;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using Jellyfin.Plugin.AudioGateway.Models;
 using Jellyfin.Plugin.AudioGateway.Services;
 using Jellyfin.Plugin.AudioGateway.Services.Analysis;
@@ -548,6 +549,42 @@ public class HigherOrderAudioAnalysisTests
         Assert.Equal(-14.2d, result.Analysis.LoudnessMeasurement!.IntegratedLufs, 2);
         Assert.Equal(-0.7d, result.Analysis.LoudnessMeasurement.TruePeakDbtp!.Value, 2);
         Assert.Equal(7.5d, result.Analysis.LoudnessMeasurement.LoudnessRangeLu!.Value, 2);
+    }
+
+    [Fact]
+    public void LoudnessMeasurement_SerializesCanonicalWireShape()
+    {
+        var loudness = new LoudnessAnalysis(-17.3d, -2.1d, 14.8d);
+        var analysis = new AnalysisBlocks(
+            new TimingAnalysis(0d, 0d),
+            new HarmonicAnalysis("Unknown", "?", 0d),
+            loudness,
+            LoudnessMeasurement: FfmpegLoudnessParser.ToMeasurementEvidence(loudness));
+
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(analysis));
+        var root = document.RootElement;
+        var legacy = root.GetProperty("loudness");
+        Assert.Equal(-17.3d, legacy.GetProperty("integratedLufs").GetDouble(), 2);
+        Assert.Equal(-2.1d, legacy.GetProperty("truePeak").GetDouble(), 2);
+        Assert.Equal(14.8d, legacy.GetProperty("dynamicRange").GetDouble(), 2);
+
+        var measured = root.GetProperty("loudnessMeasurement");
+        Assert.Equal(1, measured.GetProperty("version").GetInt32());
+        Assert.Equal("track", measured.GetProperty("scope").GetString());
+        Assert.Equal("server-analysis", measured.GetProperty("authority").GetString());
+        Assert.Equal("ffmpeg-loudnorm-input", measured.GetProperty("semantics").GetString());
+        Assert.Equal(-17.3d, measured.GetProperty("integratedLufs").GetDouble(), 2);
+        Assert.Equal(-2.1d, measured.GetProperty("truePeakDbtp").GetDouble(), 2);
+        Assert.Equal(14.8d, measured.GetProperty("loudnessRangeLu").GetDouble(), 2);
+        Assert.False(measured.TryGetProperty("gainDb", out _));
+        Assert.False(measured.TryGetProperty("dynamicRange", out _));
+
+        var analyzer = measured.GetProperty("analyzer");
+        Assert.Equal("ffmpeg-loudnorm", analyzer.GetProperty("name").GetString());
+        Assert.Equal("1", analyzer.GetProperty("version").GetString());
+        Assert.Equal(
+            FfmpegLoudnessParser.AnalyzerConfigurationDigest,
+            analyzer.GetProperty("configurationDigest").GetString());
     }
 
     [Fact]
