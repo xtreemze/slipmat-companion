@@ -65,7 +65,16 @@
 
         #AudioGatewayConfigPage input[type="checkbox"],
         #AudioGatewayConfigPage input[type="radio"] {
+            color: inherit;
             accent-color: currentColor;
+        }
+
+        #AudioGatewayConfigPage :is(
+            input[type="checkbox"],
+            input[type="radio"]
+        ):focus-visible {
+            outline: 2px solid currentColor;
+            outline-offset: 2px;
         }
 
         @media (forced-colors: active) {
