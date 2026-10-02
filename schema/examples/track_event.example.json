@@ -11,7 +11,9 @@
     "id": "alb456",
     "title": "Kind of Blue",
     "year": 1959,
-    "artistNames": ["Miles Davis"]
+    "artistNames": [
+      "Miles Davis"
+    ]
   },
   "artists": [
     {
@@ -22,26 +24,39 @@
   ],
   "artwork": {
     "albumCoverFront": "/Plugins/AudioGateway/artifacts/artwork/alb456?type=cover_front&maxWidth=4000",
-    "albumCoverBack":  "/Plugins/AudioGateway/artifacts/artwork/alb456?type=cover_back&maxWidth=4000",
-    "albumBackdrops":  [],
-    "artistAvatars":   { "art789": "/Plugins/AudioGateway/artifacts/artwork/art789?type=avatar&maxWidth=400" },
-    "artistBackdrops": { "art789": ["/Plugins/AudioGateway/artifacts/artwork/art789?type=backdrop&maxWidth=4000"] }
+    "albumCoverBack": "/Plugins/AudioGateway/artifacts/artwork/alb456?type=cover_back&maxWidth=4000",
+    "albumBackdrops": [],
+    "artistAvatars": {
+      "art789": "/Plugins/AudioGateway/artifacts/artwork/art789?type=avatar&maxWidth=400"
+    },
+    "artistBackdrops": {
+      "art789": [
+        "/Plugins/AudioGateway/artifacts/artwork/art789?type=backdrop&maxWidth=4000"
+      ]
+    }
   },
   "waveform": {
     "itemId": "abc123",
     "variant": "awf_v1_riff_mono_u8_peak",
     "pps": 10,
-    "path": "waveforms/abc123/awf_v1_riff_mono_u8_peak/pps_10.dat",
+    "path": "waveforms/asv1-45babe3bb1fb2875c1a1185d168399d182a45f0bc2bfef66be054439121570e4/awf_v1_riff_mono_u8_peak/pps_10.dat",
     "url": "/Plugins/AudioGateway/artifacts/waveform/abc123?variant=awf_v1_riff_mono_u8_peak&pps=10",
-    "etag": "\"a1b2c3d4e5f6\"",
-    "durationSamples": 4496000
+    "etag": "\"a1b2c3d4e5f6\""
   },
   "analysis": {
     "timing": {
       "bpm": 136.7,
       "bpmConfidence": 0.92,
-      "downbeats": [0, 1752, 3504, 5256],
-      "beatGrid": { "startOffsetMs": 0.0, "intervalMs": 438.9 }
+      "downbeats": [
+        0,
+        1752,
+        3504,
+        5256
+      ],
+      "beatGrid": {
+        "startOffsetMs": 0,
+        "intervalMs": 438.9
+      }
     },
     "harmonic": {
       "key": "A Minor",
@@ -50,17 +65,48 @@
     },
     "structure": {
       "energyCurve": [
-        { "timeMs": 0,      "energy": 0.12 },
-        { "timeMs": 30000,  "energy": 0.55 },
-        { "timeMs": 120000, "energy": 0.78 },
-        { "timeMs": 480000, "energy": 0.65 },
-        { "timeMs": 562000, "energy": 0.05 }
+        {
+          "timeMs": 0,
+          "energy": 0.12
+        },
+        {
+          "timeMs": 30000,
+          "energy": 0.55
+        },
+        {
+          "timeMs": 120000,
+          "energy": 0.78
+        },
+        {
+          "timeMs": 480000,
+          "energy": 0.65
+        },
+        {
+          "timeMs": 562000,
+          "energy": 0.05
+        }
       ],
       "sections": [
-        { "startMs": 0,      "endMs": 18000,  "label": "intro" },
-        { "startMs": 18000,  "endMs": 282000, "label": "verse" },
-        { "startMs": 282000, "endMs": 546000, "label": "instrumental" },
-        { "startMs": 546000, "endMs": 562000, "label": "outro" }
+        {
+          "startMs": 0,
+          "endMs": 18000,
+          "label": "intro"
+        },
+        {
+          "startMs": 18000,
+          "endMs": 282000,
+          "label": "verse"
+        },
+        {
+          "startMs": 282000,
+          "endMs": 546000,
+          "label": "instrumental"
+        },
+        {
+          "startMs": 546000,
+          "endMs": 562000,
+          "label": "outro"
+        }
       ]
     },
     "transitions": [
@@ -68,21 +114,53 @@
         "inWindowMs": 528000,
         "outWindowMs": 18000,
         "score": 0.87,
-        "reasonCodes": ["energy_match", "key_compatible"]
+        "reasonCodes": [
+          "energy_match",
+          "key_compatible"
+        ]
       }
     ],
     "loudness": {
       "integratedLufs": -17.3,
       "truePeak": -2.1,
       "dynamicRange": 14.8
+    },
+    "loudnessMeasurement": {
+      "version": 1,
+      "scope": "track",
+      "authority": "server-analysis",
+      "semantics": "ffmpeg-loudnorm-input",
+      "analyzer": {
+        "name": "ffmpeg-loudnorm",
+        "version": "1",
+        "configurationDigest": "sha256:d067e146e6dd806228d993e7cb40501a80c464fb84af3af7ecfa32f5fca2b4ec"
+      },
+      "integratedLufs": -17.3,
+      "truePeakDbtp": -2.1,
+      "loudnessRangeLu": 14.8
     }
   },
   "creditsPreview": {
     "entries": [
-      { "role": "Producer",           "names": ["Teo Macero"] },
-      { "role": "Recording Engineer", "names": ["Fred Plaut"] }
+      {
+        "role": "Producer",
+        "names": [
+          "Teo Macero"
+        ]
+      },
+      {
+        "role": "Recording Engineer",
+        "names": [
+          "Fred Plaut"
+        ]
+      }
     ],
-    "studios": [{ "name": "Columbia 30th Street Studio", "location": "New York, NY" }],
+    "studios": [
+      {
+        "name": "Columbia 30th Street Studio",
+        "location": "New York, NY"
+      }
+    ],
     "truncated": false
   },
   "cacheToken": "eyJlIjoiYWJjMTIzIiwidCI6MTczOTg0MDAwMH0",

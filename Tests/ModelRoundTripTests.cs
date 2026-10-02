@@ -46,6 +46,15 @@ public class ModelRoundTripTests
         Assert.Equal("Miles Davis", evt.Artists[0].Name);
         Assert.NotNull(evt.Waveform);
         Assert.NotNull(evt.Analysis);
+        Assert.NotNull(evt.Analysis!.LoudnessMeasurement);
+        Assert.Equal("server-analysis", evt.Analysis.LoudnessMeasurement!.Authority);
+        Assert.Equal("ffmpeg-loudnorm-input", evt.Analysis.LoudnessMeasurement.Semantics);
+        Assert.Equal(-17.3d, evt.Analysis.LoudnessMeasurement.IntegratedLufs, 2);
+        Assert.Equal(-2.1d, evt.Analysis.LoudnessMeasurement.TruePeakDbtp!.Value, 2);
+        Assert.Equal(14.8d, evt.Analysis.LoudnessMeasurement.LoudnessRangeLu!.Value, 2);
+        Assert.NotNull(evt.Waveform!.Path);
+        Assert.StartsWith("waveforms/asv1-", evt.Waveform.Path);
+        Assert.Null(evt.Waveform.DurationSamples);
         Assert.NotNull(evt.CreditsPreview);
         Assert.True(evt.AnalysisAvailable);
     }
