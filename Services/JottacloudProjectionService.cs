@@ -60,7 +60,11 @@ public sealed class JottacloudProjectionService
         var config = _configurationSource.GetCurrent();
         if (!config.JottacloudProjectionEnabled)
         {
-            return DisabledStatus(config);
+            var setupCli = new JottacloudCliHost(runner: _runner);
+            var setupStatus = await setupCli
+                .GetStatusAsync(cancellationToken)
+                .ConfigureAwait(false);
+            return DisabledStatus(config, setupStatus);
         }
 
         if (!TryResolveConfiguration(config, out var resolved, out var configurationCode))
@@ -71,6 +75,9 @@ public sealed class JottacloudProjectionService
                 Health: "configuration-error",
                 Code: configurationCode,
                 CliVersion: null,
+                RemotePath: NormalizeOptional(config.JottacloudRemotePath),
+                ProjectionPath: null,
+                ProjectionPathManaged: string.IsNullOrWhiteSpace(config.JottacloudProjectionPath),
                 DownloadQueueKnown: false,
                 DownloadQueueEntries: 0,
                 ProjectionPathReady: false,
@@ -119,6 +126,9 @@ public sealed class JottacloudProjectionService
             Health: HealthName(cliStatus.Health),
             Code: cliStatus.Code,
             CliVersion: cliStatus.CliVersion,
+            RemotePath: resolved.RemotePath,
+            ProjectionPath: resolved.ProjectionPath,
+            ProjectionPathManaged: resolved.ProjectionPathManaged,
             DownloadQueueKnown: queue.Known,
             DownloadQueueEntries: queue.QueueEntryCount,
             ProjectionPathReady: root.Ready,
@@ -349,13 +359,17 @@ public sealed class JottacloudProjectionService
         => new(runner: _runner);
 
     private static JottacloudProjectionStatusResponse DisabledStatus(
-        PluginConfiguration config)
+        PluginConfiguration config,
+        JottacloudCliStatus cliStatus)
         => new(
             Configured: false,
             Enabled: false,
-            Health: "disabled",
-            Code: "projection-disabled",
-            CliVersion: null,
+            Health: HealthName(cliStatus.Health),
+            Code: cliStatus.Code,
+            CliVersion: cliStatus.CliVersion,
+            RemotePath: NormalizeOptional(config.JottacloudRemotePath),
+            ProjectionPath: null,
+            ProjectionPathManaged: string.IsNullOrWhiteSpace(config.JottacloudProjectionPath),
             DownloadQueueKnown: false,
             DownloadQueueEntries: 0,
             ProjectionPathReady: false,
@@ -385,7 +399,7 @@ public sealed class JottacloudProjectionService
         resolved = default!;
 
         var remotePath = NormalizeOptional(config.JottacloudRemotePath);
-        var projectionPath = NormalizeOptional(config.JottacloudProjectionPath);
+        var projectionPathOverride = NormalizeOptional(config.JottacloudProjectionPath);
         var libraryName = NormalizeOptional(config.JottacloudLibraryName);
         var collectionTypeText = NormalizeOptional(config.JottacloudCollectionType);
 
@@ -403,9 +417,15 @@ public sealed class JottacloudProjectionService
             return false;
         }
 
-        if (projectionPath is null)
+        string projectionPath;
+        try
         {
-            code = "projection-path-required";
+            projectionPath = projectionPathOverride
+                ?? RuntimeSettings.ResolveJottacloudProjectionPath(config, remotePath);
+        }
+        catch (Exception)
+        {
+            code = "projection-path-invalid";
             return false;
         }
 
@@ -469,6 +489,7 @@ public sealed class JottacloudProjectionService
         resolved = new ResolvedConfiguration(
             RemotePath: remotePath,
             ProjectionPath: fullProjectionPath,
+            ProjectionPathManaged: projectionPathOverride is null,
             LibraryName: libraryName,
             CollectionType: collectionType);
         code = "configured";
@@ -665,6 +686,7 @@ public sealed class JottacloudProjectionService
     private sealed record ResolvedConfiguration(
         string RemotePath,
         string ProjectionPath,
+        bool ProjectionPathManaged,
         string LibraryName,
         CollectionTypeOptions CollectionType);
 

@@ -1,3 +1,4 @@
+using System.IO;
 using Jellyfin.Plugin.AudioGateway.Services;
 using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Controller.Plugins;
@@ -102,4 +103,21 @@ public class JellyfinHostIntegrationTests
             "Jellyfin.Plugin.AudioGateway.Configuration.configPage.html",
             typeof(Plugin).Assembly.GetManifestResourceNames());
     }
+
+    [Fact]
+    public void Plugin_CloudConfigurationPage_ContainsFolderManagerInsteadOfRawListing()
+    {
+        var resourceName = "Jellyfin.Plugin.AudioGateway.Configuration.configPage.html";
+        using var stream = typeof(Plugin).Assembly.GetManifestResourceStream(resourceName);
+        Assert.NotNull(stream);
+        using var reader = new StreamReader(stream!);
+        var html = reader.ReadToEnd();
+
+        Assert.Contains("JottacloudBrowserPath", html);
+        Assert.Contains("JottacloudBrowserEntries", html);
+        Assert.Contains("JottacloudUseFolderButton", html);
+        Assert.Contains("Use this folder", html);
+        Assert.DoesNotContain("JottacloudBrowseResults", html);
+    }
+
 }

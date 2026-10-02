@@ -37,12 +37,20 @@
                     </div>
 
                     <div class="verticalSection">
-                        <h3 class="sectionTitle">Jottacloud media projection</h3>
+                        <h3 class="sectionTitle">Cloud media — Jottacloud / Telia / Tele2</h3>
                         <div class="fieldDescription">
-                            Install and authenticate Jottacloud CLI on this server yourself. The companion never
-                            receives login credentials; it manages the already-authenticated local jottad through jotta-cli.
-                            Media is materialized one-way into a dedicated local projection before Jellyfin scans it.
-                            The host may set SLIPMAT_JOTTACLOUD_CLI when jotta-cli is not available on Jellyfin's PATH.
+                            Browse the cloud account from this server, choose a remote media folder, and let Audio Gateway
+                            materialize it into a Jellyfin library. The first-party Jottacloud CLI must be installed and
+                            authenticated in the same OS/container context as Jellyfin. Audio Gateway never asks for or stores
+                            the cloud password, Personal Login Token, OAuth token, or cookies.
+                        </div>
+
+                        <div id="JottacloudSetupSummary"
+                             class="fieldDescription"
+                             role="status"
+                             aria-live="polite"
+                             style="margin-top:0.75em">
+                            Checking server-side Jottacloud access…
                         </div>
 
                         <div class="inputContainer">
@@ -50,33 +58,100 @@
                                 <input id="JottacloudProjectionEnabled"
                                        name="JottacloudProjectionEnabled"
                                        type="checkbox" />
-                                <span>Enable Jottacloud projection</span>
+                                <span>Enable cloud media projection</span>
                             </label>
                         </div>
 
+                        <div class="verticalSection" style="margin-top:1em">
+                            <h4 class="sectionTitle">Cloud folder browser</h4>
+
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="JottacloudBrowserPath">Current remote path</label>
+                                <input id="JottacloudBrowserPath"
+                                       type="text"
+                                       is="emby-input"
+                                       autocomplete="off"
+                                       placeholder="Archive/Music" />
+                            </div>
+
+                            <div style="display:flex;gap:0.5em;flex-wrap:wrap;margin-bottom:0.75em">
+                                <button id="JottacloudBrowserGoButton"
+                                        is="emby-button"
+                                        type="button"
+                                        class="emby-button">
+                                    <span>Open path</span>
+                                </button>
+                                <button id="JottacloudBrowserRootButton"
+                                        is="emby-button"
+                                        type="button"
+                                        class="emby-button">
+                                    <span>Root</span>
+                                </button>
+                                <button id="JottacloudBrowserUpButton"
+                                        is="emby-button"
+                                        type="button"
+                                        class="emby-button">
+                                    <span>Up</span>
+                                </button>
+                                <button id="JottacloudUseFolderButton"
+                                        is="emby-button"
+                                        type="button"
+                                        class="raised emby-button">
+                                    <span>Use this folder</span>
+                                </button>
+                            </div>
+
+                            <div id="JottacloudBrowserStatus"
+                                 class="fieldDescription"
+                                 role="status"
+                                 aria-live="polite">
+                                Open the browser after the server reports that Jottacloud is ready.
+                            </div>
+
+                            <div id="JottacloudBrowserEntries"
+                                 role="list"
+                                 aria-label="Jottacloud remote folder entries"
+                                 style="max-height:22em;overflow:auto;margin-top:0.5em"></div>
+
+                            <div class="fieldDescription" style="margin-top:0.75em">
+                                The certified Jottacloud CLI exposes remote browsing and download, but no documented remote
+                                mkdir operation. To create a new cloud folder, create it in Jottacloud/Telia/Tele2 first,
+                                then return here and open it.
+                            </div>
+                        </div>
+
                         <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="JottacloudRemotePath">Remote folder</label>
+                            <label class="inputLabel inputLabelUnfocused" for="JottacloudRemotePath">Selected cloud media folder</label>
                             <input id="JottacloudRemotePath"
                                    name="JottacloudRemotePath"
                                    type="text"
                                    is="emby-input"
                                    autocomplete="off"
-                                   placeholder="Archive/Music" />
-                        </div>
-
-                        <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="JottacloudProjectionPath">Local projection folder</label>
-                            <input id="JottacloudProjectionPath"
-                                   name="JottacloudProjectionPath"
-                                   type="text"
-                                   is="emby-input"
-                                   autocomplete="off"
-                                   placeholder="/srv/slipmat/jottacloud/music" />
+                                   placeholder="Choose a folder above" />
                             <div class="fieldDescription">
-                                Must be a dedicated absolute directory. Slipmat refuses a non-empty directory it has
-                                not previously claimed for this exact remote folder and never deletes its contents.
+                                This is the remote folder Audio Gateway will mirror one-way for Jellyfin scanning.
                             </div>
                         </div>
+
+                        <details style="margin:1em 0">
+                            <summary>Advanced local storage</summary>
+                            <div class="inputContainer" style="margin-top:0.75em">
+                                <label class="inputLabel inputLabelUnfocused" for="JottacloudProjectionPath">Local projection folder override</label>
+                                <input id="JottacloudProjectionPath"
+                                       name="JottacloudProjectionPath"
+                                       type="text"
+                                       is="emby-input"
+                                       autocomplete="off"
+                                       placeholder="Automatic Jellyfin-managed storage" />
+                                <div class="fieldDescription">
+                                    Leave blank for a dedicated directory managed under Jellyfin's data path. Set an absolute
+                                    path only when the cloud cache belongs on another mounted volume. Audio Gateway never deletes
+                                    projected media and refuses non-empty directories it does not own.
+                                </div>
+                            </div>
+                            <div id="JottacloudResolvedProjectionPath"
+                                 class="fieldDescription"></div>
+                        </details>
 
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="JottacloudLibraryName">Jellyfin library name</label>
@@ -117,38 +192,23 @@
                                     is="emby-button"
                                     type="button"
                                     class="emby-button">
-                                <span>Check status</span>
-                            </button>
-                            <button id="JottacloudBrowseRootButton"
-                                    is="emby-button"
-                                    type="button"
-                                    class="emby-button">
-                                <span>Browse root</span>
-                            </button>
-                            <button id="JottacloudBrowseConfiguredButton"
-                                    is="emby-button"
-                                    type="button"
-                                    class="emby-button">
-                                <span>Browse selected folder</span>
+                                <span>Check server access</span>
                             </button>
                             <button id="JottacloudReconcileButton"
                                     is="emby-button"
                                     type="button"
                                     class="raised emby-button">
-                                <span>Reconcile now</span>
+                                <span>Sync cloud library now</span>
                             </button>
                         </div>
 
                         <div id="JottacloudStatus"
                              class="fieldDescription"
                              role="status"
-                             aria-live="polite">
-                            Save configuration, then check the authenticated daemon.
+                             aria-live="polite"
+                             style="margin-top:0.75em">
+                            Save settings before the first sync.
                         </div>
-                        <pre id="JottacloudBrowseResults"
-                             class="fieldDescription"
-                             aria-label="Jottacloud remote directory listing"
-                             style="white-space:pre-wrap;max-height:18em;overflow:auto"></pre>
                     </div>
 
                     <div class="verticalSection">
@@ -253,6 +313,7 @@
             var IptvOrgBrowseOffset = 0;
             var IptvOrgBrowseTotal = 0;
             var IptvOrgPageSize = 50;
+            var JottacloudBrowserCurrentPath = '';
 
             function textList(value) {
                 return Array.isArray(value)
@@ -441,48 +502,189 @@
                 });
             }
 
+            function normalizeJottacloudPath(value) {
+                return String(value || '')
+                    .trim()
+                    .replace(/\\/g, '/')
+                    .replace(/^\/+|\/+$/g, '')
+                    .replace(/\/{2,}/g, '/');
+            }
+
+            function parentJottacloudPath(value) {
+                const normalized = normalizeJottacloudPath(value);
+                if (!normalized) {
+                    return '';
+                }
+                const parts = normalized.split('/');
+                parts.pop();
+                return parts.join('/');
+            }
+
+            function joinJottacloudPath(base, entry) {
+                const normalizedBase = normalizeJottacloudPath(base);
+                const normalizedEntry = normalizeJottacloudPath(entry);
+                if (!normalizedBase) {
+                    return normalizedEntry;
+                }
+                if (!normalizedEntry) {
+                    return normalizedBase;
+                }
+                if (normalizedEntry === normalizedBase ||
+                    normalizedEntry.startsWith(normalizedBase + '/')) {
+                    return normalizedEntry;
+                }
+                return normalizedBase + '/' + normalizedEntry;
+            }
+
+            function renderJottacloudBrowser(response) {
+                const entries = document.querySelector('#JottacloudBrowserEntries');
+                entries.replaceChildren();
+
+                const lines = response && Array.isArray(response.lines)
+                    ? response.lines
+                        .filter(function(line) { return typeof line === 'string' && line.trim().length > 0; })
+                        .map(function(line) { return line.trim(); })
+                    : [];
+
+                if (lines.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.className = 'fieldDescription';
+                    empty.textContent = 'This folder is empty, or the CLI returned no child entries.';
+                    entries.appendChild(empty);
+                    return;
+                }
+
+                lines.forEach(function(line) {
+                    const row = document.createElement('div');
+                    row.setAttribute('role', 'listitem');
+                    row.style.borderBottom = '1px solid currentColor';
+                    row.style.padding = '0.25em 0';
+
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.setAttribute('is', 'emby-button');
+                    button.className = 'emby-button';
+                    button.style.width = '100%';
+                    button.style.textAlign = 'left';
+                    button.style.justifyContent = 'flex-start';
+                    button.textContent = line;
+                    button.setAttribute('aria-label', 'Open remote entry ' + line);
+                    button.addEventListener('click', function() {
+                        browseJottacloud(joinJottacloudPath(JottacloudBrowserCurrentPath, line));
+                    });
+
+                    row.appendChild(button);
+                    entries.appendChild(row);
+                });
+            }
+
+            function describeJottacloudSetup(response) {
+                const summary = document.querySelector('#JottacloudSetupSummary');
+                if (!response) {
+                    summary.textContent = 'Unable to read Jottacloud server status.';
+                    return;
+                }
+
+                if (response.health === 'ready') {
+                    summary.textContent = 'Server access ready' +
+                        (response.cliVersion ? ' · jotta-cli ' + response.cliVersion : '') +
+                        '. Browse the account below and choose a media folder.';
+                    return;
+                }
+
+                if (response.code === 'cli-unavailable') {
+                    summary.textContent =
+                        'Jottacloud CLI is not available to the Jellyfin process. Install jotta-cli ' +
+                        '0.17.176206 in the same OS/container context as Jellyfin, start jottad, then check again.';
+                    return;
+                }
+
+                if (response.code === 'authentication-required') {
+                    summary.textContent =
+                        'jottad is available but not authenticated for the Jellyfin service context. ' +
+                        'Log in with jotta-cli as that same OS user/runtime, then check again.';
+                    return;
+                }
+
+                if (response.code === 'daemon-unavailable') {
+                    summary.textContent =
+                        'jotta-cli is installed but jottad is not reachable from Jellyfin. Start the daemon in the same service context.';
+                    return;
+                }
+
+                if (response.code === 'unsupported-cli-version') {
+                    summary.textContent =
+                        'Jottacloud CLI version ' + (response.cliVersion || 'unknown') +
+                        ' is not the certified 0.17.176206 build. Update/downgrade before enabling managed projection.';
+                    return;
+                }
+
+                summary.textContent = 'Jottacloud server access is not ready · ' + response.code + '.';
+            }
+
             async function loadJottacloudStatus() {
                 const status = document.querySelector('#JottacloudStatus');
+                const resolvedPath = document.querySelector('#JottacloudResolvedProjectionPath');
                 status.textContent = 'Checking Jottacloud daemon…';
                 try {
                     const response = await ApiClient.getJSON(
                         ApiClient.getUrl('Plugins/AudioGateway/cloud/jottacloud/status')
                     );
+                    describeJottacloudSetup(response);
+
                     const queue = response.downloadQueueKnown
                         ? String(response.downloadQueueEntries) + ' outstanding download queue ' +
                             (response.downloadQueueEntries === 1 ? 'entry' : 'entries')
                         : 'download queue unavailable';
                     const projection = response.projectionHasFiles
                         ? 'projection materialized'
-                        : (response.projectionPathReady ? 'projection ready' : 'projection not ready');
+                        : (response.projectionPathReady ? 'projection ready' : 'projection not materialized yet');
                     const library = response.libraryReady ? 'library ready' : 'library not ready';
+
                     status.textContent = response.health + ' · ' + response.code + ' · ' +
-                        queue + ' · ' + projection + ' · ' + library +
-                        (response.cliVersion ? ' · CLI ' + response.cliVersion : '');
+                        queue + ' · ' + projection + ' · ' + library;
+
+                    resolvedPath.textContent = response.projectionPath
+                        ? (response.projectionPathManaged ? 'Managed path: ' : 'Resolved override: ') + response.projectionPath
+                        : 'The managed path is resolved after a remote folder is selected.';
+
+                    return response;
                 } catch {
+                    describeJottacloudSetup(null);
+                    resolvedPath.textContent = '';
                     status.textContent = 'Unable to read Jottacloud projection status.';
+                    return null;
                 }
             }
 
             async function browseJottacloud(path) {
-                const status = document.querySelector('#JottacloudStatus');
-                const results = document.querySelector('#JottacloudBrowseResults');
-                status.textContent = 'Loading Jottacloud directory…';
-                results.textContent = '';
+                const status = document.querySelector('#JottacloudBrowserStatus');
+                const requested = normalizeJottacloudPath(path);
+                status.textContent = 'Loading ' + (requested || 'cloud root') + '…';
+
                 try {
                     const response = await ApiClient.getJSON(
                         ApiClient.getUrl('Plugins/AudioGateway/cloud/jottacloud/browse', {
-                            path: path || undefined
+                            path: requested || undefined
                         })
                     );
-                    results.textContent = Array.isArray(response.lines)
-                        ? response.lines.join('\n')
-                        : '';
+
+                    JottacloudBrowserCurrentPath = normalizeJottacloudPath(response.path);
+                    document.querySelector('#JottacloudBrowserPath').value = JottacloudBrowserCurrentPath;
+                    document.querySelector('#JottacloudBrowserUpButton').disabled =
+                        JottacloudBrowserCurrentPath.length === 0;
+                    document.querySelector('#JottacloudUseFolderButton').disabled =
+                        JottacloudBrowserCurrentPath.length === 0;
+
+                    renderJottacloudBrowser(response);
                     status.textContent = response.truncated
-                        ? 'Directory loaded; output was truncated.'
-                        : 'Directory loaded.';
+                        ? 'Folder loaded; the listing was truncated.'
+                        : 'Folder loaded. Open an entry to descend, or choose Use this folder.';
+                    return response;
                 } catch {
-                    status.textContent = 'Unable to browse Jottacloud. Check that jottad is logged in under the service-accessible OS context.';
+                    status.textContent =
+                        'Unable to open that entry. It may be a file rather than a folder, or server-side Jottacloud access is not ready.';
+                    return null;
                 }
             }
 
@@ -531,14 +733,38 @@
                     loadJottacloudStatus();
                 });
 
-            document.querySelector('#JottacloudBrowseRootButton')
+            document.querySelector('#JottacloudBrowserGoButton')
+                .addEventListener('click', function() {
+                    browseJottacloud(document.querySelector('#JottacloudBrowserPath').value);
+                });
+
+            document.querySelector('#JottacloudBrowserPath')
+                .addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        browseJottacloud(e.currentTarget.value);
+                    }
+                });
+
+            document.querySelector('#JottacloudBrowserRootButton')
                 .addEventListener('click', function() {
                     browseJottacloud('');
                 });
 
-            document.querySelector('#JottacloudBrowseConfiguredButton')
+            document.querySelector('#JottacloudBrowserUpButton')
                 .addEventListener('click', function() {
-                    browseJottacloud(document.querySelector('#JottacloudRemotePath').value.trim());
+                    browseJottacloud(parentJottacloudPath(JottacloudBrowserCurrentPath));
+                });
+
+            document.querySelector('#JottacloudUseFolderButton')
+                .addEventListener('click', function() {
+                    if (!JottacloudBrowserCurrentPath) {
+                        return;
+                    }
+                    document.querySelector('#JottacloudRemotePath').value = JottacloudBrowserCurrentPath;
+                    document.querySelector('#JottacloudProjectionEnabled').checked = true;
+                    document.querySelector('#JottacloudBrowserStatus').textContent =
+                        'Selected ' + JottacloudBrowserCurrentPath + '. Save settings, then sync the cloud library.';
                 });
 
             document.querySelector('#JottacloudReconcileButton')
@@ -597,9 +823,17 @@
                             document.querySelector('#JottacloudAutoCreateLibrary').checked =
                                 config.JottacloudAutoCreateLibrary !== false;
                             IptvOrgPublishedChannelIds = new Set(textList(config.IptvOrgLiveTvChannelIds));
+                            const configuredCloudPath = normalizeJottacloudPath(config.JottacloudRemotePath || '');
+                            document.querySelector('#JottacloudBrowserPath').value = configuredCloudPath;
+                            JottacloudBrowserCurrentPath = configuredCloudPath;
                             return Promise.all([
                                 loadAudioGatewayStatus(),
-                                loadJottacloudStatus(),
+                                loadJottacloudStatus().then(function(cloudStatus) {
+                                    if (cloudStatus && cloudStatus.health === 'ready') {
+                                        return browseJottacloud(configuredCloudPath);
+                                    }
+                                    return null;
+                                }),
                                 browseIptvOrg(true)
                             ]);
                         })
