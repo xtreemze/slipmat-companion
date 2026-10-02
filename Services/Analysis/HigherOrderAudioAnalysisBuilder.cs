@@ -44,11 +44,12 @@ internal sealed class HigherOrderAudioAnalysisBuilder
     {
         var boundaries = _boundary.Complete();
         var rhythm = _rhythm.Complete(boundaries);
+        var harmonic = _harmonic.Complete();
         var spectral = SpectralArtifactEncoder.EncodeTiers(
             _spectral.Complete(),
             boundaries,
-            rhythm);
-        var harmonic = _harmonic.Complete();
+            rhythm,
+            harmonic);
 
         AnalysisBlocks? blocks = null;
         if (loudness is not null)

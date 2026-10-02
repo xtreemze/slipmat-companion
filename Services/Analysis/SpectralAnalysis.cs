@@ -201,7 +201,8 @@ internal static class SpectralArtifactEncoder
     public static IReadOnlyDictionary<int, byte[]> EncodeTiers(
         SpectralWaveformData detailed,
         TrackBoundaryAnalysis? boundaries,
-        RhythmAnalysisResult rhythm)
+        RhythmAnalysisResult rhythm,
+        HarmonicAnalysisResult? harmonic = null)
     {
         var result = new Dictionary<int, byte[]>(Tiers.Length);
         foreach (var fps in Tiers)
@@ -219,7 +220,8 @@ internal static class SpectralArtifactEncoder
                         detailed.SourceFrameCount,
                         frames),
                     boundaries,
-                    rhythm));
+                    rhythm,
+                    harmonic));
         }
 
         return result;
@@ -274,7 +276,8 @@ internal static class SpectralArtifactEncoder
     private static byte[] Encode(
         SpectralWaveformData waveform,
         TrackBoundaryAnalysis? boundaries,
-        RhythmAnalysisResult rhythm)
+        RhythmAnalysisResult rhythm,
+        HarmonicAnalysisResult? harmonic)
     {
         var lanes = Math.Clamp(waveform.ChannelCount, 1, 2);
         var payload = new byte[waveform.Frames.Count * lanes * 6];
@@ -292,8 +295,13 @@ internal static class SpectralArtifactEncoder
 
         var boundaryExtension = BoundaryArtifactEncoder.Encode(waveform, boundaries);
         var rhythmExtension = EncodeRhythmExtension(waveform, rhythm);
+        var harmonicExtension = EncodeHarmonicExtension(harmonic);
         var headerLength = checked(
-            (ushort)(BaseHeaderLength + boundaryExtension.Length + rhythmExtension.Length));
+            (ushort)(
+                BaseHeaderLength +
+                boundaryExtension.Length +
+                rhythmExtension.Length +
+                harmonicExtension.Length));
         var output = new byte[headerLength + payload.Length];
         var span = output.AsSpan();
 
@@ -318,6 +326,8 @@ internal static class SpectralArtifactEncoder
         boundaryExtension.CopyTo(span[headerOffset..]);
         headerOffset += boundaryExtension.Length;
         rhythmExtension.CopyTo(span[headerOffset..]);
+        headerOffset += rhythmExtension.Length;
+        harmonicExtension.CopyTo(span[headerOffset..]);
         payload.CopyTo(span[headerLength..]);
         return output;
     }
@@ -405,6 +415,36 @@ internal static class SpectralArtifactEncoder
         }
 
         BinaryPrimitives.WriteUInt32LittleEndian(span[offset..(offset + 4)], Crc32(span[..offset]));
+        return bytes;
+    }
+
+    private static byte[] EncodeHarmonicExtension(HarmonicAnalysisResult? harmonic)
+    {
+        const ushort extensionLength = 24;
+        if (harmonic is null ||
+            !harmonic.HasKey ||
+            harmonic.RootIndex is < 0 or > 11 ||
+            !double.IsFinite(harmonic.Confidence) ||
+            harmonic.Confidence < 0d ||
+            harmonic.Confidence > 1d)
+        {
+            return [];
+        }
+
+        var bytes = new byte[extensionLength];
+        var span = bytes.AsSpan();
+        Encoding.ASCII.GetBytes("SHRM").CopyTo(span);
+        BinaryPrimitives.WriteUInt16LittleEndian(span[4..6], 1);
+        BinaryPrimitives.WriteUInt16LittleEndian(span[6..8], extensionLength);
+        BinaryPrimitives.WriteUInt16LittleEndian(span[8..10], 1);
+        BinaryPrimitives.WriteUInt16LittleEndian(span[10..12], 1);
+        span[12] = checked((byte)harmonic.RootIndex);
+        span[13] = harmonic.IsMajor ? (byte)0 : (byte)1;
+        BinaryPrimitives.WriteUInt16LittleEndian(span[14..16], 0);
+        BinaryPrimitives.WriteInt32LittleEndian(
+            span[16..20],
+            BitConverter.SingleToInt32Bits((float)harmonic.Confidence));
+        BinaryPrimitives.WriteUInt32LittleEndian(span[20..24], Crc32(span[..20]));
         return bytes;
     }
 
