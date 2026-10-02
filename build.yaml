@@ -9,7 +9,7 @@ description: >
   Audio Gateway reduces Jellyfin request fan-out, serves precomputed audio-analysis
   artifacts, provides bounded podcast/directory/media acquisition when browser networking
   prevents direct access, projects selected iptv-org channels through Jellyfin Live TV,
-  and can materialize an operator-authenticated Jottacloud folder into a guarded Jellyfin
+  and can materialize an operator-configured rclone remote into a guarded Jellyfin
   library. Slipmat remains fully functional without the companion and retains all product authority.
 category: "General"
 owner: "xtreemze"
