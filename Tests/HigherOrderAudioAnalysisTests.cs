@@ -98,6 +98,45 @@ public class HigherOrderAudioAnalysisTests
         Assert.InRange(result.Confidence, 0d, 1d);
     }
 
+    private static HarmonicAnalysisResult AnalyzeHarmonicVector(params float[] frequencies)
+    {
+        const int sampleRate = 48_000;
+        var analyzer = new HarmonicAccumulator(sampleRate);
+        for (var index = 0; index < sampleRate * 5; index++)
+        {
+            var time = index / (float)sampleRate;
+            var sample = 0f;
+            foreach (var frequency in frequencies)
+            {
+                sample += MathF.Sin(2f * MathF.PI * frequency * time);
+            }
+
+            analyzer.Push(sample / frequencies.Length * 0.5f);
+        }
+
+        return analyzer.Complete();
+    }
+
+    [Fact]
+    public void HarmonicAccumulator_SharedCMajorVectorPinsKeyAndConfidence()
+    {
+        var result = AnalyzeHarmonicVector(261.62558f, 329.62756f, 391.99542f);
+
+        Assert.Equal("C Major", result.Key);
+        Assert.Equal("8B", result.CamelotKey);
+        Assert.InRange(result.Confidence, 0.37053d, 0.37453d);
+    }
+
+    [Fact]
+    public void HarmonicAccumulator_SharedAMinorVectorPinsKeyAndConfidence()
+    {
+        var result = AnalyzeHarmonicVector(220f, 261.62558f, 329.62756f);
+
+        Assert.Equal("A Minor", result.Key);
+        Assert.Equal("8A", result.CamelotKey);
+        Assert.InRange(result.Confidence, 0.58432d, 0.58832d);
+    }
+
     [Theory]
     [InlineData(0, false, "5A")]
     [InlineData(2, false, "7A")]
