@@ -167,7 +167,9 @@ public class ExtensionContractTests
             .Where(method => method.DeclaringType == controller);
 
         Assert.All(
-            methods.SelectMany(method => method.GetParameters()),
+            methods
+                .SelectMany(method => method.GetParameters())
+                .Where(parameter => parameter.ParameterType != typeof(System.Threading.CancellationToken)),
             parameter => Assert.DoesNotContain(
                 new[] { "token", "password", "credential", "cookie", "authorization", "secret" },
                 fragment => parameter.Name?.Contains(fragment, StringComparison.OrdinalIgnoreCase) == true));
