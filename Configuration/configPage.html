@@ -887,48 +887,91 @@
                 }
             }
 
-            document.querySelector('#JottacloudStatusButton')
+            document.querySelector('#CloudRefreshRemotesButton')
                 .addEventListener('click', function() {
-                    loadJottacloudStatus();
+                    const selected = document.querySelector('#CloudRemoteName').value;
+                    loadCloudRemotes(selected).then(function() {
+                        if (document.querySelector('#CloudRemoteName').value) {
+                            return browseCloud(document.querySelector('#CloudRemoteName').value, '');
+                        }
+                        return null;
+                    });
                 });
 
-            document.querySelector('#JottacloudBrowserGoButton')
+            document.querySelector('#CloudStatusButton')
                 .addEventListener('click', function() {
-                    browseJottacloud(document.querySelector('#JottacloudBrowserPath').value);
+                    loadCloudStatus();
                 });
 
-            document.querySelector('#JottacloudBrowserPath')
+            document.querySelector('#CloudRemoteName')
+                .addEventListener('change', function(e) {
+                    CloudBrowserCurrentRemote = e.currentTarget.value;
+                    CloudBrowserCurrentPath = '';
+                    document.querySelector('#CloudBrowserPath').value = '';
+                    document.querySelector('#CloudBrowserEntries').replaceChildren();
+                    if (CloudBrowserCurrentRemote) {
+                        browseCloud(CloudBrowserCurrentRemote, '');
+                    }
+                });
+
+            document.querySelector('#CloudBrowserGoButton')
+                .addEventListener('click', function() {
+                    browseCloud(
+                        document.querySelector('#CloudRemoteName').value,
+                        document.querySelector('#CloudBrowserPath').value);
+                });
+
+            document.querySelector('#CloudBrowserPath')
                 .addEventListener('keydown', function(e) {
                     if (e.key === 'Enter') {
                         e.preventDefault();
-                        browseJottacloud(e.currentTarget.value);
+                        browseCloud(
+                            document.querySelector('#CloudRemoteName').value,
+                            e.currentTarget.value);
                     }
                 });
 
-            document.querySelector('#JottacloudBrowserRootButton')
+            document.querySelector('#CloudBrowserRootButton')
                 .addEventListener('click', function() {
-                    browseJottacloud('');
+                    browseCloud(document.querySelector('#CloudRemoteName').value, '');
                 });
 
-            document.querySelector('#JottacloudBrowserUpButton')
+            document.querySelector('#CloudBrowserUpButton')
                 .addEventListener('click', function() {
-                    browseJottacloud(parentJottacloudPath(JottacloudBrowserCurrentPath));
+                    browseCloud(
+                        document.querySelector('#CloudRemoteName').value,
+                        parentCloudPath(CloudBrowserCurrentPath));
                 });
 
-            document.querySelector('#JottacloudUseFolderButton')
+            document.querySelector('#CloudUseFolderButton')
                 .addEventListener('click', function() {
-                    if (!JottacloudBrowserCurrentPath) {
+                    const remote = document.querySelector('#CloudRemoteName').value;
+                    if (!remote) {
                         return;
                     }
-                    document.querySelector('#JottacloudRemotePath').value = JottacloudBrowserCurrentPath;
-                    document.querySelector('#JottacloudProjectionEnabled').checked = true;
-                    document.querySelector('#JottacloudBrowserStatus').textContent =
-                        'Selected ' + JottacloudBrowserCurrentPath + '. Save settings, then sync the cloud library.';
+                    document.querySelector('#CloudRemotePath').value = CloudBrowserCurrentPath;
+                    document.querySelector('#CloudProjectionEnabled').checked = true;
+                    document.querySelector('#CloudBrowserStatus').textContent =
+                        'Selected ' + remote + ':' + (CloudBrowserCurrentPath || '/') +
+                        '. Save settings, then sync the cloud library.';
                 });
 
-            document.querySelector('#JottacloudReconcileButton')
+            document.querySelector('#CloudCreateFolderButton')
                 .addEventListener('click', function() {
-                    reconcileJottacloud();
+                    createCloudFolder();
+                });
+
+            document.querySelector('#CloudNewFolderName')
+                .addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        createCloudFolder();
+                    }
+                });
+
+            document.querySelector('#CloudReconcileButton')
+                .addEventListener('click', function() {
+                    reconcileCloud();
                 });
 
             document.querySelector('#IptvOrgBrowseButton')
@@ -969,27 +1012,30 @@
                     ApiClient.getPluginConfiguration(AudioGatewayConfig.pluginUniqueId)
                         .then(function(config) {
                             document.querySelector('#StoreRoot').value = config.StoreRoot || '';
-                            document.querySelector('#JottacloudProjectionEnabled').checked =
-                                config.JottacloudProjectionEnabled === true;
-                            document.querySelector('#JottacloudRemotePath').value =
-                                config.JottacloudRemotePath || '';
-                            document.querySelector('#JottacloudProjectionPath').value =
-                                config.JottacloudProjectionPath || '';
-                            document.querySelector('#JottacloudLibraryName').value =
-                                config.JottacloudLibraryName || 'Jottacloud';
-                            document.querySelector('#JottacloudCollectionType').value =
-                                config.JottacloudCollectionType || 'music';
-                            document.querySelector('#JottacloudAutoCreateLibrary').checked =
-                                config.JottacloudAutoCreateLibrary !== false;
+                            document.querySelector('#CloudProjectionEnabled').checked =
+                                config.CloudProjectionEnabled === true;
+                            document.querySelector('#CloudRemotePath').value =
+                                config.CloudRemotePath || '';
+                            document.querySelector('#CloudProjectionPath').value =
+                                config.CloudProjectionPath || '';
+                            document.querySelector('#CloudLibraryName').value =
+                                config.CloudLibraryName || 'Cloud Media';
+                            document.querySelector('#CloudCollectionType').value =
+                                config.CloudCollectionType || 'music';
+                            document.querySelector('#CloudAutoCreateLibrary').checked =
+                                config.CloudAutoCreateLibrary !== false;
                             IptvOrgPublishedChannelIds = new Set(textList(config.IptvOrgLiveTvChannelIds));
-                            const configuredCloudPath = normalizeJottacloudPath(config.JottacloudRemotePath || '');
-                            document.querySelector('#JottacloudBrowserPath').value = configuredCloudPath;
-                            JottacloudBrowserCurrentPath = configuredCloudPath;
+                            const configuredCloudPath = normalizeCloudPath(config.CloudRemotePath || '');
+                            document.querySelector('#CloudBrowserPath').value = configuredCloudPath;
+                            CloudBrowserCurrentPath = configuredCloudPath;
                             return Promise.all([
                                 loadAudioGatewayStatus(),
-                                loadJottacloudStatus().then(function(cloudStatus) {
-                                    if (cloudStatus && cloudStatus.health === 'ready') {
-                                        return browseJottacloud(configuredCloudPath);
+                                loadCloudRemotes(config.CloudRemoteName || '').then(function() {
+                                    CloudBrowserCurrentRemote = document.querySelector('#CloudRemoteName').value;
+                                    return loadCloudStatus();
+                                }).then(function(cloudStatus) {
+                                    if (cloudStatus && cloudStatus.health === 'ready' && CloudBrowserCurrentRemote) {
+                                        return browseCloud(CloudBrowserCurrentRemote, configuredCloudPath);
                                     }
                                     return null;
                                 }),
@@ -1007,18 +1053,20 @@
                     ApiClient.getPluginConfiguration(AudioGatewayConfig.pluginUniqueId)
                         .then(function(config) {
                             config.StoreRoot = document.querySelector('#StoreRoot').value.trim();
-                            config.JottacloudProjectionEnabled =
-                                document.querySelector('#JottacloudProjectionEnabled').checked;
-                            config.JottacloudRemotePath =
-                                document.querySelector('#JottacloudRemotePath').value.trim();
-                            config.JottacloudProjectionPath =
-                                document.querySelector('#JottacloudProjectionPath').value.trim();
-                            config.JottacloudLibraryName =
-                                document.querySelector('#JottacloudLibraryName').value.trim() || 'Jottacloud';
-                            config.JottacloudCollectionType =
-                                document.querySelector('#JottacloudCollectionType').value;
-                            config.JottacloudAutoCreateLibrary =
-                                document.querySelector('#JottacloudAutoCreateLibrary').checked;
+                            config.CloudProjectionEnabled =
+                                document.querySelector('#CloudProjectionEnabled').checked;
+                            config.CloudRemoteName =
+                                document.querySelector('#CloudRemoteName').value;
+                            config.CloudRemotePath =
+                                document.querySelector('#CloudRemotePath').value.trim();
+                            config.CloudProjectionPath =
+                                document.querySelector('#CloudProjectionPath').value.trim();
+                            config.CloudLibraryName =
+                                document.querySelector('#CloudLibraryName').value.trim() || 'Cloud Media';
+                            config.CloudCollectionType =
+                                document.querySelector('#CloudCollectionType').value;
+                            config.CloudAutoCreateLibrary =
+                                document.querySelector('#CloudAutoCreateLibrary').checked;
                             config.IptvOrgLiveTvChannelIds = Array.from(IptvOrgPublishedChannelIds).sort();
                             return ApiClient.updatePluginConfiguration(AudioGatewayConfig.pluginUniqueId, config);
                         })
@@ -1029,7 +1077,7 @@
                         .then(function() {
                             return Promise.all([
                                 loadAudioGatewayStatus(),
-                                loadJottacloudStatus(),
+                                loadCloudStatus(),
                                 browseIptvOrg(false)
                             ]);
                         })
