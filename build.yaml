@@ -1,7 +1,7 @@
 ---
 name: "Audio Gateway"
 guid: "d3a2b1c0-e4f5-6789-abcd-ef0123456789"
-version: "0.3.0.2"
+version: "0.3.1.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 overview: "Optional Jellyfin companion that accelerates and enriches Slipmat."
@@ -15,4 +15,4 @@ category: "General"
 owner: "xtreemze"
 artifacts:
 - "Jellyfin.Plugin.AudioGateway.dll"
-changelog: "Correct minor-key Camelot projection so companion harmonic facts map C minor to 5A and A minor to 8A."
+changelog: "Add canonical SHRM harmonic-key evidence to SLWS with typed pitch, mode, confidence, analyzer version, independent CRC, and shared Rust/C# container vectors."
