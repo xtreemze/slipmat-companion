@@ -60,7 +60,7 @@ public class TrackPlaybackEventService
             _analysisWorker.TryEnqueue(itemGuid);
         }
 
-        var artworkPalette = _artworkPaletteService.ResolveForTrack(item);
+        var artworkPalette = _artworkPaletteService.ResolveForTrack(audio);
 
         return TrackPlaybackEventComposer.Compose(
             track,
