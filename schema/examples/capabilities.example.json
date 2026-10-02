@@ -14,7 +14,8 @@
     "podcastSubscriptions": true,
     "podcastFeedRefresh": true,
     "podcastSnapshotCache": false,
-    "remoteMediaRelay": true
+    "remoteMediaRelay": true,
+    "artworkPalette": true
   },
   "analyzerHealthy": true,
   "storeWritable": true,
