@@ -44,8 +44,8 @@
       "beatGrid": { "startOffsetMs": 0.0, "intervalMs": 438.9 }
     },
     "harmonic": {
-      "key": "D Dorian",
-      "camelotKey": "7A",
+      "key": "A Minor",
+      "camelotKey": "8A",
       "keyConfidence": 0.88
     },
     "structure": {
