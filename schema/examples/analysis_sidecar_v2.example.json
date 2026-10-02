@@ -50,6 +50,20 @@
       "integratedLufs": -17.3,
       "truePeak": -2.1,
       "dynamicRange": 14.8
+    },
+    "loudnessMeasurement": {
+      "version": 1,
+      "scope": "track",
+      "authority": "server-analysis",
+      "semantics": "ffmpeg-loudnorm-input",
+      "analyzer": {
+        "name": "ffmpeg-loudnorm",
+        "version": "1",
+        "configurationDigest": "sha256:d067e146e6dd806228d993e7cb40501a80c464fb84af3af7ecfa32f5fca2b4ec"
+      },
+      "integratedLufs": -17.3,
+      "truePeakDbtp": -2.1,
+      "loudnessRangeLu": 14.8
     }
   }
 }
