@@ -136,6 +136,7 @@ public class ModelRoundTripTests
         Assert.False(caps.Modules.PodcastSubscriptions);
         Assert.True(caps.Modules.PodcastFeedRefresh);
         Assert.False(caps.Modules.PodcastSnapshotCache);
+        Assert.True(caps.Modules.ArtworkPalette);
         Assert.False(caps.StoreWritable);
         Assert.NotEmpty(caps.DegradedReasons);
     }
