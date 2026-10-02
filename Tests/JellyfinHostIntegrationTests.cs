@@ -124,4 +124,24 @@ public class JellyfinHostIntegrationTests
         Assert.DoesNotContain("jotta-cli", html, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void Plugin_ConfigurationPage_UsesThemeAdaptiveAccessibleFormControls()
+    {
+        var resourceName = "Jellyfin.Plugin.AudioGateway.Configuration.configPage.html";
+        using var stream = typeof(Plugin).Assembly.GetManifestResourceStream(resourceName);
+        Assert.NotNull(stream);
+        using var reader = new StreamReader(stream!);
+        var html = reader.ReadToEnd();
+
+        Assert.Contains("--slipmat-control-surface", html);
+        Assert.Contains("color-mix(in srgb, currentColor", html);
+        Assert.Contains(":focus-visible", html);
+        Assert.Contains("::placeholder", html);
+        Assert.Contains("@media (forced-colors: active)", html);
+        Assert.Contains("background: Canvas !important", html);
+        Assert.Contains("color: CanvasText !important", html);
+        Assert.DoesNotContain("background: white", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("background-color: white", html, StringComparison.OrdinalIgnoreCase);
+    }
+
 }

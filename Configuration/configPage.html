@@ -3,6 +3,97 @@
 <head>
     <meta charset="utf-8">
     <title>Audio Gateway</title>
+    <style>
+        /*
+         * Jellyfin themes the surrounding dashboard. Keep this page scoped and
+         * derive control surfaces from the inherited foreground so the same
+         * rules remain legible in light, dark, and custom host themes.
+         */
+        #AudioGatewayConfigPage {
+            --slipmat-control-surface: transparent;
+            --slipmat-control-border: currentColor;
+            --slipmat-control-border-hover: currentColor;
+        }
+
+        @supports (color: color-mix(in srgb, currentColor 50%, transparent)) {
+            #AudioGatewayConfigPage {
+                --slipmat-control-surface: color-mix(in srgb, currentColor 8%, transparent);
+                --slipmat-control-border: color-mix(in srgb, currentColor 50%, transparent);
+                --slipmat-control-border-hover: color-mix(in srgb, currentColor 72%, transparent);
+            }
+        }
+
+        #AudioGatewayConfigPage :is(
+            input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]),
+            select,
+            textarea
+        ) {
+            background: var(--slipmat-control-surface) !important;
+            border-color: var(--slipmat-control-border) !important;
+            color: inherit !important;
+            caret-color: currentColor;
+        }
+
+        #AudioGatewayConfigPage :is(
+            input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]),
+            select,
+            textarea
+        ):hover {
+            border-color: var(--slipmat-control-border-hover) !important;
+        }
+
+        #AudioGatewayConfigPage :is(
+            input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]),
+            select,
+            textarea
+        ):focus-visible {
+            border-color: currentColor !important;
+            outline: 2px solid currentColor;
+            outline-offset: 2px;
+        }
+
+        #AudioGatewayConfigPage input::placeholder,
+        #AudioGatewayConfigPage textarea::placeholder {
+            color: inherit !important;
+            opacity: 0.78;
+        }
+
+        #AudioGatewayConfigPage :is(input, select, textarea):disabled {
+            opacity: 1;
+            cursor: not-allowed;
+        }
+
+        #AudioGatewayConfigPage input[type="checkbox"],
+        #AudioGatewayConfigPage input[type="radio"] {
+            color: inherit;
+            accent-color: currentColor;
+        }
+
+        #AudioGatewayConfigPage :is(
+            input[type="checkbox"],
+            input[type="radio"]
+        ):focus-visible {
+            outline: 2px solid currentColor;
+            outline-offset: 2px;
+        }
+
+        @media (forced-colors: active) {
+            #AudioGatewayConfigPage :is(input, select, textarea) {
+                background: Canvas !important;
+                border-color: ButtonText !important;
+                color: CanvasText !important;
+                forced-color-adjust: auto;
+            }
+
+            #AudioGatewayConfigPage :is(input, select, textarea):focus-visible {
+                outline-color: Highlight;
+            }
+
+            #AudioGatewayConfigPage :is(input[type="checkbox"], input[type="radio"]) {
+                accent-color: Highlight;
+            }
+        }
+    </style>
 </head>
 <body>
     <div id="AudioGatewayConfigPage"
