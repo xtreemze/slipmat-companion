@@ -84,6 +84,10 @@ Atlas concept/catalog/request routes and streamrip status/search routes do not e
 
 Audio Gateway can manage a **pre-installed and pre-authenticated** first-party Jottacloud CLI/daemon as an optional Jellyfin-side media projection.
 
+The Jellyfin plugin settings include a server-side cloud folder browser. When the CLI/daemon is ready, an administrator can open the Jottacloud namespace, navigate remote entries, move to root/parent paths, and choose **Use this folder** to populate the managed media root. The local materialization directory is automatic by default under Jellyfin-managed data; an absolute local path is only an advanced override for deployments that want cloud cache bytes on another mounted volume.
+
+The certified CLI documents remote browsing and download but does not document a remote mkdir command. Audio Gateway therefore does not fabricate cloud-folder creation through a private/undocumented API: create a new folder in Jottacloud/Telia/Tele2 first, then select it from the server-side browser.
+
 The server administrator installs the supported CLI and completes `jotta-cli login` over SSH. The plugin never receives a Jottacloud password, Personal Login Token, OAuth token, cookie, or daemon credential file. It uses `jotta-cli` from Jellyfin's service `PATH`, or the operator-controlled `SLIPMAT_JOTTACLOUD_CLI` environment variable.
 
 The initial certified CLI is **0.17.176206**. Unsupported versions fail closed. The companion fingerprints the documented authenticated-account value with SHA-256 and binds that fingerprint plus the configured remote folder into the local projection marker; the raw account value is neither persisted nor returned.
