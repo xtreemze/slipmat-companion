@@ -11,7 +11,7 @@
   "artifacts": [
     {
       "kind": "waveform",
-      "variant": "awf_v1_native_mono_b8",
+      "variant": "awf_v1_riff_mono_u8_peak",
       "ratePerSecond": 10,
       "etag": "\"etag-10\""
     },

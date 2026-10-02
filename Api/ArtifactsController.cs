@@ -106,7 +106,7 @@ public class ArtifactsController : ControllerBase
     }
 
     /// <summary>
-    /// GET /Plugins/AudioGateway/artifacts/waveform/{itemId}?variant=awf_v1_native_mono_b8&amp;pps=10
+    /// GET /Plugins/AudioGateway/artifacts/waveform/{itemId}?variant=awf_v1_riff_mono_u8_peak&amp;pps=10
     /// </summary>
     [HttpGet("artifacts/waveform/{itemId}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -115,7 +115,7 @@ public class ArtifactsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public IActionResult GetWaveformArtifact(
         string itemId,
-        [FromQuery] string variant = "awf_v1_native_mono_b8",
+        [FromQuery] string variant = "awf_v1_riff_mono_u8_peak",
         [FromQuery] int pps = 10)
     {
         string subjectStoreKey;

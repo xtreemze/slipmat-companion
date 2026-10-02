@@ -155,13 +155,13 @@ public class ModelRoundTripTests
     public void ETag_Waveform_VariesByPps()
     {
         var fp = "a1b2c3d4e5f6789012345678901234567890abcdef0123456789abcdef012345";
-        var etag1 = ArtifactsController.BuildETagForWaveform(fp, "awf_v1_native_mono_b8", 1);
-        var etag10 = ArtifactsController.BuildETagForWaveform(fp, "awf_v1_native_mono_b8", 10);
-        var etag100 = ArtifactsController.BuildETagForWaveform(fp, "awf_v1_native_mono_b8", 100);
+        var etag1 = ArtifactsController.BuildETagForWaveform(fp, "awf_v1_riff_mono_u8_peak", 1);
+        var etag10 = ArtifactsController.BuildETagForWaveform(fp, "awf_v1_riff_mono_u8_peak", 10);
+        var etag100 = ArtifactsController.BuildETagForWaveform(fp, "awf_v1_riff_mono_u8_peak", 100);
         Assert.NotEqual(etag1, etag10);
         Assert.NotEqual(etag10, etag100);
         Assert.Contains(fp, etag10);
-        Assert.Contains("awf_v1_native_mono_b8", etag10);
+        Assert.Contains("awf_v1_riff_mono_u8_peak", etag10);
         Assert.Contains("10", etag10);
     }
 
@@ -169,8 +169,8 @@ public class ModelRoundTripTests
     public void ETag_Waveform_IsStableForSameInputs()
     {
         var fp = "a1b2c3d4e5f6789012345678901234567890abcdef0123456789abcdef012345";
-        var e1 = ArtifactsController.BuildETagForWaveform(fp, "awf_v1_native_mono_b8", 10);
-        var e2 = ArtifactsController.BuildETagForWaveform(fp, "awf_v1_native_mono_b8", 10);
+        var e1 = ArtifactsController.BuildETagForWaveform(fp, "awf_v1_riff_mono_u8_peak", 10);
+        var e2 = ArtifactsController.BuildETagForWaveform(fp, "awf_v1_riff_mono_u8_peak", 10);
         Assert.Equal(e1, e2);
     }
 }
