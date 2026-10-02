@@ -152,6 +152,22 @@ public class ModelRoundTripTests
         Assert.NotNull(sidecar.Analysis);
         Assert.Equal("A Minor", sidecar.Analysis!.Harmonic.Key);
         Assert.Equal("8A", sidecar.Analysis.Harmonic.CamelotKey);
+        Assert.NotNull(sidecar.Analysis.LoudnessMeasurement);
+        Assert.Equal(1, sidecar.Analysis.LoudnessMeasurement!.Version);
+        Assert.Equal("track", sidecar.Analysis.LoudnessMeasurement.Scope);
+        Assert.Equal("server-analysis", sidecar.Analysis.LoudnessMeasurement.Authority);
+        Assert.Equal(
+            "ffmpeg-loudnorm-input",
+            sidecar.Analysis.LoudnessMeasurement.Semantics);
+        Assert.Equal(
+            "ffmpeg-loudnorm",
+            sidecar.Analysis.LoudnessMeasurement.Analyzer.Name);
+        Assert.Equal(
+            "sha256:d067e146e6dd806228d993e7cb40501a80c464fb84af3af7ecfa32f5fca2b4ec",
+            sidecar.Analysis.LoudnessMeasurement.Analyzer.ConfigurationDigest);
+        Assert.Equal(-17.3d, sidecar.Analysis.LoudnessMeasurement.IntegratedLufs, 2);
+        Assert.Equal(-2.1d, sidecar.Analysis.LoudnessMeasurement.TruePeakDbtp!.Value, 2);
+        Assert.Equal(14.8d, sidecar.Analysis.LoudnessMeasurement.LoudnessRangeLu!.Value, 2);
         Assert.DoesNotContain("itemId", File.ReadAllText(path));
     }
 
