@@ -62,6 +62,7 @@ Presence of experimental source code does not grant product authority. The capab
 | GET | `/Plugins/AudioGateway/artifacts/waveform/{itemId}?variant=awf_v1_riff_mono_u8_peak&pps=10` | Authenticated waveform/spectral artifact with ETag / 304 support |
 | GET | `/Plugins/AudioGateway/events/track/{itemId}?include=waveform,sidecar&waveformPps=10` | Authenticated optional track metadata composition, including artwork palette evidence when available |
 | POST | `/Plugins/AudioGateway/events/track/batch` | Authenticated batch track metadata lookup, including artwork palette evidence before activation |
+| GET | `/Plugins/AudioGateway/artwork/palette/{itemId}` | Authenticated presentation-neutral palette evidence for any Jellyfin item with primary artwork |
 | GET | `/Plugins/AudioGateway/podcasts/subscriptions` | Authenticated current-user podcast subscription replica |
 | POST | `/Plugins/AudioGateway/podcasts/subscriptions/sync` | Authenticated deterministic merge of the current user's client/server subscription replicas |
 | POST | `/Plugins/AudioGateway/podcasts/resources/fetch` | Authenticated bounded feed/chapter/transcript acquisition for browser CORS fallback |
