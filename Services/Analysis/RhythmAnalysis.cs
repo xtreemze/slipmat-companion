@@ -287,11 +287,38 @@ internal static class RhythmGridAnalyzer
         return output;
     }
 
-    private static double PositiveLogDelta(float current, float previous)
+    internal static double PositiveLogDelta(float current, float previous)
         => Math.Max(
             0d,
-            Math.Log(1d + Math.Max(0d, current) * 1_000d) -
-            Math.Log(1d + Math.Max(0d, previous) * 1_000d));
+            LogOnePlus(Math.Max(0d, current) * 1_000d) -
+            LogOnePlus(Math.Max(0d, previous) * 1_000d));
+
+    // Rust's f64::ln_1p preserves tiny positive deltas that Math.Log(1 + x)
+    // rounds away. .NET Double.LogP1 currently differs at the subnormal-scale
+    // regression vector, so use a short alternating series in the region where
+    // cancellation matters and the ordinary logarithm elsewhere.
+    internal static double LogOnePlus(double value)
+    {
+        if (value < 0d)
+        {
+            throw new ArgumentOutOfRangeException(nameof(value));
+        }
+
+        if (value < 1e-4d)
+        {
+            var squared = value * value;
+            var cubed = squared * value;
+            var fourth = cubed * value;
+            var fifth = fourth * value;
+            return value -
+                squared / 2d +
+                cubed / 3d -
+                fourth / 4d +
+                fifth / 5d;
+        }
+
+        return Math.Log(1d + value);
+    }
 
     private static double NormalizedAutocorrelation(IReadOnlyList<double> values, int lag)
     {
