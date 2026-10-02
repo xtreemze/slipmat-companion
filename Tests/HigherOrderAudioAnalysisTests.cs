@@ -98,6 +98,45 @@ public class HigherOrderAudioAnalysisTests
         Assert.InRange(result.Confidence, 0d, 1d);
     }
 
+    private static HarmonicAnalysisResult AnalyzeHarmonicVector(params float[] frequencies)
+    {
+        const int sampleRate = 48_000;
+        var analyzer = new HarmonicAccumulator(sampleRate);
+        for (var index = 0; index < sampleRate * 5; index++)
+        {
+            var time = index / (float)sampleRate;
+            var sample = 0f;
+            foreach (var frequency in frequencies)
+            {
+                sample += MathF.Sin(2f * MathF.PI * frequency * time);
+            }
+
+            analyzer.Push(sample / frequencies.Length * 0.5f);
+        }
+
+        return analyzer.Complete();
+    }
+
+    [Fact]
+    public void HarmonicAccumulator_SharedCMajorVectorPinsKeyAndConfidence()
+    {
+        var result = AnalyzeHarmonicVector(261.62558f, 329.62756f, 391.99542f);
+
+        Assert.Equal("C Major", result.Key);
+        Assert.Equal("8B", result.CamelotKey);
+        Assert.InRange(result.Confidence, 0.37053d, 0.37453d);
+    }
+
+    [Fact]
+    public void HarmonicAccumulator_SharedAMinorVectorPinsKeyAndConfidence()
+    {
+        var result = AnalyzeHarmonicVector(220f, 261.62558f, 329.62756f);
+
+        Assert.Equal("A Minor", result.Key);
+        Assert.Equal("8A", result.CamelotKey);
+        Assert.InRange(result.Confidence, 0.58432d, 0.58832d);
+    }
+
     [Theory]
     [InlineData(0, false, "5A")]
     [InlineData(2, false, "7A")]
@@ -364,6 +403,68 @@ public class HigherOrderAudioAnalysisTests
         Assert.Equal((ushort)6, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(62, 2)));
         Assert.Equal("SRHY", Encoding.ASCII.GetString(bytes, 156, 4));
         Assert.Equal(0xAD98_B5E9u, SpectralArtifactEncoder.Crc32(bytes));
+    }
+
+    [Fact]
+    public void SlwsHarmonicParityFixture_MatchesCanonicalRustShrmContainer()
+    {
+        var frames = Enumerable.Repeat(
+            new SpectralPeakFrame(default, default),
+            1_000).ToArray();
+        var detailed = new SpectralWaveformData(
+            SampleRate: 100,
+            FramesPerSecond: 100,
+            ChannelCount: 1,
+            SourceFrameCount: 1_000,
+            Frames: frames);
+        var boundaries = new TrackBoundaryAnalysis(
+            AudibleStartSeconds: 0.5d,
+            AudibleEndSeconds: 9.5d,
+            Intro: new IntroBoundary(
+                IntroBoundaryKind.FadeIn,
+                0.5d,
+                2d,
+                0.82f),
+            Outro: new OutroBoundary(
+                OutroBoundaryKind.FadeOut,
+                7d,
+                9.5d,
+                0.91f),
+            QuickFade: null,
+            NoiseFloorRms: 0.01f);
+        var rhythm = new RhythmAnalysisResult(
+            120d,
+            0.9d,
+            Enumerable.Range(0, 20).Select(index => index * 0.5d).ToArray(),
+            Enumerable.Range(0, 5).Select(index => index * 2d).ToArray(),
+            4);
+        var harmonic = new HarmonicAnalysisResult(
+            "C Major",
+            "8B",
+            0.82d,
+            0,
+            true);
+
+        var bytes = SpectralArtifactEncoder.EncodeTiers(
+            detailed,
+            boundaries,
+            rhythm,
+            harmonic)[10];
+
+        Assert.Equal(908, bytes.Length);
+        Assert.Equal((ushort)308, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(6, 2)));
+        Assert.Equal("SBND", Encoding.ASCII.GetString(bytes, 52, 4));
+        Assert.Equal("SRHY", Encoding.ASCII.GetString(bytes, 156, 4));
+        Assert.Equal("SHRM", Encoding.ASCII.GetString(bytes, 284, 4));
+        Assert.Equal((ushort)1, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(288, 2)));
+        Assert.Equal((ushort)24, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(290, 2)));
+        Assert.Equal((byte)0, bytes[296]);
+        Assert.Equal((byte)0, bytes[297]);
+        Assert.Equal(
+            0.82f,
+            BitConverter.Int32BitsToSingle(
+                BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(300, 4))));
+        Assert.Equal(0xF403_4280u, SpectralArtifactEncoder.Crc32(bytes));
     }
 
     [Fact]

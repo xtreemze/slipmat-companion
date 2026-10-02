@@ -6,10 +6,17 @@ namespace Jellyfin.Plugin.AudioGateway.Services.Analysis;
 internal sealed record HarmonicAnalysisResult(
     string Key,
     string CamelotKey,
-    double Confidence);
+    double Confidence,
+    int RootIndex,
+    bool IsMajor)
+{
+    public bool HasKey =>
+        RootIndex is >= 0 and < 12 &&
+        !string.Equals(Key, "Unknown", StringComparison.Ordinal);
+}
 
 /// <summary>
-/// Streaming projection of Slipmat's Rust/WASM key detector.
+/// Streaming projection of Slipmat's canonical harmonic-key analyzer.
 ///
 /// Preserves channel-independent analyzer details: 4096-sample frames advance
 /// by 2048 samples, the final frame is analyzed only when at least one later
@@ -133,7 +140,9 @@ internal sealed class HarmonicAccumulator
         return new HarmonicAnalysisResult(
             key,
             ToCamelot(rootIndex, isMajor),
-            confidence);
+            confidence,
+            rootIndex,
+            isMajor);
     }
 
     private void AnalyzeFrame(IReadOnlyList<float> samples)
@@ -276,5 +285,5 @@ internal sealed class HarmonicAccumulator
     }
 
     private static HarmonicAnalysisResult Unknown()
-        => new("Unknown", "?", 0d);
+        => new("Unknown", "?", 0d, -1, false);
 }

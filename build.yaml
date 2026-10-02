@@ -1,7 +1,7 @@
 ---
 name: "Audio Gateway"
 guid: "d3a2b1c0-e4f5-6789-abcd-ef0123456789"
-version: "0.4.0.0"
+version: "0.4.1.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 overview: "Optional Jellyfin companion that accelerates and enriches Slipmat."
@@ -15,4 +15,4 @@ category: "General"
 owner: "xtreemze"
 artifacts:
 - "Jellyfin.Plugin.AudioGateway.dll"
-changelog: "Replace the Jottacloud-specific cloud bridge with a generic rclone adapter: discover configured remotes, browse structured remote entries, create folders, and copy selected cloud roots into guarded Jellyfin libraries without exposing rclone credentials or remote-control authority."
+changelog: "Add canonical SHRM harmonic-key evidence to SLWS with typed pitch, mode, confidence, analyzer version, independent CRC, and the shared Rust/C# container vector."
