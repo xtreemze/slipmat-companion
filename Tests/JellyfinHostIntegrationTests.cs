@@ -33,6 +33,10 @@ public class JellyfinHostIntegrationTests
                 && descriptor.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(
             services,
+            descriptor => descriptor.ServiceType == typeof(ArtworkPaletteService)
+                && descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
             descriptor => descriptor.ServiceType == typeof(IntegratedAudioAnalyzer)
                 && descriptor.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(
