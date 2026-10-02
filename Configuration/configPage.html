@@ -350,7 +350,8 @@
             var IptvOrgBrowseOffset = 0;
             var IptvOrgBrowseTotal = 0;
             var IptvOrgPageSize = 50;
-            var JottacloudBrowserCurrentPath = '';
+            var CloudBrowserCurrentPath = '';
+            var CloudBrowserCurrentRemote = '';
 
             function textList(value) {
                 return Array.isArray(value)
@@ -539,7 +540,7 @@
                 });
             }
 
-            function normalizeJottacloudPath(value) {
+            function normalizeCloudPath(value) {
                 return String(value || '')
                     .trim()
                     .replace(/\\/g, '/')
@@ -547,8 +548,8 @@
                     .replace(/\/{2,}/g, '/');
             }
 
-            function parentJottacloudPath(value) {
-                const normalized = normalizeJottacloudPath(value);
+            function parentCloudPath(value) {
+                const normalized = normalizeCloudPath(value);
                 if (!normalized) {
                     return '';
                 }
@@ -557,187 +558,308 @@
                 return parts.join('/');
             }
 
-            function joinJottacloudPath(base, entry) {
-                const normalizedBase = normalizeJottacloudPath(base);
-                const normalizedEntry = normalizeJottacloudPath(entry);
+            function joinCloudPath(base, entry) {
+                const normalizedBase = normalizeCloudPath(base);
+                const normalizedEntry = normalizeCloudPath(entry);
                 if (!normalizedBase) {
                     return normalizedEntry;
                 }
                 if (!normalizedEntry) {
                     return normalizedBase;
                 }
-                if (normalizedEntry === normalizedBase ||
-                    normalizedEntry.startsWith(normalizedBase + '/')) {
-                    return normalizedEntry;
-                }
                 return normalizedBase + '/' + normalizedEntry;
             }
 
-            function renderJottacloudBrowser(response) {
-                const entries = document.querySelector('#JottacloudBrowserEntries');
-                entries.replaceChildren();
+            function formatCloudSize(value) {
+                if (!Number.isFinite(value) || value < 0) {
+                    return '';
+                }
+                if (value < 1024) {
+                    return String(value) + ' B';
+                }
+                const units = ['KiB', 'MiB', 'GiB', 'TiB'];
+                let size = value / 1024;
+                let index = 0;
+                while (size >= 1024 && index < units.length - 1) {
+                    size /= 1024;
+                    index++;
+                }
+                return size.toFixed(size >= 10 ? 1 : 2) + ' ' + units[index];
+            }
 
-                const lines = response && Array.isArray(response.lines)
-                    ? response.lines
-                        .filter(function(line) { return typeof line === 'string' && line.trim().length > 0; })
-                        .map(function(line) { return line.trim(); })
+            function renderCloudEntries(response) {
+                const container = document.querySelector('#CloudBrowserEntries');
+                container.replaceChildren();
+
+                const entries = response && Array.isArray(response.entries)
+                    ? response.entries
                     : [];
 
-                if (lines.length === 0) {
+                if (entries.length === 0) {
                     const empty = document.createElement('div');
                     empty.className = 'fieldDescription';
-                    empty.textContent = 'This folder is empty, or the CLI returned no child entries.';
-                    entries.appendChild(empty);
+                    empty.textContent = 'This folder is empty.';
+                    container.appendChild(empty);
                     return;
                 }
 
-                lines.forEach(function(line) {
+                entries.forEach(function(entry) {
                     const row = document.createElement('div');
                     row.setAttribute('role', 'listitem');
+                    row.style.display = 'flex';
+                    row.style.alignItems = 'center';
+                    row.style.gap = '0.75em';
+                    row.style.padding = '0.45em 0';
                     row.style.borderBottom = '1px solid currentColor';
-                    row.style.padding = '0.25em 0';
 
-                    const button = document.createElement('button');
-                    button.type = 'button';
-                    button.setAttribute('is', 'emby-button');
-                    button.className = 'emby-button';
-                    button.style.width = '100%';
-                    button.style.textAlign = 'left';
-                    button.style.justifyContent = 'flex-start';
-                    button.textContent = line;
-                    button.setAttribute('aria-label', 'Open remote entry ' + line);
-                    button.addEventListener('click', function() {
-                        browseJottacloud(joinJottacloudPath(JottacloudBrowserCurrentPath, line));
-                    });
+                    if (entry.isDirectory) {
+                        const button = document.createElement('button');
+                        button.type = 'button';
+                        button.setAttribute('is', 'emby-button');
+                        button.className = 'emby-button';
+                        button.style.flex = '1 1 auto';
+                        button.style.textAlign = 'left';
+                        button.style.justifyContent = 'flex-start';
+                        button.textContent = 'Folder · ' + entry.name;
+                        button.addEventListener('click', function() {
+                            browseCloud(
+                                CloudBrowserCurrentRemote,
+                                joinCloudPath(CloudBrowserCurrentPath, entry.name));
+                        });
+                        row.appendChild(button);
+                    } else {
+                        const name = document.createElement('div');
+                        name.style.flex = '1 1 auto';
+                        name.textContent = entry.name;
+                        row.appendChild(name);
 
-                    row.appendChild(button);
-                    entries.appendChild(row);
+                        const size = formatCloudSize(entry.size);
+                        if (size) {
+                            const metadata = document.createElement('div');
+                            metadata.className = 'fieldDescription';
+                            metadata.textContent = size;
+                            row.appendChild(metadata);
+                        }
+                    }
+
+                    container.appendChild(row);
                 });
             }
 
-            function describeJottacloudSetup(response) {
-                const summary = document.querySelector('#JottacloudSetupSummary');
+            function renderCloudRemotes(response, preferredRemote) {
+                const select = document.querySelector('#CloudRemoteName');
+                select.replaceChildren();
+
+                const empty = document.createElement('option');
+                empty.value = '';
+                empty.textContent = 'Select a configured rclone remote';
+                select.appendChild(empty);
+
+                const remotes = response && Array.isArray(response.remotes)
+                    ? response.remotes
+                    : [];
+
+                remotes.forEach(function(remote) {
+                    const option = document.createElement('option');
+                    option.value = remote.name;
+                    const details = [];
+                    if (remote.type) {
+                        details.push(remote.type);
+                    }
+                    if (remote.description) {
+                        details.push(remote.description);
+                    }
+                    option.textContent = remote.name + (details.length ? ' · ' + details.join(' · ') : '');
+                    select.appendChild(option);
+                });
+
+                const wanted = String(preferredRemote || '').trim();
+                if (wanted && remotes.some(function(remote) { return remote.name === wanted; })) {
+                    select.value = wanted;
+                } else if (remotes.length === 1) {
+                    select.value = remotes[0].name;
+                } else {
+                    select.value = '';
+                }
+
+                CloudBrowserCurrentRemote = select.value;
+                return remotes;
+            }
+
+            async function loadCloudRemotes(preferredRemote) {
+                const status = document.querySelector('#CloudBrowserStatus');
+                status.textContent = 'Reading configured rclone remotes…';
+                try {
+                    const response = await ApiClient.getJSON(
+                        ApiClient.getUrl('Plugins/AudioGateway/cloud/rclone/remotes')
+                    );
+                    const remotes = renderCloudRemotes(response, preferredRemote);
+                    status.textContent = remotes.length === 0
+                        ? 'No rclone remotes are visible to Jellyfin. Configure one on the server first.'
+                        : String(remotes.length) + ' configured rclone remote' + (remotes.length === 1 ? '' : 's') + ' available.';
+                    return response;
+                } catch {
+                    renderCloudRemotes({ remotes: [] }, '');
+                    status.textContent = 'Unable to read rclone remotes from the Jellyfin service context.';
+                    return null;
+                }
+            }
+
+            function describeCloudSetup(response) {
+                const summary = document.querySelector('#CloudSetupSummary');
                 if (!response) {
-                    summary.textContent = 'Unable to read Jottacloud server status.';
+                    summary.textContent = 'Unable to read server-side rclone status.';
                     return;
                 }
 
                 if (response.health === 'ready') {
-                    summary.textContent = 'Server access ready' +
-                        (response.cliVersion ? ' · jotta-cli ' + response.cliVersion : '') +
-                        '. Browse the account below and choose a media folder.';
+                    summary.textContent = 'rclone ready' +
+                        (response.rcloneVersion ? ' · v' + response.rcloneVersion : '') +
+                        ' · ' + String(response.remoteCount || 0) + ' configured remote' +
+                        (response.remoteCount === 1 ? '' : 's') + '.';
                     return;
                 }
 
-                if (response.code === 'cli-unavailable') {
+                if (response.code === 'rclone-unavailable') {
                     summary.textContent =
-                        'Jottacloud CLI is not available to the Jellyfin process. Install jotta-cli ' +
-                        '0.17.176206 in the same OS/container context as Jellyfin, start jottad, then check again.';
+                        'rclone is not available to the Jellyfin process. Install it on this host/container or set SLIPMAT_RCLONE.';
                     return;
                 }
 
-                if (response.code === 'authentication-required') {
+                if (response.code === 'no-remotes-configured') {
                     summary.textContent =
-                        'jottad is available but not authenticated for the Jellyfin service context. ' +
-                        'Log in with jotta-cli as that same OS user/runtime, then check again.';
+                        'rclone is installed but no remotes are visible. Run rclone config as the Jellyfin service user, ' +
+                        'or expose the intended config with RCLONE_CONFIG.';
                     return;
                 }
 
-                if (response.code === 'daemon-unavailable') {
+                if (response.code === 'selected-remote-missing') {
                     summary.textContent =
-                        'jotta-cli is installed but jottad is not reachable from Jellyfin. Start the daemon in the same service context.';
+                        'The previously selected rclone remote is no longer configured. Choose another remote.';
                     return;
                 }
 
-                if (response.code === 'unsupported-cli-version') {
-                    summary.textContent =
-                        'Jottacloud CLI version ' + (response.cliVersion || 'unknown') +
-                        ' is not the certified 0.17.176206 build. Update/downgrade before enabling managed projection.';
-                    return;
-                }
-
-                summary.textContent = 'Jottacloud server access is not ready · ' + response.code + '.';
+                summary.textContent = 'rclone cloud access is not ready · ' + response.code + '.';
             }
 
-            async function loadJottacloudStatus() {
-                const status = document.querySelector('#JottacloudStatus');
-                const resolvedPath = document.querySelector('#JottacloudResolvedProjectionPath');
-                status.textContent = 'Checking Jottacloud daemon…';
+            async function loadCloudStatus() {
+                const status = document.querySelector('#CloudStatus');
+                const resolvedPath = document.querySelector('#CloudResolvedProjectionPath');
+                status.textContent = 'Checking rclone…';
                 try {
                     const response = await ApiClient.getJSON(
-                        ApiClient.getUrl('Plugins/AudioGateway/cloud/jottacloud/status')
+                        ApiClient.getUrl('Plugins/AudioGateway/cloud/rclone/status')
                     );
-                    describeJottacloudSetup(response);
+                    describeCloudSetup(response);
 
-                    const queue = response.downloadQueueKnown
-                        ? String(response.downloadQueueEntries) + ' outstanding download queue ' +
-                            (response.downloadQueueEntries === 1 ? 'entry' : 'entries')
-                        : 'download queue unavailable';
                     const projection = response.projectionHasFiles
                         ? 'projection materialized'
                         : (response.projectionPathReady ? 'projection ready' : 'projection not materialized yet');
                     const library = response.libraryReady ? 'library ready' : 'library not ready';
+                    const sync = response.syncInProgress ? 'copy in progress' : 'idle';
 
                     status.textContent = response.health + ' · ' + response.code + ' · ' +
-                        queue + ' · ' + projection + ' · ' + library;
+                        sync + ' · ' + projection + ' · ' + library;
 
                     resolvedPath.textContent = response.projectionPath
                         ? (response.projectionPathManaged ? 'Managed path: ' : 'Resolved override: ') + response.projectionPath
-                        : 'The managed path is resolved after a remote folder is selected.';
+                        : 'The managed path is resolved after a remote is selected.';
 
                     return response;
                 } catch {
-                    describeJottacloudSetup(null);
+                    describeCloudSetup(null);
                     resolvedPath.textContent = '';
-                    status.textContent = 'Unable to read Jottacloud projection status.';
+                    status.textContent = 'Unable to read cloud projection status.';
                     return null;
                 }
             }
 
-            async function browseJottacloud(path) {
-                const status = document.querySelector('#JottacloudBrowserStatus');
-                const requested = normalizeJottacloudPath(path);
-                status.textContent = 'Loading ' + (requested || 'cloud root') + '…';
+            async function browseCloud(remote, path) {
+                const status = document.querySelector('#CloudBrowserStatus');
+                const selectedRemote = String(remote || document.querySelector('#CloudRemoteName').value || '').trim();
+                if (!selectedRemote) {
+                    status.textContent = 'Select a configured rclone remote first.';
+                    document.querySelector('#CloudBrowserEntries').replaceChildren();
+                    return null;
+                }
+
+                const requested = normalizeCloudPath(path);
+                status.textContent = 'Loading ' + selectedRemote + ':' + (requested || '/') + '…';
 
                 try {
                     const response = await ApiClient.getJSON(
-                        ApiClient.getUrl('Plugins/AudioGateway/cloud/jottacloud/browse', {
+                        ApiClient.getUrl('Plugins/AudioGateway/cloud/rclone/browse', {
+                            remote: selectedRemote,
                             path: requested || undefined
                         })
                     );
 
-                    JottacloudBrowserCurrentPath = normalizeJottacloudPath(response.path);
-                    document.querySelector('#JottacloudBrowserPath').value = JottacloudBrowserCurrentPath;
-                    document.querySelector('#JottacloudBrowserUpButton').disabled =
-                        JottacloudBrowserCurrentPath.length === 0;
-                    document.querySelector('#JottacloudUseFolderButton').disabled =
-                        JottacloudBrowserCurrentPath.length === 0;
+                    CloudBrowserCurrentRemote = response.remote;
+                    CloudBrowserCurrentPath = normalizeCloudPath(response.path);
+                    document.querySelector('#CloudRemoteName').value = CloudBrowserCurrentRemote;
+                    document.querySelector('#CloudBrowserPath').value = CloudBrowserCurrentPath;
+                    document.querySelector('#CloudBrowserUpButton').disabled =
+                        CloudBrowserCurrentPath.length === 0;
+                    document.querySelector('#CloudUseFolderButton').disabled = false;
 
-                    renderJottacloudBrowser(response);
+                    renderCloudEntries(response);
                     status.textContent = response.truncated
                         ? 'Folder loaded; the listing was truncated.'
-                        : 'Folder loaded. Open an entry to descend, or choose Use this folder.';
+                        : 'Folder loaded. Open a folder or choose Use this folder.';
                     return response;
                 } catch {
-                    status.textContent =
-                        'Unable to open that entry. It may be a file rather than a folder, or server-side Jottacloud access is not ready.';
+                    status.textContent = 'Unable to browse that rclone path.';
                     return null;
                 }
             }
 
-            async function reconcileJottacloud() {
-                const status = document.querySelector('#JottacloudStatus');
-                status.textContent = 'Reconciling Jottacloud projection…';
+            async function createCloudFolder() {
+                const status = document.querySelector('#CloudBrowserStatus');
+                const remote = document.querySelector('#CloudRemoteName').value;
+                const name = document.querySelector('#CloudNewFolderName').value.trim();
+
+                if (!remote) {
+                    status.textContent = 'Select an rclone remote first.';
+                    return;
+                }
+
+                if (!name || name.includes('/') || name.includes('\\') || name === '.' || name === '..') {
+                    status.textContent = 'Enter one folder name without slash characters.';
+                    return;
+                }
+
+                const path = joinCloudPath(CloudBrowserCurrentPath, name);
+                status.textContent = 'Creating ' + remote + ':' + path + '…';
+
+                try {
+                    await ApiClient.ajax({
+                        type: 'POST',
+                        contentType: 'application/json',
+                        dataType: 'json',
+                        data: JSON.stringify({ remote: remote, path: path }),
+                        url: ApiClient.getUrl('Plugins/AudioGateway/cloud/rclone/mkdir')
+                    });
+                    document.querySelector('#CloudNewFolderName').value = '';
+                    await browseCloud(remote, CloudBrowserCurrentPath);
+                    status.textContent = 'Folder created.';
+                } catch {
+                    status.textContent = 'Unable to create the remote folder.';
+                }
+            }
+
+            async function reconcileCloud() {
+                const status = document.querySelector('#CloudStatus');
+                status.textContent = 'Copying cloud changes into the Jellyfin projection. Large first syncs can take time…';
                 try {
                     const response = await ApiClient.ajax({
                         type: 'POST',
                         dataType: 'json',
-                        url: ApiClient.getUrl('Plugins/AudioGateway/cloud/jottacloud/reconcile')
+                        url: ApiClient.getUrl('Plugins/AudioGateway/cloud/rclone/reconcile')
                     });
                     status.textContent = response.status + ' · ' + response.code;
-                    await loadJottacloudStatus();
+                    await loadCloudStatus();
                 } catch {
-                    status.textContent = 'Unable to reconcile Jottacloud projection.';
+                    status.textContent = 'Unable to reconcile the cloud projection.';
                 }
             }
 
