@@ -72,42 +72,46 @@ public class RuntimeSettingsTests
     }
 
     [Fact]
-    public void ResolveJottacloudProjectionPath_FreshInstall_UsesDeterministicJellyfinManagedPath()
+    public void ResolveCloudProjectionPath_FreshInstall_UsesDeterministicJellyfinManagedPath()
     {
         var config = new PluginConfiguration();
         var dataPath = Path.Combine(Path.GetTempPath(), "jellyfin-data");
 
-        var first = RuntimeSettings.ResolveJottacloudProjectionPath(
+        var first = RuntimeSettings.ResolveCloudProjectionPath(
             config,
+            "tele2",
             "Archive/Music",
             dataPath);
-        var second = RuntimeSettings.ResolveJottacloudProjectionPath(
+        var second = RuntimeSettings.ResolveCloudProjectionPath(
             config,
+            "tele2",
             "Archive/Music",
             dataPath);
-        var other = RuntimeSettings.ResolveJottacloudProjectionPath(
+        var other = RuntimeSettings.ResolveCloudProjectionPath(
             config,
-            "Archive/Movies",
+            "drive",
+            "Archive/Music",
             dataPath);
 
         Assert.Equal(first, second);
         Assert.StartsWith(
-            Path.Combine(dataPath, "audio-gateway", "cloud", "jottacloud"),
+            Path.Combine(dataPath, "audio-gateway", "cloud", "rclone"),
             first);
         Assert.NotEqual(first, other);
     }
 
     [Fact]
-    public void ResolveJottacloudProjectionPath_ConfiguredOverrideWins()
+    public void ResolveCloudProjectionPath_ConfiguredOverrideWins()
     {
         var overridePath = Path.Combine(Path.GetTempPath(), "cloud-media-cache");
         var config = new PluginConfiguration
         {
-            JottacloudProjectionPath = overridePath,
+            CloudProjectionPath = overridePath,
         };
 
-        var resolved = RuntimeSettings.ResolveJottacloudProjectionPath(
+        var resolved = RuntimeSettings.ResolveCloudProjectionPath(
             config,
+            "tele2",
             "Archive/Music",
             Path.Combine(Path.GetTempPath(), "jellyfin-data"));
 
