@@ -98,6 +98,19 @@ public class HigherOrderAudioAnalysisTests
         Assert.InRange(result.Confidence, 0d, 1d);
     }
 
+    [Theory]
+    [InlineData(0, false, "5A")]
+    [InlineData(2, false, "7A")]
+    [InlineData(9, false, "8A")]
+    [InlineData(11, false, "10A")]
+    public void HarmonicAccumulator_UsesCanonicalCamelotMinorWheel(
+        int rootIndex,
+        bool major,
+        string expected)
+    {
+        Assert.Equal(expected, HarmonicAccumulator.ToCamelot(rootIndex, major));
+    }
+
     [Fact]
     public void HarmonicAccumulator_UsesRustStrictFrameBoundary()
     {
