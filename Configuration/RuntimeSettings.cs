@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Jellyfin.Plugin.AudioGateway.Configuration;
 
@@ -55,4 +57,49 @@ public static class RuntimeSettings
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Jellyfin.AudioGateway");
     }
+    /// <summary>
+    /// Resolves the local materialization directory for one remote Jottacloud folder.
+    /// A configured absolute override wins. Fresh installs use a deterministic
+    /// Jellyfin-managed directory so cloud setup does not require filesystem knowledge.
+    /// </summary>
+    public static string ResolveJottacloudProjectionPath(
+        PluginConfiguration config,
+        string remotePath)
+        => ResolveJottacloudProjectionPath(
+            config,
+            remotePath,
+            Plugin.Instance?.HostApplicationPaths.DataPath);
+
+    public static string ResolveJottacloudProjectionPath(
+        PluginConfiguration config,
+        string remotePath,
+        string? jellyfinDataPath)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentException.ThrowIfNullOrWhiteSpace(remotePath);
+
+        var configuredRoot = config.JottacloudProjectionPath?.Trim();
+        if (!string.IsNullOrWhiteSpace(configuredRoot))
+        {
+            return Path.GetFullPath(configuredRoot);
+        }
+
+        var managedBase = !string.IsNullOrWhiteSpace(jellyfinDataPath)
+            ? Path.Combine(jellyfinDataPath, "audio-gateway")
+            : Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Jellyfin.AudioGateway");
+
+        var normalizedRemotePath = remotePath.Trim().Replace('\\', '/');
+        var digest = Convert.ToHexString(
+                SHA256.HashData(Encoding.UTF8.GetBytes(normalizedRemotePath)))
+            .ToLowerInvariant()[..16];
+
+        return Path.Combine(
+            managedBase,
+            "cloud",
+            "jottacloud",
+            digest);
+    }
+
 }
