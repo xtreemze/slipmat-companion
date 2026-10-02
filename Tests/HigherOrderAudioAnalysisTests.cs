@@ -512,6 +512,41 @@ public class HigherOrderAudioAnalysisTests
         Assert.Equal(-17.31d, result!.IntegratedLufs, 2);
         Assert.Equal(-0.82d, result.TruePeak, 2);
         Assert.Equal(8.4d, result.DynamicRange, 2);
+
+        var measurement = FfmpegLoudnessParser.ToMeasurementEvidence(result);
+        Assert.Equal(1, measurement.Version);
+        Assert.Equal("track", measurement.Scope);
+        Assert.Equal("server-analysis", measurement.Authority);
+        Assert.Equal("ffmpeg-loudnorm-input", measurement.Semantics);
+        Assert.Equal("ffmpeg-loudnorm", measurement.Analyzer.Name);
+        Assert.Equal("1", measurement.Analyzer.Version);
+        Assert.Equal(
+            "sha256:d067e146e6dd806228d993e7cb40501a80c464fb84af3af7ecfa32f5fca2b4ec",
+            measurement.Analyzer.ConfigurationDigest);
+        Assert.Equal(-17.31d, measurement.IntegratedLufs, 2);
+        Assert.Equal(-0.82d, measurement.TruePeakDbtp!.Value, 2);
+        Assert.Equal(8.4d, measurement.LoudnessRangeLu!.Value, 2);
+    }
+
+    [Fact]
+    public void HigherOrderAnalysis_EmitsMeasuredLoudnessWithoutChangingLegacyBlock()
+    {
+        const int sampleRate = 48_000;
+        var builder = new HigherOrderAudioAnalysisBuilder(sampleRate, 1);
+        for (var index = 0; index < sampleRate; index++)
+        {
+            builder.PushFrame([(float)Math.Sin(2d * Math.PI * 440d * index / sampleRate)]);
+        }
+
+        var loudness = new LoudnessAnalysis(-14.2d, -0.7d, 7.5d);
+        var result = builder.Complete(loudness);
+
+        Assert.NotNull(result.Analysis);
+        Assert.Same(loudness, result.Analysis!.Loudness);
+        Assert.NotNull(result.Analysis.LoudnessMeasurement);
+        Assert.Equal(-14.2d, result.Analysis.LoudnessMeasurement!.IntegratedLufs, 2);
+        Assert.Equal(-0.7d, result.Analysis.LoudnessMeasurement.TruePeakDbtp!.Value, 2);
+        Assert.Equal(7.5d, result.Analysis.LoudnessMeasurement.LoudnessRangeLu!.Value, 2);
     }
 
     [Fact]
