@@ -51,6 +51,17 @@ public class SidecarLoaderTests
     }
 
     [Fact]
+    public void SidecarCurrentness_RejectsInvalidStoreKeyEvenWhenItMatches()
+    {
+        var loader = new SidecarLoader();
+        var sidecar = loader.LoadSidecar(ExamplePath("analysis_sidecar_v2.example.json"));
+        Assert.NotNull(sidecar);
+
+        var invalid = sidecar! with { SubjectStoreKey = "abc123" };
+        Assert.False(invalid.IsCurrentFor("abc123"));
+    }
+
+    [Fact]
     public void LoadSidecar_MissingFile_ReturnsNull()
     {
         var loader = new SidecarLoader();

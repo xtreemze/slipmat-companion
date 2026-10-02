@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Linq;
 
 namespace Jellyfin.Plugin.AudioGateway.Services;
 
@@ -13,18 +12,12 @@ namespace Jellyfin.Plugin.AudioGateway.Services;
 /// </summary>
 public static class StorePaths
 {
-    private const string SubjectStoreKeyPrefix = "asv1-";
-
     /// <summary>
     /// Validates a deterministic host-neutral analysis subject key.
     /// </summary>
     public static void ValidateStoreKey(string storeKey)
     {
-        if (string.IsNullOrEmpty(storeKey)
-            || !storeKey.StartsWith(SubjectStoreKeyPrefix, StringComparison.Ordinal)
-            || storeKey.Length != SubjectStoreKeyPrefix.Length + 64
-            || storeKey[SubjectStoreKeyPrefix.Length..].Any(
-                character => !Uri.IsHexDigit(character) || char.IsUpper(character)))
+        if (!Jellyfin.Plugin.AudioGateway.Models.AnalysisSubjectV1.IsStoreKey(storeKey))
         {
             throw new ArgumentException("Invalid host-neutral analysis subject store key.", nameof(storeKey));
         }

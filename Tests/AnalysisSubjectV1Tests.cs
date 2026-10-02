@@ -65,6 +65,18 @@ public class AnalysisSubjectV1Tests
     }
 
     [Theory]
+    [InlineData("asv1-45babe3bb1fb2875c1a1185d168399d182a45f0bc2bfef66be054439121570e4", true)]
+    [InlineData("asv1-45BABE3BB1FB2875C1A1185D168399D182A45F0BC2BFEF66BE054439121570E4", false)]
+    [InlineData("asv1-45babe", false)]
+    [InlineData("abc123", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void StoreKey_ValidationMatchesCanonicalShape(string? value, bool expected)
+    {
+        Assert.Equal(expected, AnalysisSubjectV1.IsStoreKey(value));
+    }
+
+    [Theory]
     [InlineData("", "provider", "resource", null)]
     [InlineData("host", "", "resource", null)]
     [InlineData("host", "provider", "", null)]
