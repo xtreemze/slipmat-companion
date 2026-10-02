@@ -313,6 +313,7 @@
             var IptvOrgBrowseOffset = 0;
             var IptvOrgBrowseTotal = 0;
             var IptvOrgPageSize = 50;
+            var JottacloudBrowserCurrentPath = '';
 
             function textList(value) {
                 return Array.isArray(value)
@@ -501,48 +502,189 @@
                 });
             }
 
+            function normalizeJottacloudPath(value) {
+                return String(value || '')
+                    .trim()
+                    .replace(/\\/g, '/')
+                    .replace(/^\/+|\/+$/g, '')
+                    .replace(/\/{2,}/g, '/');
+            }
+
+            function parentJottacloudPath(value) {
+                const normalized = normalizeJottacloudPath(value);
+                if (!normalized) {
+                    return '';
+                }
+                const parts = normalized.split('/');
+                parts.pop();
+                return parts.join('/');
+            }
+
+            function joinJottacloudPath(base, entry) {
+                const normalizedBase = normalizeJottacloudPath(base);
+                const normalizedEntry = normalizeJottacloudPath(entry);
+                if (!normalizedBase) {
+                    return normalizedEntry;
+                }
+                if (!normalizedEntry) {
+                    return normalizedBase;
+                }
+                if (normalizedEntry === normalizedBase ||
+                    normalizedEntry.startsWith(normalizedBase + '/')) {
+                    return normalizedEntry;
+                }
+                return normalizedBase + '/' + normalizedEntry;
+            }
+
+            function renderJottacloudBrowser(response) {
+                const entries = document.querySelector('#JottacloudBrowserEntries');
+                entries.replaceChildren();
+
+                const lines = response && Array.isArray(response.lines)
+                    ? response.lines
+                        .filter(function(line) { return typeof line === 'string' && line.trim().length > 0; })
+                        .map(function(line) { return line.trim(); })
+                    : [];
+
+                if (lines.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.className = 'fieldDescription';
+                    empty.textContent = 'This folder is empty, or the CLI returned no child entries.';
+                    entries.appendChild(empty);
+                    return;
+                }
+
+                lines.forEach(function(line) {
+                    const row = document.createElement('div');
+                    row.setAttribute('role', 'listitem');
+                    row.style.borderBottom = '1px solid currentColor';
+                    row.style.padding = '0.25em 0';
+
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.setAttribute('is', 'emby-button');
+                    button.className = 'emby-button';
+                    button.style.width = '100%';
+                    button.style.textAlign = 'left';
+                    button.style.justifyContent = 'flex-start';
+                    button.textContent = line;
+                    button.setAttribute('aria-label', 'Open remote entry ' + line);
+                    button.addEventListener('click', function() {
+                        browseJottacloud(joinJottacloudPath(JottacloudBrowserCurrentPath, line));
+                    });
+
+                    row.appendChild(button);
+                    entries.appendChild(row);
+                });
+            }
+
+            function describeJottacloudSetup(response) {
+                const summary = document.querySelector('#JottacloudSetupSummary');
+                if (!response) {
+                    summary.textContent = 'Unable to read Jottacloud server status.';
+                    return;
+                }
+
+                if (response.health === 'ready') {
+                    summary.textContent = 'Server access ready' +
+                        (response.cliVersion ? ' · jotta-cli ' + response.cliVersion : '') +
+                        '. Browse the account below and choose a media folder.';
+                    return;
+                }
+
+                if (response.code === 'cli-unavailable') {
+                    summary.textContent =
+                        'Jottacloud CLI is not available to the Jellyfin process. Install jotta-cli ' +
+                        '0.17.176206 in the same OS/container context as Jellyfin, start jottad, then check again.';
+                    return;
+                }
+
+                if (response.code === 'authentication-required') {
+                    summary.textContent =
+                        'jottad is available but not authenticated for the Jellyfin service context. ' +
+                        'Log in with jotta-cli as that same OS user/runtime, then check again.';
+                    return;
+                }
+
+                if (response.code === 'daemon-unavailable') {
+                    summary.textContent =
+                        'jotta-cli is installed but jottad is not reachable from Jellyfin. Start the daemon in the same service context.';
+                    return;
+                }
+
+                if (response.code === 'unsupported-cli-version') {
+                    summary.textContent =
+                        'Jottacloud CLI version ' + (response.cliVersion || 'unknown') +
+                        ' is not the certified 0.17.176206 build. Update/downgrade before enabling managed projection.';
+                    return;
+                }
+
+                summary.textContent = 'Jottacloud server access is not ready · ' + response.code + '.';
+            }
+
             async function loadJottacloudStatus() {
                 const status = document.querySelector('#JottacloudStatus');
+                const resolvedPath = document.querySelector('#JottacloudResolvedProjectionPath');
                 status.textContent = 'Checking Jottacloud daemon…';
                 try {
                     const response = await ApiClient.getJSON(
                         ApiClient.getUrl('Plugins/AudioGateway/cloud/jottacloud/status')
                     );
+                    describeJottacloudSetup(response);
+
                     const queue = response.downloadQueueKnown
                         ? String(response.downloadQueueEntries) + ' outstanding download queue ' +
                             (response.downloadQueueEntries === 1 ? 'entry' : 'entries')
                         : 'download queue unavailable';
                     const projection = response.projectionHasFiles
                         ? 'projection materialized'
-                        : (response.projectionPathReady ? 'projection ready' : 'projection not ready');
+                        : (response.projectionPathReady ? 'projection ready' : 'projection not materialized yet');
                     const library = response.libraryReady ? 'library ready' : 'library not ready';
+
                     status.textContent = response.health + ' · ' + response.code + ' · ' +
-                        queue + ' · ' + projection + ' · ' + library +
-                        (response.cliVersion ? ' · CLI ' + response.cliVersion : '');
+                        queue + ' · ' + projection + ' · ' + library;
+
+                    resolvedPath.textContent = response.projectionPath
+                        ? (response.projectionPathManaged ? 'Managed path: ' : 'Resolved override: ') + response.projectionPath
+                        : 'The managed path is resolved after a remote folder is selected.';
+
+                    return response;
                 } catch {
+                    describeJottacloudSetup(null);
+                    resolvedPath.textContent = '';
                     status.textContent = 'Unable to read Jottacloud projection status.';
+                    return null;
                 }
             }
 
             async function browseJottacloud(path) {
-                const status = document.querySelector('#JottacloudStatus');
-                const results = document.querySelector('#JottacloudBrowseResults');
-                status.textContent = 'Loading Jottacloud directory…';
-                results.textContent = '';
+                const status = document.querySelector('#JottacloudBrowserStatus');
+                const requested = normalizeJottacloudPath(path);
+                status.textContent = 'Loading ' + (requested || 'cloud root') + '…';
+
                 try {
                     const response = await ApiClient.getJSON(
                         ApiClient.getUrl('Plugins/AudioGateway/cloud/jottacloud/browse', {
-                            path: path || undefined
+                            path: requested || undefined
                         })
                     );
-                    results.textContent = Array.isArray(response.lines)
-                        ? response.lines.join('\n')
-                        : '';
+
+                    JottacloudBrowserCurrentPath = normalizeJottacloudPath(response.path);
+                    document.querySelector('#JottacloudBrowserPath').value = JottacloudBrowserCurrentPath;
+                    document.querySelector('#JottacloudBrowserUpButton').disabled =
+                        JottacloudBrowserCurrentPath.length === 0;
+                    document.querySelector('#JottacloudUseFolderButton').disabled =
+                        JottacloudBrowserCurrentPath.length === 0;
+
+                    renderJottacloudBrowser(response);
                     status.textContent = response.truncated
-                        ? 'Directory loaded; output was truncated.'
-                        : 'Directory loaded.';
+                        ? 'Folder loaded; the listing was truncated.'
+                        : 'Folder loaded. Open an entry to descend, or choose Use this folder.';
+                    return response;
                 } catch {
-                    status.textContent = 'Unable to browse Jottacloud. Check that jottad is logged in under the service-accessible OS context.';
+                    status.textContent =
+                        'Unable to open that entry. It may be a file rather than a folder, or server-side Jottacloud access is not ready.';
+                    return null;
                 }
             }
 
@@ -591,14 +733,38 @@
                     loadJottacloudStatus();
                 });
 
-            document.querySelector('#JottacloudBrowseRootButton')
+            document.querySelector('#JottacloudBrowserGoButton')
+                .addEventListener('click', function() {
+                    browseJottacloud(document.querySelector('#JottacloudBrowserPath').value);
+                });
+
+            document.querySelector('#JottacloudBrowserPath')
+                .addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        browseJottacloud(e.currentTarget.value);
+                    }
+                });
+
+            document.querySelector('#JottacloudBrowserRootButton')
                 .addEventListener('click', function() {
                     browseJottacloud('');
                 });
 
-            document.querySelector('#JottacloudBrowseConfiguredButton')
+            document.querySelector('#JottacloudBrowserUpButton')
                 .addEventListener('click', function() {
-                    browseJottacloud(document.querySelector('#JottacloudRemotePath').value.trim());
+                    browseJottacloud(parentJottacloudPath(JottacloudBrowserCurrentPath));
+                });
+
+            document.querySelector('#JottacloudUseFolderButton')
+                .addEventListener('click', function() {
+                    if (!JottacloudBrowserCurrentPath) {
+                        return;
+                    }
+                    document.querySelector('#JottacloudRemotePath').value = JottacloudBrowserCurrentPath;
+                    document.querySelector('#JottacloudProjectionEnabled').checked = true;
+                    document.querySelector('#JottacloudBrowserStatus').textContent =
+                        'Selected ' + JottacloudBrowserCurrentPath + '. Save settings, then sync the cloud library.';
                 });
 
             document.querySelector('#JottacloudReconcileButton')
@@ -657,9 +823,17 @@
                             document.querySelector('#JottacloudAutoCreateLibrary').checked =
                                 config.JottacloudAutoCreateLibrary !== false;
                             IptvOrgPublishedChannelIds = new Set(textList(config.IptvOrgLiveTvChannelIds));
+                            const configuredCloudPath = normalizeJottacloudPath(config.JottacloudRemotePath || '');
+                            document.querySelector('#JottacloudBrowserPath').value = configuredCloudPath;
+                            JottacloudBrowserCurrentPath = configuredCloudPath;
                             return Promise.all([
                                 loadAudioGatewayStatus(),
-                                loadJottacloudStatus(),
+                                loadJottacloudStatus().then(function(cloudStatus) {
+                                    if (cloudStatus && cloudStatus.health === 'ready') {
+                                        return browseJottacloud(configuredCloudPath);
+                                    }
+                                    return null;
+                                }),
                                 browseIptvOrg(true)
                             ]);
                         })
