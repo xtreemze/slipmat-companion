@@ -37,63 +37,94 @@
                     </div>
 
                     <div class="verticalSection">
-                        <h3 class="sectionTitle">Cloud media — Jottacloud / Telia / Tele2</h3>
+                        <h3 class="sectionTitle">Cloud media — rclone</h3>
                         <div class="fieldDescription">
-                            Browse the cloud account from this server, choose a remote media folder, and let Audio Gateway
-                            materialize it into a Jellyfin library. The first-party Jottacloud CLI must be installed and
-                            authenticated in the same OS/container context as Jellyfin. Audio Gateway never asks for or stores
-                            the cloud password, Personal Login Token, OAuth token, or cookies.
+                            Audio Gateway uses rclone as the generic cloud adapter. Configure and authenticate remotes with
+                            rclone on the server first, then select and browse them here. Tele2 Cloud is supported through
+                            rclone's Jottacloud backend, and the same interface works with other configured rclone providers.
+                            The plugin never reads or returns rclone credentials.
+                        </div>
+                        <div class="fieldDescription" style="margin-top:0.5em">
+                            rclone must be available to the Jellyfin service account/container. Use the normal rclone config
+                            location or RCLONE_CONFIG; set SLIPMAT_RCLONE only when the executable is not on Jellyfin's PATH.
                         </div>
 
-                        <div id="JottacloudSetupSummary"
+                        <div id="CloudSetupSummary"
                              class="fieldDescription"
                              role="status"
                              aria-live="polite"
                              style="margin-top:0.75em">
-                            Checking server-side Jottacloud access…
+                            Checking server-side rclone access…
                         </div>
 
                         <div class="inputContainer">
                             <label style="display:flex;gap:0.5em;align-items:center">
-                                <input id="JottacloudProjectionEnabled"
-                                       name="JottacloudProjectionEnabled"
+                                <input id="CloudProjectionEnabled"
+                                       name="CloudProjectionEnabled"
                                        type="checkbox" />
                                 <span>Enable cloud media projection</span>
                             </label>
                         </div>
 
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="CloudRemoteName">rclone remote</label>
+                            <select id="CloudRemoteName"
+                                    name="CloudRemoteName"
+                                    is="emby-select">
+                                <option value="">No configured remote selected</option>
+                            </select>
+                            <div class="fieldDescription">
+                                Only remote name/type/description are exposed here. Cloud credentials remain in rclone.
+                            </div>
+                        </div>
+
+                        <div style="display:flex;gap:0.5em;flex-wrap:wrap;margin-bottom:1em">
+                            <button id="CloudRefreshRemotesButton"
+                                    is="emby-button"
+                                    type="button"
+                                    class="emby-button">
+                                <span>Refresh remotes</span>
+                            </button>
+                            <button id="CloudStatusButton"
+                                    is="emby-button"
+                                    type="button"
+                                    class="emby-button">
+                                <span>Check rclone</span>
+                            </button>
+                        </div>
+
                         <div class="verticalSection" style="margin-top:1em">
-                            <h4 class="sectionTitle">Cloud folder browser</h4>
+                            <h4 class="sectionTitle">Remote file manager</h4>
 
                             <div class="inputContainer">
-                                <label class="inputLabel inputLabelUnfocused" for="JottacloudBrowserPath">Current remote path</label>
-                                <input id="JottacloudBrowserPath"
+                                <label class="inputLabel inputLabelUnfocused" for="CloudBrowserPath">Current remote path</label>
+                                <input id="CloudBrowserPath"
                                        type="text"
                                        is="emby-input"
                                        autocomplete="off"
-                                       placeholder="Archive/Music" />
+                                       placeholder="Media/Music" />
                             </div>
 
                             <div style="display:flex;gap:0.5em;flex-wrap:wrap;margin-bottom:0.75em">
-                                <button id="JottacloudBrowserGoButton"
+                                <button id="CloudBrowserGoButton"
                                         is="emby-button"
                                         type="button"
                                         class="emby-button">
                                     <span>Open path</span>
                                 </button>
-                                <button id="JottacloudBrowserRootButton"
+                                <button id="CloudBrowserRootButton"
                                         is="emby-button"
                                         type="button"
                                         class="emby-button">
                                     <span>Root</span>
                                 </button>
-                                <button id="JottacloudBrowserUpButton"
+                                <button id="CloudBrowserUpButton"
                                         is="emby-button"
                                         type="button"
                                         class="emby-button">
                                     <span>Up</span>
                                 </button>
-                                <button id="JottacloudUseFolderButton"
+                                <button id="CloudUseFolderButton"
                                         is="emby-button"
                                         type="button"
                                         class="raised emby-button">
@@ -101,72 +132,84 @@
                                 </button>
                             </div>
 
-                            <div id="JottacloudBrowserStatus"
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="CloudNewFolderName">Create folder in current path</label>
+                                <div style="display:flex;gap:0.5em;align-items:center">
+                                    <input id="CloudNewFolderName"
+                                           type="text"
+                                           is="emby-input"
+                                           autocomplete="off"
+                                           style="flex:1 1 auto"
+                                           placeholder="New folder" />
+                                    <button id="CloudCreateFolderButton"
+                                            is="emby-button"
+                                            type="button"
+                                            class="emby-button">
+                                        <span>Create</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div id="CloudBrowserStatus"
                                  class="fieldDescription"
                                  role="status"
                                  aria-live="polite">
-                                Open the browser after the server reports that Jottacloud is ready.
+                                Select a configured rclone remote to browse it.
                             </div>
 
-                            <div id="JottacloudBrowserEntries"
+                            <div id="CloudBrowserEntries"
                                  role="list"
-                                 aria-label="Jottacloud remote folder entries"
-                                 style="max-height:22em;overflow:auto;margin-top:0.5em"></div>
-
-                            <div class="fieldDescription" style="margin-top:0.75em">
-                                The certified Jottacloud CLI exposes remote browsing and download, but no documented remote
-                                mkdir operation. To create a new cloud folder, create it in Jottacloud/Telia/Tele2 first,
-                                then return here and open it.
-                            </div>
+                                 aria-label="rclone remote entries"
+                                 style="max-height:24em;overflow:auto;margin-top:0.5em"></div>
                         </div>
 
                         <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="JottacloudRemotePath">Selected cloud media folder</label>
-                            <input id="JottacloudRemotePath"
-                                   name="JottacloudRemotePath"
+                            <label class="inputLabel inputLabelUnfocused" for="CloudRemotePath">Selected cloud media folder</label>
+                            <input id="CloudRemotePath"
+                                   name="CloudRemotePath"
                                    type="text"
                                    is="emby-input"
                                    autocomplete="off"
                                    placeholder="Choose a folder above" />
                             <div class="fieldDescription">
-                                This is the remote folder Audio Gateway will mirror one-way for Jellyfin scanning.
+                                This remote root is copied one-way into the managed Jellyfin projection. Audio Gateway does
+                                not automatically delete local projected files when objects disappear from the cloud.
                             </div>
                         </div>
 
                         <details style="margin:1em 0">
                             <summary>Advanced local storage</summary>
                             <div class="inputContainer" style="margin-top:0.75em">
-                                <label class="inputLabel inputLabelUnfocused" for="JottacloudProjectionPath">Local projection folder override</label>
-                                <input id="JottacloudProjectionPath"
-                                       name="JottacloudProjectionPath"
+                                <label class="inputLabel inputLabelUnfocused" for="CloudProjectionPath">Local projection folder override</label>
+                                <input id="CloudProjectionPath"
+                                       name="CloudProjectionPath"
                                        type="text"
                                        is="emby-input"
                                        autocomplete="off"
                                        placeholder="Automatic Jellyfin-managed storage" />
                                 <div class="fieldDescription">
-                                    Leave blank for a dedicated directory managed under Jellyfin's data path. Set an absolute
-                                    path only when the cloud cache belongs on another mounted volume. Audio Gateway never deletes
-                                    projected media and refuses non-empty directories it does not own.
+                                    Leave blank for a dedicated directory under Jellyfin's managed data path. Set an absolute
+                                    path only when cloud cache bytes belong on another mounted volume.
                                 </div>
                             </div>
-                            <div id="JottacloudResolvedProjectionPath"
+                            <div id="CloudResolvedProjectionPath"
                                  class="fieldDescription"></div>
                         </details>
 
                         <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="JottacloudLibraryName">Jellyfin library name</label>
-                            <input id="JottacloudLibraryName"
-                                   name="JottacloudLibraryName"
+                            <label class="inputLabel inputLabelUnfocused" for="CloudLibraryName">Jellyfin library name</label>
+                            <input id="CloudLibraryName"
+                                   name="CloudLibraryName"
                                    type="text"
                                    is="emby-input"
                                    autocomplete="off"
-                                   placeholder="Jottacloud" />
+                                   placeholder="Cloud Media" />
                         </div>
 
                         <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="JottacloudCollectionType">Library type</label>
-                            <select id="JottacloudCollectionType"
-                                    name="JottacloudCollectionType"
+                            <label class="inputLabel inputLabelUnfocused" for="CloudCollectionType">Library type</label>
+                            <select id="CloudCollectionType"
+                                    name="CloudCollectionType"
                                     is="emby-select">
                                 <option value="music">Music</option>
                                 <option value="movies">Movies</option>
@@ -180,21 +223,15 @@
 
                         <div class="inputContainer">
                             <label style="display:flex;gap:0.5em;align-items:center">
-                                <input id="JottacloudAutoCreateLibrary"
-                                       name="JottacloudAutoCreateLibrary"
+                                <input id="CloudAutoCreateLibrary"
+                                       name="CloudAutoCreateLibrary"
                                        type="checkbox" />
-                                <span>Create the Jellyfin library after the first complete materialization</span>
+                                <span>Create the Jellyfin library after a successful cloud copy</span>
                             </label>
                         </div>
 
                         <div style="display:flex;gap:0.5em;flex-wrap:wrap">
-                            <button id="JottacloudStatusButton"
-                                    is="emby-button"
-                                    type="button"
-                                    class="emby-button">
-                                <span>Check server access</span>
-                            </button>
-                            <button id="JottacloudReconcileButton"
+                            <button id="CloudReconcileButton"
                                     is="emby-button"
                                     type="button"
                                     class="raised emby-button">
@@ -202,7 +239,7 @@
                             </button>
                         </div>
 
-                        <div id="JottacloudStatus"
+                        <div id="CloudStatus"
                              class="fieldDescription"
                              role="status"
                              aria-live="polite"
