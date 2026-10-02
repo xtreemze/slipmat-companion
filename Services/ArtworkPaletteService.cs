@@ -173,7 +173,7 @@ public sealed class ArtworkPaletteService
                 continue;
             }
 
-            var saturation = chroma / (double)Math.Max(1, max);
+            var saturation = chroma / (double)Math.Max(1, (int)max);
             var sampleWeight = 0.35d + saturation;
             var key = ((red >> 3) << 10) | ((green >> 3) << 5) | (blue >> 3);
             if (!buckets.TryGetValue(key, out var bucket))
