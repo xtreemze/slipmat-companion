@@ -79,7 +79,8 @@ internal sealed class HigherOrderAudioAnalysisBuilder
                     harmonic.Confidence),
                 loudness,
                 structure,
-                Transitions: null);
+                Transitions: null,
+                LoudnessMeasurement: FfmpegLoudnessParser.ToMeasurementEvidence(loudness));
         }
 
         return new HigherOrderAnalysisResult(

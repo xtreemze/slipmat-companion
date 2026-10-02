@@ -17,7 +17,7 @@ public record StoredWaveformRef(
 );
 
 /// <summary>
-/// Host-neutral V2 sidecar written by any compatible Slipmat analyzer to
+/// Host-neutral V2-family sidecar projected from Slipmat's canonical Rust contract to
 /// {store}/analysis/{subjectStoreKey}.json.
 /// </summary>
 public record AnalysisSidecar(
@@ -34,7 +34,7 @@ public record AnalysisSidecar(
     [property: JsonPropertyName("spectralAnalysisVersion")] int SpectralAnalysisVersion = 0
 )
 {
-    public const string CurrentSchemaVersion = "2.0.0";
+    public const string CurrentSchemaVersion = "2.1.0";
 
     public bool IsCurrentFor(string subjectStoreKey)
         => SchemaVersion == CurrentSchemaVersion
