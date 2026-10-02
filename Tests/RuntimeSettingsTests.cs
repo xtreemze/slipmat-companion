@@ -70,4 +70,48 @@ public class RuntimeSettingsTests
 
         Assert.Equal(Path.GetFullPath(environmentRoot), resolved);
     }
+
+    [Fact]
+    public void ResolveJottacloudProjectionPath_FreshInstall_UsesDeterministicJellyfinManagedPath()
+    {
+        var config = new PluginConfiguration();
+        var dataPath = Path.Combine(Path.GetTempPath(), "jellyfin-data");
+
+        var first = RuntimeSettings.ResolveJottacloudProjectionPath(
+            config,
+            "Archive/Music",
+            dataPath);
+        var second = RuntimeSettings.ResolveJottacloudProjectionPath(
+            config,
+            "Archive/Music",
+            dataPath);
+        var other = RuntimeSettings.ResolveJottacloudProjectionPath(
+            config,
+            "Archive/Movies",
+            dataPath);
+
+        Assert.Equal(first, second);
+        Assert.StartsWith(
+            Path.Combine(dataPath, "audio-gateway", "cloud", "jottacloud"),
+            first);
+        Assert.NotEqual(first, other);
+    }
+
+    [Fact]
+    public void ResolveJottacloudProjectionPath_ConfiguredOverrideWins()
+    {
+        var overridePath = Path.Combine(Path.GetTempPath(), "cloud-media-cache");
+        var config = new PluginConfiguration
+        {
+            JottacloudProjectionPath = overridePath,
+        };
+
+        var resolved = RuntimeSettings.ResolveJottacloudProjectionPath(
+            config,
+            "Archive/Music",
+            Path.Combine(Path.GetTempPath(), "jellyfin-data"));
+
+        Assert.Equal(Path.GetFullPath(overridePath), resolved);
+    }
+
 }
