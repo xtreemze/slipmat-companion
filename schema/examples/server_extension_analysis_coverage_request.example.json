@@ -7,7 +7,7 @@
         "storeKey": "asv1-45babe3bb1fb2875c1a1185d168399d182a45f0bc2bfef66be054439121570e4"
       },
       "expectedSourceFingerprint": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-      "expectedSidecarSchemaVersion": "2.0.0"
+      "expectedSidecarSchemaVersion": "2.1.0"
     },
     {
       "subject": {

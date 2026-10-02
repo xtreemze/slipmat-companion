@@ -15,4 +15,4 @@ category: "General"
 owner: "xtreemze"
 artifacts:
 - "Jellyfin.Plugin.AudioGateway.dll"
-changelog: "Add explicit provider-neutral measured loudness evidence for FFmpeg loudnorm input statistics, preserving integrated LUFS, true peak dBTP, LRA, recipe identity, and server-analysis provenance without deriving normalization gain."
+changelog: "Add provider-neutral measured loudness evidence and adopt canonical host-neutral sidecar schema 2.1.0, preserving LUFS, true peak dBTP, LRA, recipe provenance, and exact stale-schema rejection without deriving normalization gain."
