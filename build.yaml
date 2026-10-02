@@ -1,7 +1,7 @@
 ---
 name: "Audio Gateway"
 guid: "d3a2b1c0-e4f5-6789-abcd-ef0123456789"
-version: "0.4.1.0"
+version: "0.4.2.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 overview: "Optional Jellyfin companion that accelerates and enriches Slipmat."
@@ -15,4 +15,4 @@ category: "General"
 owner: "xtreemze"
 artifacts:
 - "Jellyfin.Plugin.AudioGateway.dll"
-changelog: "Adopt canonical host-neutral sidecar schema 2.1.0 and expose provider-neutral measured loudness evidence with LUFS, true peak dBTP, LRA, and analyzer provenance without deriving normalization gain."
+changelog: "Add canonical SHRM harmonic-key evidence to SLWS with typed pitch, mode, confidence, analyzer version, independent CRC, and the shared Rust/C# container vector."
