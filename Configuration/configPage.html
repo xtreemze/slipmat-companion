@@ -17,7 +17,7 @@
                         <div class="fieldDescription">
                             Audio analysis is built into the plugin and uses Jellyfin's managed FFmpeg.
                             No analyzer URL, second container, or shared media mount is required.
-                            Missing artifacts are generated asynchronously and a daily Jellyfin scheduled task reconciles the library.
+                            Missing artifacts are generated asynchronously and the scheduled backfill reconciles the library.
                         </div>
                     </div>
 
@@ -34,6 +34,201 @@
                             Existing deployments with a mounted /store remain compatible.
                             SLIPMAT_ARTIFACT_STORE_ROOT can provide an environment override.
                         </div>
+                    </div>
+
+                    <div class="verticalSection">
+                        <h3 class="sectionTitle">Jottacloud media projection</h3>
+                        <div class="fieldDescription">
+                            Install and authenticate Jottacloud CLI on this server yourself. The companion never
+                            receives login credentials; it manages the already-authenticated local jottad through jotta-cli.
+                            Media is materialized one-way into a dedicated local projection before Jellyfin scans it.
+                            The host may set SLIPMAT_JOTTACLOUD_CLI when jotta-cli is not available on Jellyfin's PATH.
+                        </div>
+
+                        <div class="inputContainer">
+                            <label style="display:flex;gap:0.5em;align-items:center">
+                                <input id="JottacloudProjectionEnabled"
+                                       name="JottacloudProjectionEnabled"
+                                       type="checkbox" />
+                                <span>Enable Jottacloud projection</span>
+                            </label>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="JottacloudRemotePath">Remote folder</label>
+                            <input id="JottacloudRemotePath"
+                                   name="JottacloudRemotePath"
+                                   type="text"
+                                   is="emby-input"
+                                   autocomplete="off"
+                                   placeholder="Archive/Music" />
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="JottacloudProjectionPath">Local projection folder</label>
+                            <input id="JottacloudProjectionPath"
+                                   name="JottacloudProjectionPath"
+                                   type="text"
+                                   is="emby-input"
+                                   autocomplete="off"
+                                   placeholder="/srv/slipmat/jottacloud/music" />
+                            <div class="fieldDescription">
+                                Must be a dedicated absolute directory. Slipmat refuses a non-empty directory it has
+                                not previously claimed for this exact remote folder and never deletes its contents.
+                            </div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="JottacloudLibraryName">Jellyfin library name</label>
+                            <input id="JottacloudLibraryName"
+                                   name="JottacloudLibraryName"
+                                   type="text"
+                                   is="emby-input"
+                                   autocomplete="off"
+                                   placeholder="Jottacloud" />
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="JottacloudCollectionType">Library type</label>
+                            <select id="JottacloudCollectionType"
+                                    name="JottacloudCollectionType"
+                                    is="emby-select">
+                                <option value="music">Music</option>
+                                <option value="movies">Movies</option>
+                                <option value="tvshows">TV shows</option>
+                                <option value="musicvideos">Music videos</option>
+                                <option value="homevideos">Home videos and photos</option>
+                                <option value="books">Books</option>
+                                <option value="mixed">Mixed movies and TV</option>
+                            </select>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label style="display:flex;gap:0.5em;align-items:center">
+                                <input id="JottacloudAutoCreateLibrary"
+                                       name="JottacloudAutoCreateLibrary"
+                                       type="checkbox" />
+                                <span>Create the Jellyfin library after the first complete materialization</span>
+                            </label>
+                        </div>
+
+                        <div style="display:flex;gap:0.5em;flex-wrap:wrap">
+                            <button id="JottacloudStatusButton"
+                                    is="emby-button"
+                                    type="button"
+                                    class="emby-button">
+                                <span>Check status</span>
+                            </button>
+                            <button id="JottacloudBrowseRootButton"
+                                    is="emby-button"
+                                    type="button"
+                                    class="emby-button">
+                                <span>Browse root</span>
+                            </button>
+                            <button id="JottacloudBrowseConfiguredButton"
+                                    is="emby-button"
+                                    type="button"
+                                    class="emby-button">
+                                <span>Browse selected folder</span>
+                            </button>
+                            <button id="JottacloudReconcileButton"
+                                    is="emby-button"
+                                    type="button"
+                                    class="raised emby-button">
+                                <span>Reconcile now</span>
+                            </button>
+                        </div>
+
+                        <div id="JottacloudStatus"
+                             class="fieldDescription"
+                             role="status"
+                             aria-live="polite">
+                            Save configuration, then check the authenticated daemon.
+                        </div>
+                        <pre id="JottacloudBrowseResults"
+                             class="fieldDescription"
+                             aria-label="Jottacloud remote directory listing"
+                             style="white-space:pre-wrap;max-height:18em;overflow:auto"></pre>
+                    </div>
+
+                    <div class="verticalSection">
+                        <h3 class="sectionTitle">iptv-org Live TV discovery</h3>
+                        <div class="fieldDescription">
+                            Browse the public iptv-org JSON catalog and subscribe channels to this Jellyfin server.
+                            Selected channels are published through Jellyfin's native Live TV service, including
+                            per-stream Referer/User-Agent requirements when provided by iptv-org. This server-wide
+                            source configuration is separate from Slipmat's per-user client subscription library.
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="IptvOrgSearch">Search</label>
+                            <input id="IptvOrgSearch"
+                                   name="IptvOrgSearch"
+                                   type="search"
+                                   is="emby-input"
+                                   maxlength="160"
+                                   autocomplete="off"
+                                   placeholder="Channel, network, category, language…" />
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="IptvOrgCountry">Country code</label>
+                            <input id="IptvOrgCountry"
+                                   name="IptvOrgCountry"
+                                   type="text"
+                                   is="emby-input"
+                                   maxlength="8"
+                                   autocomplete="off"
+                                   placeholder="SE" />
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="IptvOrgCategory">Category</label>
+                            <input id="IptvOrgCategory"
+                                   name="IptvOrgCategory"
+                                   type="text"
+                                   is="emby-input"
+                                   maxlength="64"
+                                   autocomplete="off"
+                                   placeholder="news" />
+                        </div>
+
+                        <div style="display:flex;gap:0.5em;flex-wrap:wrap">
+                            <button id="IptvOrgBrowseButton"
+                                    is="emby-button"
+                                    type="button"
+                                    class="raised emby-button">
+                                <span>Browse channels</span>
+                            </button>
+                            <button id="IptvOrgRefreshCatalogButton"
+                                    is="emby-button"
+                                    type="button"
+                                    class="emby-button">
+                                <span>Refresh catalog</span>
+                            </button>
+                            <button id="IptvOrgPreviousButton"
+                                    is="emby-button"
+                                    type="button"
+                                    class="emby-button"
+                                    disabled>
+                                <span>Previous</span>
+                            </button>
+                            <button id="IptvOrgNextButton"
+                                    is="emby-button"
+                                    type="button"
+                                    class="emby-button"
+                                    disabled>
+                                <span>Next</span>
+                            </button>
+                        </div>
+
+                        <div id="IptvOrgBrowseStatus"
+                             class="fieldDescription"
+                             role="status"
+                             aria-live="polite"></div>
+                        <div id="IptvOrgResults"
+                             class="verticalSection"
+                             aria-label="iptv-org channel results"></div>
                     </div>
 
                     <div class="verticalSection">
@@ -54,6 +249,258 @@
             var AudioGatewayConfig = {
                 pluginUniqueId: 'd3a2b1c0-e4f5-6789-abcd-ef0123456789'
             };
+            var IptvOrgPublishedChannelIds = new Set();
+            var IptvOrgBrowseOffset = 0;
+            var IptvOrgBrowseTotal = 0;
+            var IptvOrgPageSize = 50;
+
+            function textList(value) {
+                return Array.isArray(value)
+                    ? value.filter(function(entry) { return typeof entry === 'string' && entry.trim().length > 0; })
+                    : [];
+            }
+
+            function createMetadataLine(channel) {
+                const parts = [];
+                if (channel.countryCode) {
+                    parts.push(channel.countryCode);
+                }
+                if (channel.network) {
+                    parts.push(channel.network);
+                }
+                if (Array.isArray(channel.categories) && channel.categories.length > 0) {
+                    parts.push(channel.categories.join(', '));
+                }
+                if (Array.isArray(channel.languages) && channel.languages.length > 0) {
+                    parts.push(channel.languages.join(', '));
+                }
+                parts.push(String(channel.streamCount || 0) + ' stream' + (channel.streamCount === 1 ? '' : 's'));
+                if (channel.headerDependentStreamCount > 0) {
+                    parts.push(String(channel.headerDependentStreamCount) + ' server-header stream' +
+                        (channel.headerDependentStreamCount === 1 ? '' : 's'));
+                }
+                if (channel.hasGuide) {
+                    parts.push('guide metadata available');
+                }
+                return parts.join(' · ');
+            }
+
+            function renderIptvOrgResults(response) {
+                const results = document.querySelector('#IptvOrgResults');
+                results.replaceChildren();
+
+                const channels = response && Array.isArray(response.channels) ? response.channels : [];
+                if (channels.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.className = 'fieldDescription';
+                    empty.textContent = 'No matching channels.';
+                    results.appendChild(empty);
+                    return;
+                }
+
+                channels.forEach(function(channel) {
+                    const row = document.createElement('div');
+                    row.className = 'paperList';
+                    row.style.padding = '0.75em 0';
+                    row.style.borderBottom = '1px solid currentColor';
+
+                    const content = document.createElement('div');
+                    content.style.display = 'flex';
+                    content.style.gap = '1em';
+                    content.style.alignItems = 'center';
+
+                    if (channel.logoUrl) {
+                        const logo = document.createElement('img');
+                        const variants = Array.isArray(channel.logos) ? channel.logos : [];
+                        const best = variants.find(function(candidate) {
+                            return candidate && candidate.url === channel.logoUrl;
+                        }) || variants[0] || null;
+                        logo.src = channel.logoUrl;
+                        logo.alt = '';
+                        logo.loading = 'lazy';
+                        if (best && Number.isFinite(best.width) && Number.isFinite(best.height)) {
+                            logo.width = best.width;
+                            logo.height = best.height;
+                            logo.style.aspectRatio = String(best.width) + ' / ' + String(best.height);
+                        }
+                        logo.style.maxWidth = '96px';
+                        logo.style.maxHeight = '54px';
+                        logo.style.width = 'auto';
+                        logo.style.height = 'auto';
+                        logo.style.objectFit = 'contain';
+                        content.appendChild(logo);
+                    }
+
+                    const details = document.createElement('div');
+                    details.style.flex = '1 1 auto';
+
+                    const name = document.createElement('div');
+                    name.textContent = channel.name || channel.id;
+                    name.style.fontWeight = '600';
+                    details.appendChild(name);
+
+                    const metadata = document.createElement('div');
+                    metadata.className = 'fieldDescription';
+                    metadata.textContent = createMetadataLine(channel);
+                    details.appendChild(metadata);
+
+                    content.appendChild(details);
+
+                    const selection = document.createElement('label');
+                    selection.style.display = 'flex';
+                    selection.style.alignItems = 'center';
+                    selection.style.gap = '0.5em';
+
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.checked = IptvOrgPublishedChannelIds.has(channel.id);
+                    checkbox.setAttribute('aria-label', 'Subscribe ' + (channel.name || channel.id) + ' to Jellyfin Live TV');
+                    checkbox.addEventListener('change', function() {
+                        if (checkbox.checked) {
+                            IptvOrgPublishedChannelIds.add(channel.id);
+                        } else {
+                            IptvOrgPublishedChannelIds.delete(channel.id);
+                        }
+                    });
+
+                    const labelText = document.createElement('span');
+                    labelText.textContent = 'Subscribe';
+                    selection.appendChild(checkbox);
+                    selection.appendChild(labelText);
+                    content.appendChild(selection);
+
+                    row.appendChild(content);
+                    results.appendChild(row);
+                });
+            }
+
+            async function browseIptvOrg(resetOffset) {
+                if (resetOffset) {
+                    IptvOrgBrowseOffset = 0;
+                }
+                const status = document.querySelector('#IptvOrgBrowseStatus');
+                const query = document.querySelector('#IptvOrgSearch').value.trim();
+                const country = document.querySelector('#IptvOrgCountry').value.trim();
+                const category = document.querySelector('#IptvOrgCategory').value.trim();
+
+                status.textContent = 'Loading iptv-org catalog…';
+                try {
+                    const response = await ApiClient.getJSON(
+                        ApiClient.getUrl('Plugins/AudioGateway/livetv/iptv-org/channels', {
+                            q: query || undefined,
+                            country: country || undefined,
+                            category: category || undefined,
+                            offset: IptvOrgBrowseOffset,
+                            limit: IptvOrgPageSize
+                        })
+                    );
+                    renderIptvOrgResults(response);
+                    const shown = Array.isArray(response.channels) ? response.channels.length : 0;
+                    const total = Number.isFinite(response.total) ? response.total : shown;
+                    IptvOrgBrowseTotal = total;
+                    const first = shown === 0 ? 0 : IptvOrgBrowseOffset + 1;
+                    const last = IptvOrgBrowseOffset + shown;
+                    status.textContent = 'Showing ' + first + '–' + last + ' of ' + total + ' matching channels.';
+            document.querySelector('#IptvOrgPreviousButton').disabled = IptvOrgBrowseOffset === 0;
+                    document.querySelector('#IptvOrgNextButton').disabled =
+                        IptvOrgBrowseOffset + shown >= total;
+                } catch {
+                    document.querySelector('#IptvOrgResults').replaceChildren();
+                    status.textContent = 'Unable to load iptv-org discovery.';
+                    document.querySelector('#IptvOrgPreviousButton').disabled = IptvOrgBrowseOffset === 0;
+                    document.querySelector('#IptvOrgNextButton').disabled = true;
+                }
+            }
+
+            async function refreshIptvOrgCatalog() {
+                const status = document.querySelector('#IptvOrgBrowseStatus');
+                status.textContent = 'Refreshing iptv-org catalog…';
+                try {
+                    const response = await ApiClient.ajax({
+                        type: 'POST',
+                        dataType: 'json',
+                        url: ApiClient.getUrl('Plugins/AudioGateway/livetv/iptv-org/catalog/refresh')
+                    });
+                    const cached = response && response.usedLastKnownGood === true;
+                    const count = response && Number.isFinite(response.channelCount)
+                        ? response.channelCount
+                        : null;
+                    status.textContent = cached
+                        ? 'Provider refresh failed; retained the last-known-good catalog.'
+                        : 'Catalog refreshed' + (count === null ? '.' : ' (' + count + ' playable channels).');
+                    await browseIptvOrg(false);
+                } catch {
+                    status.textContent = 'Unable to refresh iptv-org catalog.';
+                }
+            }
+
+            async function refreshJellyfinLiveTv() {
+                return ApiClient.ajax({
+                    type: 'POST',
+                    url: ApiClient.getUrl('Plugins/AudioGateway/livetv/iptv-org/refresh')
+                });
+            }
+
+            async function loadJottacloudStatus() {
+                const status = document.querySelector('#JottacloudStatus');
+                status.textContent = 'Checking Jottacloud daemon…';
+                try {
+                    const response = await ApiClient.getJSON(
+                        ApiClient.getUrl('Plugins/AudioGateway/cloud/jottacloud/status')
+                    );
+                    const queue = response.downloadQueueKnown
+                        ? String(response.downloadQueueEntries) + ' outstanding download queue ' +
+                            (response.downloadQueueEntries === 1 ? 'entry' : 'entries')
+                        : 'download queue unavailable';
+                    const projection = response.projectionHasFiles
+                        ? 'projection materialized'
+                        : (response.projectionPathReady ? 'projection ready' : 'projection not ready');
+                    const library = response.libraryReady ? 'library ready' : 'library not ready';
+                    status.textContent = response.health + ' · ' + response.code + ' · ' +
+                        queue + ' · ' + projection + ' · ' + library +
+                        (response.cliVersion ? ' · CLI ' + response.cliVersion : '');
+                } catch {
+                    status.textContent = 'Unable to read Jottacloud projection status.';
+                }
+            }
+
+            async function browseJottacloud(path) {
+                const status = document.querySelector('#JottacloudStatus');
+                const results = document.querySelector('#JottacloudBrowseResults');
+                status.textContent = 'Loading Jottacloud directory…';
+                results.textContent = '';
+                try {
+                    const response = await ApiClient.getJSON(
+                        ApiClient.getUrl('Plugins/AudioGateway/cloud/jottacloud/browse', {
+                            path: path || undefined
+                        })
+                    );
+                    results.textContent = Array.isArray(response.lines)
+                        ? response.lines.join('\n')
+                        : '';
+                    status.textContent = response.truncated
+                        ? 'Directory loaded; output was truncated.'
+                        : 'Directory loaded.';
+                } catch {
+                    status.textContent = 'Unable to browse Jottacloud. Check that jottad is logged in under the service-accessible OS context.';
+                }
+            }
+
+            async function reconcileJottacloud() {
+                const status = document.querySelector('#JottacloudStatus');
+                status.textContent = 'Reconciling Jottacloud projection…';
+                try {
+                    const response = await ApiClient.ajax({
+                        type: 'POST',
+                        dataType: 'json',
+                        url: ApiClient.getUrl('Plugins/AudioGateway/cloud/jottacloud/reconcile')
+                    });
+                    status.textContent = response.status + ' · ' + response.code;
+                    await loadJottacloudStatus();
+                } catch {
+                    status.textContent = 'Unable to reconcile Jottacloud projection.';
+                }
+            }
 
             async function loadAudioGatewayStatus() {
                 const status = document.querySelector('#AudioGatewayStatus');
@@ -69,13 +516,67 @@
                     const store = response.storeWritable ? 'ready' : 'unavailable';
                     const overall = reasons.length > 0 ? 'degraded' : 'ready';
                     const degraded = reasons.length > 0
-                        ? ` — ${reasons.join(', ')}`
+                        ? ' — ' + reasons.join(', ')
                         : '';
-                    status.textContent = `Core companion: ${overall}; analyzer: ${analyzer}; store: ${store}${degraded}`;
+                    status.textContent = 'Core companion: ' + overall +
+                        '; analyzer: ' + analyzer +
+                        '; store: ' + store + degraded;
                 } catch {
                     status.textContent = 'Unable to read Audio Gateway health.';
                 }
             }
+
+            document.querySelector('#JottacloudStatusButton')
+                .addEventListener('click', function() {
+                    loadJottacloudStatus();
+                });
+
+            document.querySelector('#JottacloudBrowseRootButton')
+                .addEventListener('click', function() {
+                    browseJottacloud('');
+                });
+
+            document.querySelector('#JottacloudBrowseConfiguredButton')
+                .addEventListener('click', function() {
+                    browseJottacloud(document.querySelector('#JottacloudRemotePath').value.trim());
+                });
+
+            document.querySelector('#JottacloudReconcileButton')
+                .addEventListener('click', function() {
+                    reconcileJottacloud();
+                });
+
+            document.querySelector('#IptvOrgBrowseButton')
+                .addEventListener('click', function() {
+                    browseIptvOrg(true);
+                });
+
+            document.querySelector('#IptvOrgRefreshCatalogButton')
+                .addEventListener('click', function() {
+                    refreshIptvOrgCatalog();
+                });
+
+            document.querySelector('#IptvOrgPreviousButton')
+                .addEventListener('click', function() {
+                    IptvOrgBrowseOffset = Math.max(0, IptvOrgBrowseOffset - IptvOrgPageSize);
+                    browseIptvOrg(false);
+                });
+
+            document.querySelector('#IptvOrgNextButton')
+                .addEventListener('click', function() {
+                    if (IptvOrgBrowseOffset + IptvOrgPageSize < IptvOrgBrowseTotal) {
+                        IptvOrgBrowseOffset += IptvOrgPageSize;
+                        browseIptvOrg(false);
+                    }
+                });
+
+            document.querySelector('#IptvOrgSearch')
+                .addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        browseIptvOrg(true);
+                    }
+                });
 
             document.querySelector('#AudioGatewayConfigPage')
                 .addEventListener('pageshow', function() {
@@ -83,7 +584,24 @@
                     ApiClient.getPluginConfiguration(AudioGatewayConfig.pluginUniqueId)
                         .then(function(config) {
                             document.querySelector('#StoreRoot').value = config.StoreRoot || '';
-                            return loadAudioGatewayStatus();
+                            document.querySelector('#JottacloudProjectionEnabled').checked =
+                                config.JottacloudProjectionEnabled === true;
+                            document.querySelector('#JottacloudRemotePath').value =
+                                config.JottacloudRemotePath || '';
+                            document.querySelector('#JottacloudProjectionPath').value =
+                                config.JottacloudProjectionPath || '';
+                            document.querySelector('#JottacloudLibraryName').value =
+                                config.JottacloudLibraryName || 'Jottacloud';
+                            document.querySelector('#JottacloudCollectionType').value =
+                                config.JottacloudCollectionType || 'music';
+                            document.querySelector('#JottacloudAutoCreateLibrary').checked =
+                                config.JottacloudAutoCreateLibrary !== false;
+                            IptvOrgPublishedChannelIds = new Set(textList(config.IptvOrgLiveTvChannelIds));
+                            return Promise.all([
+                                loadAudioGatewayStatus(),
+                                loadJottacloudStatus(),
+                                browseIptvOrg(true)
+                            ]);
                         })
                         .finally(function() {
                             Dashboard.hideLoadingMsg();
@@ -96,11 +614,31 @@
                     ApiClient.getPluginConfiguration(AudioGatewayConfig.pluginUniqueId)
                         .then(function(config) {
                             config.StoreRoot = document.querySelector('#StoreRoot').value.trim();
+                            config.JottacloudProjectionEnabled =
+                                document.querySelector('#JottacloudProjectionEnabled').checked;
+                            config.JottacloudRemotePath =
+                                document.querySelector('#JottacloudRemotePath').value.trim();
+                            config.JottacloudProjectionPath =
+                                document.querySelector('#JottacloudProjectionPath').value.trim();
+                            config.JottacloudLibraryName =
+                                document.querySelector('#JottacloudLibraryName').value.trim() || 'Jottacloud';
+                            config.JottacloudCollectionType =
+                                document.querySelector('#JottacloudCollectionType').value;
+                            config.JottacloudAutoCreateLibrary =
+                                document.querySelector('#JottacloudAutoCreateLibrary').checked;
+                            config.IptvOrgLiveTvChannelIds = Array.from(IptvOrgPublishedChannelIds).sort();
                             return ApiClient.updatePluginConfiguration(AudioGatewayConfig.pluginUniqueId, config);
                         })
                         .then(function(result) {
                             Dashboard.processPluginConfigurationUpdateResult(result);
-                            return loadAudioGatewayStatus();
+                            return refreshJellyfinLiveTv();
+                        })
+                        .then(function() {
+                            return Promise.all([
+                                loadAudioGatewayStatus(),
+                                loadJottacloudStatus(),
+                                browseIptvOrg(false)
+                            ]);
                         })
                         .finally(function() {
                             Dashboard.hideLoadingMsg();
