@@ -24,6 +24,7 @@ public sealed class ArtworkPaletteService
     private const int MaxSwatches = 6;
     private const int MaxCacheEntries = 512;
 
+    private readonly MediaBrowser.Controller.Library.ILibraryManager _library;
     private readonly JellyfinMetadataAdapter _metadataAdapter;
     private readonly ILogger<ArtworkPaletteService> _logger;
     private readonly object _cacheGate = new();
@@ -31,11 +32,35 @@ public sealed class ArtworkPaletteService
     private readonly Queue<string> _cacheOrder = new();
 
     public ArtworkPaletteService(
+        MediaBrowser.Controller.Library.ILibraryManager library,
         JellyfinMetadataAdapter metadataAdapter,
         ILogger<ArtworkPaletteService> logger)
     {
+        _library = library;
         _metadataAdapter = metadataAdapter;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Resolves palette evidence for any Jellyfin item with primary artwork.
+    /// Audio tracks reuse the canonical album-first association rule.
+    /// </summary>
+    public ArtworkPaletteV1? ResolveForItem(Guid itemId)
+    {
+        var item = _library.GetItemById(itemId);
+        if (item is null)
+        {
+            return null;
+        }
+
+        if (item is Audio audio)
+        {
+            return ResolveForTrack(audio);
+        }
+
+        return item.HasImage(ImageType.Primary)
+            ? Resolve(item, "item-primary")
+            : null;
     }
 
     /// <summary>
