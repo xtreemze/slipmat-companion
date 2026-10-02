@@ -1,29 +1,55 @@
 {
-  "schemaVersion": "2.0.0",
+  "schemaVersion": "2.1.0",
   "subjectVersion": 1,
   "subjectStoreKey": "asv1-45babe3bb1fb2875c1a1185d168399d182a45f0bc2bfef66be054439121570e4",
   "sourceFingerprint": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   "durationMs": 562000,
   "waveformRefs": [
     {
-      "variant": "awf_v1_riff_mono_u8_peak",
+      "variant": "awf_v1_native_mono_b8",
       "pps": 1,
       "etag": "\"etag-1\"",
-      "path": "waveforms/asv1-45babe3bb1fb2875c1a1185d168399d182a45f0bc2bfef66be054439121570e4/awf_v1_riff_mono_u8_peak/pps_1.dat"
+      "path": "waveforms/asv1-45babe3bb1fb2875c1a1185d168399d182a45f0bc2bfef66be054439121570e4/awf_v1_native_mono_b8/pps_1.dat"
     },
     {
-      "variant": "awf_v1_riff_mono_u8_peak",
+      "variant": "awf_v1_native_mono_b8",
       "pps": 10,
       "etag": "\"etag-10\"",
-      "path": "waveforms/asv1-45babe3bb1fb2875c1a1185d168399d182a45f0bc2bfef66be054439121570e4/awf_v1_riff_mono_u8_peak/pps_10.dat"
+      "path": "waveforms/asv1-45babe3bb1fb2875c1a1185d168399d182a45f0bc2bfef66be054439121570e4/awf_v1_native_mono_b8/pps_10.dat"
     },
     {
-      "variant": "awf_v1_riff_mono_u8_peak",
+      "variant": "awf_v1_native_mono_b8",
       "pps": 100,
       "etag": "\"etag-100\"",
-      "path": "waveforms/asv1-45babe3bb1fb2875c1a1185d168399d182a45f0bc2bfef66be054439121570e4/awf_v1_riff_mono_u8_peak/pps_100.dat"
+      "path": "waveforms/asv1-45babe3bb1fb2875c1a1185d168399d182a45f0bc2bfef66be054439121570e4/awf_v1_native_mono_b8/pps_100.dat"
     }
   ],
   "producerVersion": "0.1.0",
-  "generatedAt": "2026-04-06T00:00:00Z"
+  "generatedAt": "2026-04-06T00:00:00Z",
+  "analysis": {
+    "timing": {
+      "bpm": 136.7,
+      "bpmConfidence": 0.92,
+      "downbeats": [
+        0,
+        1752,
+        3504,
+        5256
+      ],
+      "beatGrid": {
+        "startOffsetMs": 0,
+        "intervalMs": 438.9
+      }
+    },
+    "harmonic": {
+      "key": "A Minor",
+      "camelotKey": "8A",
+      "keyConfidence": 0.88
+    },
+    "loudness": {
+      "integratedLufs": -17.3,
+      "truePeak": -2.1,
+      "dynamicRange": 14.8
+    }
+  }
 }

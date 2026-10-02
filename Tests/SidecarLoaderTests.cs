@@ -39,6 +39,18 @@ public class SidecarLoaderTests
     }
 
     [Fact]
+    public void PreviousSidecarSchema_IsNotCurrent()
+    {
+        var loader = new SidecarLoader();
+        var sidecar = loader.LoadSidecar(ExamplePath("analysis_sidecar_v2.example.json"));
+        Assert.NotNull(sidecar);
+
+        var previous = sidecar! with { SchemaVersion = "2.0.0" };
+        Assert.False(previous.IsCurrentFor(StoreKey));
+        Assert.True(sidecar.IsCurrentFor(StoreKey));
+    }
+
+    [Fact]
     public void LoadSidecar_MissingFile_ReturnsNull()
     {
         var loader = new SidecarLoader();

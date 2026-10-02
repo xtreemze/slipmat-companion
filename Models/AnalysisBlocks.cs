@@ -33,6 +33,27 @@ public record LoudnessAnalysis(
     [property: JsonPropertyName("dynamicRange")]    double DynamicRange
 );
 
+public record LoudnessAnalyzerIdentityV1(
+    [property: JsonPropertyName("name")]                string Name,
+    [property: JsonPropertyName("version")]             string Version,
+    [property: JsonPropertyName("configurationDigest")] string? ConfigurationDigest = null
+);
+
+/// <summary>
+/// Provider-neutral measured loudness facts. This is evidence only: no
+/// normalization target, gain selection, headroom policy, or render state.
+/// </summary>
+public record LoudnessMeasurementEvidenceV1(
+    [property: JsonPropertyName("version")]         int Version,
+    [property: JsonPropertyName("scope")]           string Scope,
+    [property: JsonPropertyName("authority")]       string Authority,
+    [property: JsonPropertyName("semantics")]       string Semantics,
+    [property: JsonPropertyName("analyzer")]        LoudnessAnalyzerIdentityV1 Analyzer,
+    [property: JsonPropertyName("integratedLufs")]  double IntegratedLufs,
+    [property: JsonPropertyName("truePeakDbtp")]    double? TruePeakDbtp = null,
+    [property: JsonPropertyName("loudnessRangeLu")] double? LoudnessRangeLu = null
+);
+
 public record EnergyCurvePoint(
     /// <summary>Sample position in integer milliseconds from track start.</summary>
     [property: JsonPropertyName("timeMs")]  long TimeMs,
@@ -62,9 +83,10 @@ public record TransitionCandidate(
 );
 
 public record AnalysisBlocks(
-    [property: JsonPropertyName("timing")]      TimingAnalysis Timing,
-    [property: JsonPropertyName("harmonic")]    HarmonicAnalysis Harmonic,
-    [property: JsonPropertyName("loudness")]    LoudnessAnalysis Loudness,
-    [property: JsonPropertyName("structure")]   StructureAnalysis? Structure = null,
-    [property: JsonPropertyName("transitions")] List<TransitionCandidate>? Transitions = null
+    [property: JsonPropertyName("timing")]               TimingAnalysis Timing,
+    [property: JsonPropertyName("harmonic")]             HarmonicAnalysis Harmonic,
+    [property: JsonPropertyName("loudness")]             LoudnessAnalysis Loudness,
+    [property: JsonPropertyName("structure")]            StructureAnalysis? Structure = null,
+    [property: JsonPropertyName("transitions")]          List<TransitionCandidate>? Transitions = null,
+    [property: JsonPropertyName("loudnessMeasurement")] LoudnessMeasurementEvidenceV1? LoudnessMeasurement = null
 );

@@ -140,6 +140,9 @@ public class ModelRoundTripTests
         Assert.Equal(AnalysisSubjectV1.SubjectVersion, sidecar.SubjectVersion);
         Assert.StartsWith("asv1-", sidecar.SubjectStoreKey);
         Assert.Equal(3, sidecar.WaveformRefs.Count);
+        Assert.NotNull(sidecar.Analysis);
+        Assert.Equal("A Minor", sidecar.Analysis!.Harmonic.Key);
+        Assert.Equal("8A", sidecar.Analysis.Harmonic.CamelotKey);
         Assert.DoesNotContain("itemId", File.ReadAllText(path));
     }
 
