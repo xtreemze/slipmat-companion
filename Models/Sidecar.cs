@@ -39,5 +39,6 @@ public record AnalysisSidecar(
     public bool IsCurrentFor(string subjectStoreKey)
         => SchemaVersion == CurrentSchemaVersion
             && SubjectVersion == AnalysisSubjectV1.SubjectVersion
+            && AnalysisSubjectV1.IsStoreKey(SubjectStoreKey)
             && SubjectStoreKey == subjectStoreKey;
 }

@@ -22,6 +22,27 @@ public sealed record AnalysisSubjectV1(
     private const string StoreKeyPrefix = "asv1-";
     private static readonly byte[] Domain = Encoding.UTF8.GetBytes("slipmat-analysis-subject-v1\0");
 
+    public static bool IsStoreKey(string? value)
+    {
+        if (value is null ||
+            !value.StartsWith(StoreKeyPrefix, StringComparison.Ordinal) ||
+            value.Length != StoreKeyPrefix.Length + 64)
+        {
+            return false;
+        }
+
+        foreach (var character in value.AsSpan(StoreKeyPrefix.Length))
+        {
+            if (!((character >= '0' && character <= '9') ||
+                  (character >= 'a' && character <= 'f')))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     public string StoreKey()
     {
         Validate();
