@@ -17,6 +17,9 @@ public class RhythmNumericalParityTests
         Assert.NotEqual(
             Math.Log(1d + current * 1_000d),
             actual);
+        Assert.NotEqual(
+            double.LogP1(current * 1_000d),
+            actual);
     }
 
     [Fact]
