@@ -60,7 +60,11 @@ public sealed class JottacloudProjectionService
         var config = _configurationSource.GetCurrent();
         if (!config.JottacloudProjectionEnabled)
         {
-            return DisabledStatus(config);
+            var setupCli = new JottacloudCliHost(runner: _runner);
+            var setupStatus = await setupCli
+                .GetStatusAsync(cancellationToken)
+                .ConfigureAwait(false);
+            return DisabledStatus(config, setupStatus);
         }
 
         if (!TryResolveConfiguration(config, out var resolved, out var configurationCode))
@@ -355,13 +359,14 @@ public sealed class JottacloudProjectionService
         => new(runner: _runner);
 
     private static JottacloudProjectionStatusResponse DisabledStatus(
-        PluginConfiguration config)
+        PluginConfiguration config,
+        JottacloudCliStatus cliStatus)
         => new(
             Configured: false,
             Enabled: false,
-            Health: "disabled",
-            Code: "projection-disabled",
-            CliVersion: null,
+            Health: HealthName(cliStatus.Health),
+            Code: cliStatus.Code,
+            CliVersion: cliStatus.CliVersion,
             RemotePath: NormalizeOptional(config.JottacloudRemotePath),
             ProjectionPath: null,
             ProjectionPathManaged: string.IsNullOrWhiteSpace(config.JottacloudProjectionPath),
