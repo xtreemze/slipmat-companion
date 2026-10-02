@@ -25,7 +25,7 @@ public class StorePathsTests
         => Assert.Throws<ArgumentException>(() => StorePaths.ValidateStoreKey(key));
 
     [Theory]
-    [InlineData("awf_v1_native_mono_b8")]
+    [InlineData("awf_v1_riff_mono_u8_peak")]
     [InlineData("slws_v2_stereo_u8_max_5band")]
     public void ValidatePathSegment_AcceptsArtifactVariants(string value)
         => StorePaths.ValidatePathSegment(value);
@@ -42,9 +42,9 @@ public class StorePathsTests
     [Fact]
     public void WaveformDatPath_UsesSubjectStoreKey()
     {
-        var path = StorePaths.WaveformDatPath("/store", StoreKey, "awf_v1_native_mono_b8", 10);
+        var path = StorePaths.WaveformDatPath("/store", StoreKey, "awf_v1_riff_mono_u8_peak", 10);
         Assert.Equal(
-            Path.Combine("/store", "waveforms", StoreKey, "awf_v1_native_mono_b8", "pps_10.dat"),
+            Path.Combine("/store", "waveforms", StoreKey, "awf_v1_riff_mono_u8_peak", "pps_10.dat"),
             path);
     }
 

@@ -42,7 +42,7 @@ public sealed record IntegratedAnalysisResult(
 /// </summary>
 public sealed class IntegratedAudioAnalyzer
 {
-    public const string AmplitudeVariant = "awf_v1_native_mono_b8";
+    public const string AmplitudeVariant = "awf_v1_riff_mono_u8_peak";
 
     private static readonly JsonSerializerOptions SidecarJsonOptions =
         new(JsonSerializerDefaults.Web)

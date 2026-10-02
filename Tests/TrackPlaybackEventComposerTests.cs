@@ -31,7 +31,7 @@ public class TrackPlaybackEventComposerTests
         var sidecar = MakeSidecar(
             [
                 new StoredWaveformRef(
-                    "awf_v1_native_mono_b8",
+                    "awf_v1_riff_mono_u8_peak",
                     10,
                     "\"etag-10\"",
                     Path: $"{StoreKey}/pps_10.dat")
@@ -47,7 +47,7 @@ public class TrackPlaybackEventComposerTests
         Assert.NotNull(result.Waveform);
         Assert.Equal("abc123", result.Waveform!.ItemId);
         Assert.Equal(
-            "/Plugins/AudioGateway/artifacts/waveform/abc123?variant=awf_v1_native_mono_b8&pps=10",
+            "/Plugins/AudioGateway/artifacts/waveform/abc123?variant=awf_v1_riff_mono_u8_peak&pps=10",
             result.Waveform.Url);
         Assert.NotNull(result.Sidecar);
         Assert.Equal("abc123", result.Sidecar!.ItemId);
