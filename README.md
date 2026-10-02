@@ -36,7 +36,11 @@ The current build advertises and ships only capabilities that are already client
 - `trackMetadataBatching` — optional reduction of Jellyfin metadata request fan-out;
 - `podcastDirectorySearch` — optional authenticated server-side Podcast Index search; API credentials never leave the Jellyfin process;
 - `podcastSubscriptions` — optional authenticated per-user replica of Slipmat podcast subscription intent for cross-device continuity;
-- `podcastFeedRefresh` — optional authenticated bounded server fetch for podcast feeds, chapters, and transcripts when direct browser acquisition is blocked by CORS.
+- `podcastFeedRefresh` — optional authenticated bounded server fetch for podcast feeds, chapters, and transcripts when direct browser acquisition is blocked by CORS;
+- `directoryResourceFetch` — bounded raw-JSON fallback for client-owned gpodder, Radio Browser, and iptv-org discovery;
+- `liveGuideResourceFetch` — bounded XMLTV acquisition for guide URLs published by the current iptv-org catalog; parsing remains client-owned;
+- `remoteMediaRelay` — short-lived opaque SSRF-hardened relay for browser media/sample acquisition without exposing a generic proxy;
+- native iptv-org Live TV projection — administrator-selected channels published through Jellyfin's `ILiveTvService`, separate from Slipmat's per-user subscription authority.
 
 The following protocol slots intentionally advertise `false`:
 
@@ -61,10 +65,47 @@ Presence of experimental source code does not grant product authority. The capab
 | POST | `/Plugins/AudioGateway/podcasts/subscriptions/sync` | Authenticated deterministic merge of the current user's client/server subscription replicas |
 | POST | `/Plugins/AudioGateway/podcasts/resources/fetch` | Authenticated bounded feed/chapter/transcript acquisition for browser CORS fallback |
 | POST | `/Plugins/AudioGateway/podcasts/directory/search` | Authenticated bounded Podcast Index search using server-side credentials |
+| POST | `/Plugins/AudioGateway/directories/resources/fetch` | Authenticated allowlisted raw-JSON directory fallback |
+| POST | `/Plugins/AudioGateway/media/relay/prepare` | Authenticated bounded opaque media-relay preparation |
+| GET | `/Plugins/AudioGateway/media/relay/{relayId}` | Authenticated short-lived relay response |
+| GET | `/Plugins/AudioGateway/livetv/iptv-org/channels` | Elevated bounded iptv-org browse/search for Jellyfin Live TV publication |
+| POST | `/Plugins/AudioGateway/livetv/iptv-org/catalog/refresh` | Elevated provider refresh with last-known-good fallback |
+| POST | `/Plugins/AudioGateway/livetv/iptv-org/guide/fetch` | Authenticated bounded XMLTV fetch for catalog-listed guide URLs |
+| POST | `/Plugins/AudioGateway/livetv/iptv-org/refresh` | Elevated refresh of Jellyfin's native Live TV projection |
+| GET | `/Plugins/AudioGateway/cloud/jottacloud/status` | Elevated sanitized Jottacloud projection health |
+| GET | `/Plugins/AudioGateway/cloud/jottacloud/browse` | Elevated read-only Jottacloud remote browse |
+| POST | `/Plugins/AudioGateway/cloud/jottacloud/reconcile` | Elevated one-way Jottacloud projection reconciliation |
 
 Podcast routes never accept a user ID parameter. The Jellyfin `Jellyfin-UserId` authentication claim selects the storage namespace for subscription replication; a client payload cannot address another user's subscriptions.
 
 Atlas concept/catalog/request routes and streamrip status/search routes do not exist in the shipping plugin assembly.
+
+## Operator-managed Jottacloud projection
+
+Audio Gateway can manage a **pre-installed and pre-authenticated** first-party Jottacloud CLI/daemon as an optional Jellyfin-side media projection.
+
+The server administrator installs the supported CLI and completes `jotta-cli login` over SSH. The plugin never receives a Jottacloud password, Personal Login Token, OAuth token, cookie, or daemon credential file. It uses `jotta-cli` from Jellyfin's service `PATH`, or the operator-controlled `SLIPMAT_JOTTACLOUD_CLI` environment variable.
+
+The initial certified CLI is **0.17.176206**. Unsupported versions fail closed. The companion fingerprints the documented authenticated-account value with SHA-256 and binds that fingerprint plus the configured remote folder into the local projection marker; the raw account value is neither persisted nor returned.
+
+Materialization is one-way:
+
+```text
+operator-authenticated jottad
+        |
+     jotta-cli
+        |
+        | download REMOTE LOCAL --merge --mergemode=metadata
+        v
+marker-owned local projection
+        |
+        v
+Jellyfin virtual folder + guarded library scan
+```
+
+A non-empty unowned projection path is refused. Changing the remote folder or authenticated account against an existing marker fails closed. The plugin never deletes cloud objects or local projection media. Jellyfin scans only after `list downloads --json` is clear; retained failed-download entries therefore block automatic scanning until the operator resolves them. Re-authentication remains an SSH/operator action and does not erase existing materialized bytes.
+
+This projection is optional server acceleration. It does not own Slipmat media identity, source selection, playback, queue, Rail, podcast identity, or offline-retention policy.
 
 ## Capability contract
 
@@ -84,9 +125,12 @@ A module being unavailable is not a product failure. It means Slipmat uses its c
 The plugin uses Jellyfin's native plugin surfaces rather than treating the server only as an HTTP host:
 
 - `ServiceRegistrator` implements `IPluginServiceRegistrator` and registers reusable gateway services in Jellyfin's dependency-injection container;
-- artifact and track-event controllers consume those services through constructor injection;
-- `Plugin` implements `IHasWebPages` and exposes a native Jellyfin dashboard configuration page for the optional artifact-store override and integrated-analyzer status;
-- the configuration page reports current analyzer/store health through the existing non-authoritative capabilities endpoint.
+- the integrated analyzer worker/backfill remains host-managed and non-authoritative;
+- `IptvOrgLiveTvService` is registered as Jellyfin's native `ILiveTvService`;
+- the operator-managed Jottacloud bridge registers its CLI/process boundary and six-hour reconciliation task;
+- artifact and track-event controllers consume reusable services through constructor injection;
+- `Plugin` implements `IHasWebPages` and exposes a native Jellyfin dashboard for store/analyzer health, iptv-org publication, and Jottacloud projection administration;
+- the configuration page reports current health through bounded, non-authoritative endpoints.
 
 ### Host-neutral artifact identity
 

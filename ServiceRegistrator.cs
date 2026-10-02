@@ -1,6 +1,8 @@
 using Jellyfin.Plugin.AudioGateway.Services;
 using MediaBrowser.Controller;
+using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Controller.Plugins;
+using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -24,5 +26,13 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<IHostedService>(
             services => services.GetRequiredService<IntegratedAnalysisWorker>());
         serviceCollection.AddSingleton<TrackPlaybackEventService>();
+        serviceCollection.AddSingleton<IptvOrgCatalogService>();
+        serviceCollection.AddSingleton<ILiveTvService, IptvOrgLiveTvService>();
+
+        serviceCollection.AddSingleton<IJottacloudCliProcessRunner, JottacloudCliProcessRunner>();
+        serviceCollection.AddSingleton<IJottacloudProjectionConfigurationSource, PluginJottacloudProjectionConfigurationSource>();
+        serviceCollection.AddSingleton<IJottacloudLibraryProjection, JellyfinJottacloudLibraryProjection>();
+        serviceCollection.AddSingleton<JottacloudProjectionService>();
+        serviceCollection.AddSingleton<IScheduledTask, JottacloudProjectionRefreshTask>();
     }
 }

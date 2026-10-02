@@ -8,15 +8,18 @@
     "trackMetadataBatching": true,
     "atlasProjectionCache": false,
     "acquisitionSearch": false,
+    "directoryResourceFetch": true,
+    "liveGuideResourceFetch": true,
     "podcastDirectorySearch": false,
     "podcastSubscriptions": false,
     "podcastFeedRefresh": true,
-    "podcastSnapshotCache": false
+    "podcastSnapshotCache": false,
+    "remoteMediaRelay": true
   },
   "analyzerHealthy": false,
   "storeWritable": false,
   "degradedReasons": [
-    "analyzer_unreachable: HttpRequestException",
+    "integrated_analyzer_unavailable",
     "store_not_writable: UnauthorizedAccessException"
   ]
 }

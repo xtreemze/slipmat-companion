@@ -241,8 +241,7 @@ public static class PodcastResourceFetchService
             HttpResponseMessage response;
             try
             {
-                response = await Http.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, token)
-                    .ConfigureAwait(false);
+                response = await SendSafeRequestAsync(message, token).ConfigureAwait(false);
             }
             catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
             {
@@ -314,6 +313,25 @@ public static class PodcastResourceFetchService
         }
 
         throw new FetchException("redirect-limit", HttpStatusCode.BadGateway, "Podcast resource exceeded the redirect limit.");
+    }
+
+    /// <summary>
+    /// Sends one already-validated outbound request through the shared connection-time
+    /// public-address guard. Callers remain responsible for redirect policy.
+    /// </summary>
+    internal static async Task<HttpResponseMessage> SendSafeRequestAsync(
+        HttpRequestMessage message,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await Http.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (HttpRequestException ex) when (FindPolicyException(ex) is { } policy)
+        {
+            throw policy;
+        }
     }
 
     private static HttpRequestMessage BuildRequest(

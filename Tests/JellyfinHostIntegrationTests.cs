@@ -1,6 +1,8 @@
 using Jellyfin.Plugin.AudioGateway.Services;
+using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Controller.Plugins;
 using MediaBrowser.Model.Plugins;
+using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Xunit;
@@ -43,6 +45,39 @@ public class JellyfinHostIntegrationTests
         Assert.Contains(
             services,
             descriptor => descriptor.ServiceType == typeof(TrackPlaybackEventService)
+                && descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            descriptor => descriptor.ServiceType == typeof(IptvOrgCatalogService)
+                && descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            descriptor => descriptor.ServiceType == typeof(ILiveTvService)
+                && descriptor.ImplementationType == typeof(IptvOrgLiveTvService)
+                && descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            descriptor => descriptor.ServiceType == typeof(IJottacloudCliProcessRunner)
+                && descriptor.ImplementationType == typeof(JottacloudCliProcessRunner)
+                && descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            descriptor => descriptor.ServiceType == typeof(IJottacloudProjectionConfigurationSource)
+                && descriptor.ImplementationType == typeof(PluginJottacloudProjectionConfigurationSource)
+                && descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            descriptor => descriptor.ServiceType == typeof(IJottacloudLibraryProjection)
+                && descriptor.ImplementationType == typeof(JellyfinJottacloudLibraryProjection)
+                && descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            descriptor => descriptor.ServiceType == typeof(JottacloudProjectionService)
+                && descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            descriptor => descriptor.ServiceType == typeof(IScheduledTask)
+                && descriptor.ImplementationType == typeof(JottacloudProjectionRefreshTask)
                 && descriptor.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(
             typeof(ServiceRegistrator).GetInterfaces(),

@@ -8,10 +8,13 @@
     "trackMetadataBatching": true,
     "atlasProjectionCache": false,
     "acquisitionSearch": false,
+    "directoryResourceFetch": true,
+    "liveGuideResourceFetch": true,
     "podcastDirectorySearch": true,
     "podcastSubscriptions": true,
     "podcastFeedRefresh": true,
-    "podcastSnapshotCache": false
+    "podcastSnapshotCache": false,
+    "remoteMediaRelay": true
   },
   "analyzerHealthy": true,
   "storeWritable": true,

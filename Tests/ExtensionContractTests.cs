@@ -1,6 +1,8 @@
 using System;
 using System.Linq;
 using Jellyfin.Plugin.AudioGateway.Api;
+using Jellyfin.Plugin.AudioGateway.Configuration;
+using MediaBrowser.Common.Api;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Xunit;
@@ -56,7 +58,13 @@ public class ExtensionContractTests
             "Jellyfin.Plugin.AudioGateway.Api.ArtifactsController",
             "Jellyfin.Plugin.AudioGateway.Api.EventsController",
             "Jellyfin.Plugin.AudioGateway.Api.PodcastSubscriptionsController",
+            "Jellyfin.Plugin.AudioGateway.Api.PodcastDirectoryController",
             "Jellyfin.Plugin.AudioGateway.Api.PodcastResourceFetchController",
+            "Jellyfin.Plugin.AudioGateway.Api.DirectoryResourceFetchController",
+            "Jellyfin.Plugin.AudioGateway.Api.RemoteMediaRelayController",
+            "Jellyfin.Plugin.AudioGateway.Api.IptvOrgLiveTvController",
+            "Jellyfin.Plugin.AudioGateway.Api.IptvOrgGuideResourceFetchController",
+            "Jellyfin.Plugin.AudioGateway.Api.JottacloudProjectionController",
         };
 
         Assert.All(
@@ -88,14 +96,134 @@ public class ExtensionContractTests
     }
 
     [Fact]
+    public void PodcastDirectoryController_RequiresAuthenticationAndExposesOnlyBoundedSearchContract()
+    {
+        AssertSingleAuthenticatedRequest(typeof(PodcastDirectoryController), nameof(PodcastDirectoryController.Search));
+    }
+
+    [Fact]
     public void PodcastResourceFetchController_RequiresAuthenticationAndExposesOnlyBoundedRequestContract()
     {
-        var controller = typeof(PodcastResourceFetchController);
+        AssertSingleAuthenticatedRequest(typeof(PodcastResourceFetchController), nameof(PodcastResourceFetchController.Fetch));
+    }
+
+    [Fact]
+    public void DirectoryResourceFetchController_RequiresAuthenticationAndExposesOnlyBoundedRequestContract()
+    {
+        AssertSingleAuthenticatedRequest(typeof(DirectoryResourceFetchController), nameof(DirectoryResourceFetchController.Fetch));
+    }
+
+    [Fact]
+    public void IptvOrgGuideResourceFetchController_RequiresLiveTvAccessAndExposesOnlyBoundedRequestContract()
+    {
+        var controller = typeof(IptvOrgGuideResourceFetchController);
+        var authorize = Assert.IsType<AuthorizeAttribute>(
+            Attribute.GetCustomAttribute(controller, typeof(AuthorizeAttribute)));
+        Assert.Equal(Policies.LiveTvAccess, authorize.Policy);
+
+        var fetch = controller.GetMethod(nameof(IptvOrgGuideResourceFetchController.Fetch));
+        Assert.NotNull(fetch);
+        Assert.Single(fetch!.GetParameters());
+        Assert.Equal("request", fetch.GetParameters()[0].Name);
+
+        var requestProperties = typeof(Jellyfin.Plugin.AudioGateway.Models.IptvOrgGuideResourceFetchRequest)
+            .GetProperties()
+            .Select(property => property.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+        Assert.Equal(new[] { "Url", "Version" }, requestProperties);
+    }
+
+    [Fact]
+    public void IptvOrgLiveTvController_RequiresElevationAndAcceptsOnlyBoundedBrowseInputs()
+    {
+        var controller = typeof(IptvOrgLiveTvController);
+        var authorize = Assert.IsType<AuthorizeAttribute>(
+            Attribute.GetCustomAttribute(controller, typeof(AuthorizeAttribute)));
+        Assert.Equal(Policies.RequiresElevation, authorize.Policy);
+
+        var browse = controller.GetMethod(nameof(IptvOrgLiveTvController.Browse));
+        Assert.NotNull(browse);
+        Assert.All(
+            browse!.GetParameters(),
+            parameter => Assert.DoesNotContain(
+                new[] { "url", "header", "cookie", "secret", "useragent", "referrer" },
+                fragment => parameter.Name?.Contains(fragment, StringComparison.OrdinalIgnoreCase) == true));
+
+        Assert.Empty(controller.GetMethod(nameof(IptvOrgLiveTvController.Refresh))!.GetParameters());
+        Assert.Empty(controller.GetMethod(nameof(IptvOrgLiveTvController.RefreshCatalog))!.GetParameters());
+    }
+
+    [Fact]
+    public void JottacloudProjectionController_RequiresElevationAndAcceptsNoCredentialInputs()
+    {
+        var controller = typeof(JottacloudProjectionController);
+        var authorize = Assert.IsType<AuthorizeAttribute>(
+            Attribute.GetCustomAttribute(controller, typeof(AuthorizeAttribute)));
+        Assert.Equal(Policies.RequiresElevation, authorize.Policy);
+
+        var methods = controller
+            .GetMethods()
+            .Where(method => method.DeclaringType == controller);
+
+        Assert.All(
+            methods
+                .SelectMany(method => method.GetParameters())
+                .Where(parameter => parameter.ParameterType != typeof(System.Threading.CancellationToken)),
+            parameter => Assert.DoesNotContain(
+                new[] { "token", "password", "credential", "cookie", "authorization", "secret" },
+                fragment => parameter.Name?.Contains(fragment, StringComparison.OrdinalIgnoreCase) == true));
+    }
+
+    [Fact]
+    public void JottacloudConfiguration_ContainsNoCredentialsOrExecutablePath()
+    {
+        var properties = typeof(PluginConfiguration)
+            .GetProperties()
+            .Select(property => property.Name)
+            .ToArray();
+
+        Assert.DoesNotContain(
+            properties,
+            name => name.Contains("JottacloudCliPath", StringComparison.OrdinalIgnoreCase));
+
+        Assert.DoesNotContain(
+            properties,
+            name => new[] { "token", "password", "credential", "cookie", "secret" }
+                .Any(fragment => name.Contains(fragment, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [Fact]
+    public void RemoteMediaRelayController_RequiresAuthenticationAndDoesNotExposeGenericProxyInputs()
+    {
+        var controller = typeof(RemoteMediaRelayController);
         Assert.NotNull(Attribute.GetCustomAttribute(controller, typeof(AuthorizeAttribute)));
 
-        var fetch = controller.GetMethod(nameof(PodcastResourceFetchController.Fetch));
-        Assert.NotNull(fetch);
-        var parameters = fetch!.GetParameters();
+        var prepare = controller.GetMethod(nameof(RemoteMediaRelayController.Prepare));
+        Assert.NotNull(prepare);
+        Assert.Single(prepare!.GetParameters());
+        Assert.Equal("request", prepare.GetParameters()[0].Name);
+
+        var relay = controller.GetMethod(nameof(RemoteMediaRelayController.Relay));
+        Assert.NotNull(relay);
+        var relayParameters = relay!.GetParameters();
+        Assert.Single(relayParameters);
+        Assert.Equal("relayId", relayParameters[0].Name);
+
+        Assert.All(
+            prepare.GetParameters().Concat(relayParameters),
+            parameter => Assert.DoesNotContain(
+                new[] { "header", "cookie", "method", "user", "target", "url" },
+                fragment => parameter.Name?.Contains(fragment, StringComparison.OrdinalIgnoreCase) == true));
+    }
+
+    private static void AssertSingleAuthenticatedRequest(Type controller, string methodName)
+    {
+        Assert.NotNull(Attribute.GetCustomAttribute(controller, typeof(AuthorizeAttribute)));
+
+        var method = controller.GetMethod(methodName);
+        Assert.NotNull(method);
+        var parameters = method!.GetParameters();
         Assert.Single(parameters);
         Assert.Equal("request", parameters[0].Name);
         Assert.DoesNotContain(

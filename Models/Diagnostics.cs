@@ -12,10 +12,13 @@ public record ExtensionModules(
     [property: JsonPropertyName("trackMetadataBatching")] bool TrackMetadataBatching,
     [property: JsonPropertyName("atlasProjectionCache")] bool AtlasProjectionCache,
     [property: JsonPropertyName("acquisitionSearch")] bool AcquisitionSearch,
+    [property: JsonPropertyName("directoryResourceFetch")] bool DirectoryResourceFetch,
+    [property: JsonPropertyName("liveGuideResourceFetch")] bool LiveGuideResourceFetch,
     [property: JsonPropertyName("podcastDirectorySearch")] bool PodcastDirectorySearch,
     [property: JsonPropertyName("podcastSubscriptions")] bool PodcastSubscriptions,
     [property: JsonPropertyName("podcastFeedRefresh")] bool PodcastFeedRefresh,
-    [property: JsonPropertyName("podcastSnapshotCache")] bool PodcastSnapshotCache
+    [property: JsonPropertyName("podcastSnapshotCache")] bool PodcastSnapshotCache,
+    [property: JsonPropertyName("remoteMediaRelay")] bool RemoteMediaRelay
 );
 
 /// <summary>
