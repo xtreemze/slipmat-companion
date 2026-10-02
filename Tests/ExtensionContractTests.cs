@@ -64,7 +64,7 @@ public class ExtensionContractTests
             "Jellyfin.Plugin.AudioGateway.Api.RemoteMediaRelayController",
             "Jellyfin.Plugin.AudioGateway.Api.IptvOrgLiveTvController",
             "Jellyfin.Plugin.AudioGateway.Api.IptvOrgGuideResourceFetchController",
-            "Jellyfin.Plugin.AudioGateway.Api.JottacloudProjectionController",
+            "Jellyfin.Plugin.AudioGateway.Api.CloudProjectionController",
         };
 
         Assert.All(
@@ -155,9 +155,9 @@ public class ExtensionContractTests
     }
 
     [Fact]
-    public void JottacloudProjectionController_RequiresElevationAndAcceptsNoCredentialInputs()
+    public void CloudProjectionController_RequiresElevationAndAcceptsNoCredentialInputs()
     {
-        var controller = typeof(JottacloudProjectionController);
+        var controller = typeof(CloudProjectionController);
         var authorize = Assert.IsType<AuthorizeAttribute>(
             Attribute.GetCustomAttribute(controller, typeof(AuthorizeAttribute)));
         Assert.Equal(Policies.RequiresElevation, authorize.Policy);
@@ -176,7 +176,7 @@ public class ExtensionContractTests
     }
 
     [Fact]
-    public void JottacloudConfiguration_ContainsNoCredentialsOrExecutablePath()
+    public void CloudConfiguration_ContainsNoCredentialsOrExecutablePath()
     {
         var properties = typeof(PluginConfiguration)
             .GetProperties()
@@ -185,7 +185,8 @@ public class ExtensionContractTests
 
         Assert.DoesNotContain(
             properties,
-            name => name.Contains("JottacloudCliPath", StringComparison.OrdinalIgnoreCase));
+            name => name.Contains("RcloneConfig", StringComparison.OrdinalIgnoreCase)
+                || name.Contains("RcloneExecutable", StringComparison.OrdinalIgnoreCase));
 
         Assert.DoesNotContain(
             properties,
