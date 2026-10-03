@@ -339,8 +339,14 @@ The generated Pages artifact contains `manifest.json`. GitHub Pages is a distrib
 ## Cross-repository fixture parity
 
 Slipmat owns the canonical portable analysis contracts and examples mirrored under `schema/examples/`.
-The companion keeps those checked-in copies so normal builds and tests remain deterministic and do not
-depend on network access. `schema/upstream-parity-files.txt` declares the shared mirror set, and the
-scheduled/manual `Upstream Fixture Parity` workflow checks those files byte-for-byte against
-`xtreemze/slipmat` `main`. Drift fails closed and requires a reviewed mirror update; the watchdog
-does not change product authority or make ordinary CI depend on the upstream repository.
+The companion keeps reviewed copies so normal builds and tests remain deterministic and do not depend
+on cross-repository credentials or network availability. `schema/upstream-parity-files.txt` declares
+the shared mirror set. `schema/upstream-parity-provenance.json` records the exact reviewed Slipmat
+commit plus each canonical file's Git blob identity. Companion CI and the focused
+`Canonical Fixture Provenance` workflow recompute those blob identities locally and fail closed on
+unreviewed mirror drift.
+
+Updating the snapshot is an explicit cross-repository contract action: inspect the new Slipmat
+canonical commit, update the mirrored files and provenance together, then review the resulting
+companion PR. This records exact authority without giving the companion workflow credentials to the
+Slipmat repository.
