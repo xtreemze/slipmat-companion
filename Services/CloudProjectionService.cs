@@ -483,6 +483,15 @@ public sealed class CloudProjectionService
             return false;
         }
 
+        if (profiles
+            .GroupBy(profile => profile.Id, StringComparer.OrdinalIgnoreCase)
+            .Any(group => group.Count() > 1))
+        {
+            projectionConfig = new PluginConfiguration();
+            code = "projection-id-conflict";
+            return false;
+        }
+
         CloudLibraryProfile? selected;
         if (string.IsNullOrWhiteSpace(projectionId))
         {
