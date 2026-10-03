@@ -1,7 +1,7 @@
 ---
 name: "Audio Gateway"
 guid: "d3a2b1c0-e4f5-6789-abcd-ef0123456789"
-version: "0.4.2.0"
+version: "0.4.2.1"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 overview: "Optional Jellyfin companion that accelerates and enriches Slipmat."
@@ -15,4 +15,4 @@ category: "General"
 owner: "xtreemze"
 artifacts:
 - "Jellyfin.Plugin.AudioGateway.dll"
-changelog: "Fix integrated analyzer readiness detection by probing the Jellyfin-managed FFmpeg loudnorm filter directly instead of relying on Jellyfin's narrowed SupportsFilter allowlist."
+changelog: "Improve cloud setup diagnostics for healthy-but-empty rclone roots, including provider root/device/mountpoint guidance and a projection-safety warning when an existing remote name is repointed."
