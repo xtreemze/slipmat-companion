@@ -70,6 +70,26 @@ public class AmplitudeEnvelopeBuilderTests
     }
 
     [Fact]
+    public void PartialTrailingSecond_MatchesCanonicalSlwsProjectionVector()
+    {
+        var builder = new AmplitudeEnvelopeBuilder(100);
+        for (var index = 0; index <= 100; index++)
+        {
+            builder.Push(index / 255f);
+        }
+
+        var tiers = builder.Complete();
+
+        Assert.Equal(new byte[] { 99, 100 }, tiers[1]);
+        Assert.Equal(
+            new byte[] { 9, 19, 29, 39, 49, 59, 69, 79, 89, 99, 100 },
+            tiers[10]);
+        Assert.Equal(
+            Enumerable.Range(0, 101).Select(index => (byte)index).ToArray(),
+            tiers[100]);
+    }
+
+    [Fact]
     public void NonFiniteSamples_FailClosedToSilence()
     {
         var builder = new AmplitudeEnvelopeBuilder(100);
