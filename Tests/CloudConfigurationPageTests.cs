@@ -19,6 +19,6 @@ public class CloudConfigurationPageTests
         Assert.Contains("remote-authentication-required", html);
         Assert.Contains("rclone config reconnect", html);
         Assert.Contains("localhost:53682", html);
-        Assert.Contains("do not use rclone authorize", html);
+        Assert.Contains("Do not use rclone authorize", html);
     }
 }
