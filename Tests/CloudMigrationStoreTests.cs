@@ -84,6 +84,7 @@ public class CloudMigrationStoreTests
             queue,
             source,
             null!,
+            null!,
             null!);
 
         var mismatch = await Assert.ThrowsAsync<InvalidOperationException>(
