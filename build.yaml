@@ -15,4 +15,4 @@ category: "General"
 owner: "xtreemze"
 artifacts:
 - "Jellyfin.Plugin.AudioGateway.dll"
-changelog: "Align the companion configuration page with Jellyfin Web native buttons, selects, and checkboxes so host light/dark themes own accessible control contrast."
+changelog: "Classify expired rclone provider OAuth as remote-authentication-required, probe selected remote reachability in cloud status, and document the headless SSH-tunnel reconnect flow for Tele2/Jottacloud traditional OAuth."
