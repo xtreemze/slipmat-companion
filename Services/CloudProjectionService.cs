@@ -440,6 +440,18 @@ public sealed class CloudProjectionService
                     mountReady: mountReady);
             }
 
+            if (!library.Created
+                && !_libraryProjection.ApplyCloudSafeScanPolicy(
+                    resolved.LibraryName,
+                    resolved.ProjectionPath))
+            {
+                return Reconcile(
+                    "blocked",
+                    "library-scan-policy-unavailable",
+                    mountReady: mountReady,
+                    libraryReady: true);
+            }
+
             if (_libraryProjection.IsScanRunning)
             {
                 return Reconcile(
