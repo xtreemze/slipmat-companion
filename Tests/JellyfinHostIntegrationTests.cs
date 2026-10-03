@@ -125,7 +125,12 @@ public class JellyfinHostIntegrationTests
         Assert.Contains("CloudCreateFolderButton", html);
         Assert.Contains("This remote root is empty", html);
         Assert.Contains("rclone lsd", html);
-        Assert.Contains("new local projection folder", html);
+        Assert.Contains("new local mount folder", html);
+        Assert.Contains("CloudCachePath", html);
+        Assert.Contains("CloudCacheMaxSizeGiB", html);
+        Assert.Contains("CloudCacheMaxAgeHours", html);
+        Assert.Contains("CloudCacheMinFreeSpaceGiB", html);
+        Assert.Contains("read-only rclone VFS mount", html);
         Assert.Contains("rclone", html, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Jottacloud", html, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("jotta-cli", html, StringComparison.OrdinalIgnoreCase);
