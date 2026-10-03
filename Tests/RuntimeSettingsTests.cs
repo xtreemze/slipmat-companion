@@ -148,6 +148,7 @@ public class RuntimeSettingsTests
         var mount = Path.Combine(temp.Path, "mount");
         var config = new PluginConfiguration
         {
+            CloudProjectionEnabled = true,
             CloudRemoteName = "tele2",
             CloudRemotePath = "Archive/Music",
             CloudProjectionPath = mount,
@@ -195,6 +196,7 @@ public class RuntimeSettingsTests
                 new CloudLibraryProfile
                 {
                     Id = "music",
+                    Enabled = true,
                     RemoteName = "tele2",
                     RemotePath = "Music",
                     ProjectionPath = firstMount,
@@ -203,6 +205,7 @@ public class RuntimeSettingsTests
                 new CloudLibraryProfile
                 {
                     Id = "movies",
+                    Enabled = true,
                     RemoteName = "tele2",
                     RemotePath = "Movies",
                     ProjectionPath = secondMount,
