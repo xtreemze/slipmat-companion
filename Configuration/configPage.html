@@ -56,6 +56,52 @@
                             Checking server-side rclone access…
                         </div>
 
+                        <details open style="margin:1em 0">
+                            <summary>VFS setup and migration model</summary>
+                            <div class="fieldDescription" style="margin-top:0.75em">
+                                <ol>
+                                    <li>Install rclone on the Jellyfin host and configure/authenticate each provider remote outside this plugin.</li>
+                                    <li>Create one VFS library profile below for each Jellyfin library you want backed by cloud storage.</li>
+                                    <li>Choose or create a remote folder, set the Jellyfin library name/type, save, then mount/refresh that profile.</li>
+                                    <li>The cloud object is authoritative. The local VFS cache contains only recently read media and can be evicted without deleting the cloud file.</li>
+                                </ol>
+                                <p>
+                                    Jellyfin catalog scans enumerate the mounted remote namespace and may perform the lightweight reads Jellyfin requires to identify media.
+                                    Companion scheduled waveform/peak/loudness analysis does not traverse VFS libraries at all, so it cannot download an uncached cloud collection in the background.
+                                    Playback or an explicit Slipmat artifact request may read a cloud item; those bytes then enter the bounded VFS cache and are reused until eviction.
+                                </p>
+                                <p>
+                                    To migrate a conventional local Jellyfin library to VFS, copy it to an empty cloud destination, verify source versus remote, cut the same library over to its VFS profile, keep the local source as rollback, and only then explicitly finalize local cleanup.
+                                    To migrate back, copy and verify the cloud library into a local destination before switching Jellyfin back to that local path.
+                                    Audio Gateway never treats cache eviction as migration and never uses rclone sync/move/purge for these workflows.
+                                </p>
+                            </div>
+                        </details>
+
+                        <div class="selectContainer">
+                            <label class="selectLabel" for="CloudLibraryProfile">Managed VFS library</label>
+                            <select id="CloudLibraryProfile"
+                                    is="emby-select"
+                                    class="emby-select-withcolor emby-select"></select>
+                            <div class="fieldDescription">
+                                Each profile owns one remote root, one Jellyfin library projection, and one independent bounded cache policy.
+                            </div>
+                        </div>
+                        <div style="display:flex;gap:0.5em;flex-wrap:wrap;margin-bottom:1em">
+                            <button id="CloudAddLibraryButton"
+                                    is="emby-button"
+                                    type="button"
+                                    class="raised emby-button">
+                                <span>Add VFS library</span>
+                            </button>
+                            <button id="CloudRemoveLibraryButton"
+                                    is="emby-button"
+                                    type="button"
+                                    class="raised emby-button">
+                                <span>Remove profile</span>
+                            </button>
+                        </div>
+
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="CloudProjectionEnabled"
@@ -397,6 +443,9 @@
             var IptvOrgPageSize = 50;
             var CloudBrowserCurrentPath = '';
             var CloudBrowserCurrentRemote = '';
+            var CloudLibraryProfiles = [];
+            var CloudActiveProfileId = '';
+            var CloudPersistedProfileIds = new Set();
 
             function textList(value) {
                 return Array.isArray(value)
@@ -575,6 +624,177 @@
                     type: 'POST',
                     url: ApiClient.getUrl('Plugins/AudioGateway/livetv/iptv-org/refresh')
                 });
+            }
+
+            function newCloudProfileId() {
+                if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
+                    return globalThis.crypto.randomUUID();
+                }
+                return 'vfs-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+            }
+
+            function normalizeCloudProfile(raw, fallbackId) {
+                const value = raw || {};
+                return {
+                    Id: String(value.Id || value.id || fallbackId || newCloudProfileId()).trim(),
+                    Enabled: value.Enabled !== undefined ? value.Enabled === true : value.enabled !== false,
+                    RemoteName: String(value.RemoteName || value.remoteName || '').trim(),
+                    RemotePath: String(value.RemotePath || value.remotePath || '').trim(),
+                    ProjectionPath: String(value.ProjectionPath || value.projectionPath || '').trim(),
+                    CachePath: String(value.CachePath || value.cachePath || '').trim(),
+                    CacheMaxSizeGiB: Math.max(1, Number.parseInt(value.CacheMaxSizeGiB || value.cacheMaxSizeGiB, 10) || 16),
+                    CacheMaxAgeHours: Math.max(1, Number.parseInt(value.CacheMaxAgeHours || value.cacheMaxAgeHours, 10) || 24),
+                    CacheMinFreeSpaceGiB: Math.max(0, Number.parseInt(
+                        value.CacheMinFreeSpaceGiB !== undefined ? value.CacheMinFreeSpaceGiB : value.cacheMinFreeSpaceGiB,
+                        10) || 0),
+                    LibraryName: String(value.LibraryName || value.libraryName || 'Cloud Media').trim() || 'Cloud Media',
+                    CollectionType: String(value.CollectionType || value.collectionType || 'music').trim() || 'music',
+                    AutoCreateLibrary: value.AutoCreateLibrary !== undefined
+                        ? value.AutoCreateLibrary !== false
+                        : value.autoCreateLibrary !== false
+                };
+            }
+
+            function legacyCloudProfile(config) {
+                return normalizeCloudProfile({
+                    Id: 'legacy',
+                    Enabled: config.CloudProjectionEnabled === true,
+                    RemoteName: config.CloudRemoteName || '',
+                    RemotePath: config.CloudRemotePath || '',
+                    ProjectionPath: config.CloudProjectionPath || '',
+                    CachePath: config.CloudCachePath || '',
+                    CacheMaxSizeGiB: config.CloudCacheMaxSizeGiB || 16,
+                    CacheMaxAgeHours: config.CloudCacheMaxAgeHours || 24,
+                    CacheMinFreeSpaceGiB: Number.isInteger(config.CloudCacheMinFreeSpaceGiB)
+                        ? config.CloudCacheMinFreeSpaceGiB
+                        : 4,
+                    LibraryName: config.CloudLibraryName || 'Cloud Media',
+                    CollectionType: config.CloudCollectionType || 'music',
+                    AutoCreateLibrary: config.CloudAutoCreateLibrary !== false
+                }, 'legacy');
+            }
+
+            function loadCloudProfiles(config) {
+                const configured = Array.isArray(config.CloudLibraries)
+                    ? config.CloudLibraries.map(function(profile, index) {
+                        return normalizeCloudProfile(profile, 'profile-' + String(index + 1));
+                    })
+                    : [];
+
+                if (configured.length > 0) {
+                    CloudLibraryProfiles = configured;
+                    CloudPersistedProfileIds = new Set(configured.map(function(profile) { return profile.Id; }));
+                } else if (config.CloudProjectionEnabled === true
+                    || config.CloudRemoteName
+                    || config.CloudRemotePath
+                    || config.CloudProjectionPath) {
+                    const legacy = legacyCloudProfile(config);
+                    CloudLibraryProfiles = [legacy];
+                    CloudPersistedProfileIds = new Set([legacy.Id]);
+                } else {
+                    CloudLibraryProfiles = [normalizeCloudProfile({}, newCloudProfileId())];
+                    CloudPersistedProfileIds = new Set();
+                }
+
+                CloudActiveProfileId = CloudLibraryProfiles[0].Id;
+                renderCloudProfileSelect();
+                applyCloudProfileToForm(CloudLibraryProfiles[0]);
+            }
+
+            function currentCloudProfile() {
+                return CloudLibraryProfiles.find(function(profile) {
+                    return profile.Id === CloudActiveProfileId;
+                }) || null;
+            }
+
+            function cloudProfileLabel(profile) {
+                const library = profile.LibraryName || 'Cloud Media';
+                const source = profile.RemoteName
+                    ? profile.RemoteName + ':' + (normalizeCloudPath(profile.RemotePath) || '/')
+                    : 'not configured';
+                return library + ' · ' + source;
+            }
+
+            function renderCloudProfileSelect() {
+                const select = document.querySelector('#CloudLibraryProfile');
+                select.replaceChildren();
+                CloudLibraryProfiles.forEach(function(profile) {
+                    const option = document.createElement('option');
+                    option.value = profile.Id;
+                    option.textContent = cloudProfileLabel(profile);
+                    select.appendChild(option);
+                });
+                select.value = CloudActiveProfileId;
+                document.querySelector('#CloudRemoveLibraryButton').disabled = CloudLibraryProfiles.length <= 1;
+            }
+
+            function captureCloudProfileFromForm() {
+                const profile = currentCloudProfile();
+                if (!profile) {
+                    return;
+                }
+
+                profile.Enabled = document.querySelector('#CloudProjectionEnabled').checked;
+                profile.RemoteName = document.querySelector('#CloudRemoteName').value;
+                profile.RemotePath = normalizeCloudPath(document.querySelector('#CloudRemotePath').value);
+                profile.ProjectionPath = document.querySelector('#CloudProjectionPath').value.trim();
+                profile.CachePath = document.querySelector('#CloudCachePath').value.trim();
+                profile.CacheMaxSizeGiB = Math.max(
+                    1,
+                    Number.parseInt(document.querySelector('#CloudCacheMaxSizeGiB').value, 10) || 16);
+                profile.CacheMaxAgeHours = Math.max(
+                    1,
+                    Number.parseInt(document.querySelector('#CloudCacheMaxAgeHours').value, 10) || 24);
+                profile.CacheMinFreeSpaceGiB = Math.max(
+                    0,
+                    Number.parseInt(document.querySelector('#CloudCacheMinFreeSpaceGiB').value, 10) || 0);
+                profile.LibraryName = document.querySelector('#CloudLibraryName').value.trim() || 'Cloud Media';
+                profile.CollectionType = document.querySelector('#CloudCollectionType').value;
+                profile.AutoCreateLibrary = document.querySelector('#CloudAutoCreateLibrary').checked;
+                renderCloudProfileSelect();
+            }
+
+            function applyCloudProfileToForm(profile) {
+                document.querySelector('#CloudProjectionEnabled').checked = profile.Enabled === true;
+                document.querySelector('#CloudRemotePath').value = profile.RemotePath || '';
+                document.querySelector('#CloudProjectionPath').value = profile.ProjectionPath || '';
+                document.querySelector('#CloudCachePath').value = profile.CachePath || '';
+                document.querySelector('#CloudCacheMaxSizeGiB').value = profile.CacheMaxSizeGiB || 16;
+                document.querySelector('#CloudCacheMaxAgeHours').value = profile.CacheMaxAgeHours || 24;
+                document.querySelector('#CloudCacheMinFreeSpaceGiB').value =
+                    Number.isInteger(profile.CacheMinFreeSpaceGiB) ? profile.CacheMinFreeSpaceGiB : 4;
+                document.querySelector('#CloudLibraryName').value = profile.LibraryName || 'Cloud Media';
+                document.querySelector('#CloudCollectionType').value = profile.CollectionType || 'music';
+                document.querySelector('#CloudAutoCreateLibrary').checked = profile.AutoCreateLibrary !== false;
+                CloudBrowserCurrentPath = normalizeCloudPath(profile.RemotePath || '');
+                document.querySelector('#CloudBrowserPath').value = CloudBrowserCurrentPath;
+            }
+
+            async function activateCloudProfile(profileId) {
+                captureCloudProfileFromForm();
+                const profile = CloudLibraryProfiles.find(function(candidate) {
+                    return candidate.Id === profileId;
+                });
+                if (!profile) {
+                    return;
+                }
+
+                CloudActiveProfileId = profile.Id;
+                renderCloudProfileSelect();
+                applyCloudProfileToForm(profile);
+                await loadCloudRemotes(profile.RemoteName || '');
+                CloudBrowserCurrentRemote = document.querySelector('#CloudRemoteName').value;
+                if (CloudPersistedProfileIds.has(profile.Id)) {
+                    await loadCloudStatus();
+                } else {
+                    document.querySelector('#CloudStatus').textContent =
+                        'Save this new VFS profile before mounting or checking server status.';
+                    document.querySelector('#CloudResolvedProjectionPath').textContent = '';
+                }
+
+                if (CloudBrowserCurrentRemote) {
+                    await browseCloud(CloudBrowserCurrentRemote, CloudBrowserCurrentPath);
+                }
             }
 
             function normalizeCloudPath(value) {
@@ -811,7 +1031,9 @@
                 status.textContent = 'Checking rclone…';
                 try {
                     const response = await ApiClient.getJSON(
-                        ApiClient.getUrl('Plugins/AudioGateway/cloud/rclone/status')
+                        ApiClient.getUrl('Plugins/AudioGateway/cloud/rclone/status', {
+                            projectionId: CloudActiveProfileId || undefined
+                        })
                     );
                     describeCloudSetup(response);
 
@@ -931,7 +1153,9 @@
                     const response = await ApiClient.ajax({
                         type: 'POST',
                         dataType: 'json',
-                        url: ApiClient.getUrl('Plugins/AudioGateway/cloud/rclone/reconcile')
+                        url: ApiClient.getUrl('Plugins/AudioGateway/cloud/rclone/reconcile', {
+                            projectionId: CloudActiveProfileId || undefined
+                        })
                     });
                     status.textContent = response.status + ' · ' + response.code;
                     await loadCloudStatus();
@@ -963,6 +1187,42 @@
                     status.textContent = 'Unable to read Audio Gateway health.';
                 }
             }
+
+            document.querySelector('#CloudLibraryProfile')
+                .addEventListener('change', function(e) {
+                    activateCloudProfile(e.currentTarget.value);
+                });
+
+            document.querySelector('#CloudAddLibraryButton')
+                .addEventListener('click', function() {
+                    captureCloudProfileFromForm();
+                    const profile = normalizeCloudProfile({}, newCloudProfileId());
+                    profile.LibraryName = 'Cloud Media ' + String(CloudLibraryProfiles.length + 1);
+                    CloudLibraryProfiles.push(profile);
+                    CloudActiveProfileId = profile.Id;
+                    renderCloudProfileSelect();
+                    applyCloudProfileToForm(profile);
+                    loadCloudRemotes('').then(function() {
+                        document.querySelector('#CloudStatus').textContent =
+                            'New VFS profile created. Choose a remote folder and save before mounting.';
+                        document.querySelector('#CloudResolvedProjectionPath').textContent = '';
+                    });
+                });
+
+            document.querySelector('#CloudRemoveLibraryButton')
+                .addEventListener('click', function() {
+                    if (CloudLibraryProfiles.length <= 1) {
+                        return;
+                    }
+                    const removedId = CloudActiveProfileId;
+                    CloudLibraryProfiles = CloudLibraryProfiles.filter(function(profile) {
+                        return profile.Id !== removedId;
+                    });
+                    CloudPersistedProfileIds.delete(removedId);
+                    CloudActiveProfileId = CloudLibraryProfiles[0].Id;
+                    renderCloudProfileSelect();
+                    activateCloudProfile(CloudActiveProfileId);
+                });
 
             document.querySelector('#CloudRefreshRemotesButton')
                 .addEventListener('click', function() {
@@ -1089,36 +1349,20 @@
                     ApiClient.getPluginConfiguration(AudioGatewayConfig.pluginUniqueId)
                         .then(function(config) {
                             document.querySelector('#StoreRoot').value = config.StoreRoot || '';
-                            document.querySelector('#CloudProjectionEnabled').checked =
-                                config.CloudProjectionEnabled === true;
-                            document.querySelector('#CloudRemotePath').value =
-                                config.CloudRemotePath || '';
-                            document.querySelector('#CloudProjectionPath').value =
-                                config.CloudProjectionPath || '';
-                            document.querySelector('#CloudCachePath').value =
-                                config.CloudCachePath || '';
-                            document.querySelector('#CloudCacheMaxSizeGiB').value =
-                                config.CloudCacheMaxSizeGiB || 16;
-                            document.querySelector('#CloudCacheMaxAgeHours').value =
-                                config.CloudCacheMaxAgeHours || 24;
-                            document.querySelector('#CloudCacheMinFreeSpaceGiB').value =
-                                Number.isInteger(config.CloudCacheMinFreeSpaceGiB)
-                                    ? config.CloudCacheMinFreeSpaceGiB
-                                    : 4;
-                            document.querySelector('#CloudLibraryName').value =
-                                config.CloudLibraryName || 'Cloud Media';
-                            document.querySelector('#CloudCollectionType').value =
-                                config.CloudCollectionType || 'music';
-                            document.querySelector('#CloudAutoCreateLibrary').checked =
-                                config.CloudAutoCreateLibrary !== false;
+                            loadCloudProfiles(config);
                             IptvOrgPublishedChannelIds = new Set(textList(config.IptvOrgLiveTvChannelIds));
-                            const configuredCloudPath = normalizeCloudPath(config.CloudRemotePath || '');
-                            document.querySelector('#CloudBrowserPath').value = configuredCloudPath;
-                            CloudBrowserCurrentPath = configuredCloudPath;
+                            const activeProfile = currentCloudProfile();
+                            const configuredCloudPath = normalizeCloudPath(
+                                activeProfile ? activeProfile.RemotePath : '');
                             return Promise.all([
                                 loadAudioGatewayStatus(),
-                                loadCloudRemotes(config.CloudRemoteName || '').then(function() {
+                                loadCloudRemotes(activeProfile ? activeProfile.RemoteName : '').then(function() {
                                     CloudBrowserCurrentRemote = document.querySelector('#CloudRemoteName').value;
+                                    if (!activeProfile || !CloudPersistedProfileIds.has(activeProfile.Id)) {
+                                        document.querySelector('#CloudStatus').textContent =
+                                            'Choose a remote folder and save this VFS profile before mounting.';
+                                        return null;
+                                    }
                                     return loadCloudStatus();
                                 }).then(function(cloudStatus) {
                                     if (cloudStatus && cloudStatus.health === 'ready' && CloudBrowserCurrentRemote) {
@@ -1162,11 +1406,36 @@
                                 document.querySelector('#CloudCollectionType').value;
                             config.CloudAutoCreateLibrary =
                                 document.querySelector('#CloudAutoCreateLibrary').checked;
+
+                            captureCloudProfileFromForm();
+                            config.CloudLibraries = CloudLibraryProfiles.map(function(profile) {
+                                return normalizeCloudProfile(profile, profile.Id);
+                            });
+
+                            const legacy = config.CloudLibraries[0];
+                            if (legacy) {
+                                config.CloudProjectionEnabled = legacy.Enabled === true;
+                                config.CloudRemoteName = legacy.RemoteName || '';
+                                config.CloudRemotePath = legacy.RemotePath || '';
+                                config.CloudProjectionPath = legacy.ProjectionPath || '';
+                                config.CloudCachePath = legacy.CachePath || '';
+                                config.CloudCacheMaxSizeGiB = legacy.CacheMaxSizeGiB || 16;
+                                config.CloudCacheMaxAgeHours = legacy.CacheMaxAgeHours || 24;
+                                config.CloudCacheMinFreeSpaceGiB = Number.isInteger(legacy.CacheMinFreeSpaceGiB)
+                                    ? legacy.CacheMinFreeSpaceGiB
+                                    : 4;
+                                config.CloudLibraryName = legacy.LibraryName || 'Cloud Media';
+                                config.CloudCollectionType = legacy.CollectionType || 'music';
+                                config.CloudAutoCreateLibrary = legacy.AutoCreateLibrary !== false;
+                            }
+
                             config.IptvOrgLiveTvChannelIds = Array.from(IptvOrgPublishedChannelIds).sort();
                             return ApiClient.updatePluginConfiguration(AudioGatewayConfig.pluginUniqueId, config);
                         })
                         .then(function(result) {
                             Dashboard.processPluginConfigurationUpdateResult(result);
+                            CloudPersistedProfileIds = new Set(
+                                CloudLibraryProfiles.map(function(profile) { return profile.Id; }));
                             return refreshJellyfinLiveTv();
                         })
                         .then(function() {
