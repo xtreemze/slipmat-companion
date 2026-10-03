@@ -11,7 +11,7 @@ public sealed class CloudLibraryProfile
 {
     public string Id { get; set; } = string.Empty;
 
-    public bool Enabled { get; set; } = true;
+    public bool Enabled { get; set; }
 
     public string RemoteName { get; set; } = string.Empty;
 
