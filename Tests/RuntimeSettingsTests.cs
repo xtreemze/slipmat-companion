@@ -224,6 +224,32 @@ public class RuntimeSettingsTests
     }
 
     [Fact]
+    public void IsCloudProjectionPath_DisabledProfile_DoesNotSuppressLocalAnalysis()
+    {
+        using var temp = new TemporaryDirectory();
+        var mount = Path.Combine(temp.Path, "music");
+        var config = new PluginConfiguration
+        {
+            CloudLibraries =
+            [
+                new CloudLibraryProfile
+                {
+                    Id = "music",
+                    Enabled = false,
+                    RemoteName = "tele2",
+                    RemotePath = "Music",
+                    ProjectionPath = mount,
+                    LibraryName = "Music",
+                },
+            ],
+        };
+
+        Assert.False(RuntimeSettings.IsCloudProjectionPath(
+            config,
+            Path.Combine(mount, "Artist", "track.flac")));
+    }
+
+    [Fact]
     public void GetCloudLibraries_BlankProfileId_IsNormalizedDeterministically()
     {
         var config = new PluginConfiguration
