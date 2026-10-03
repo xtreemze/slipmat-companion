@@ -217,7 +217,7 @@ public sealed partial class RcloneCliHost
     private const int MaxRemoteCount = 512;
     private const int MaxListingEntries = 2000;
     private static readonly TimeSpan DefaultCommandTimeout = TimeSpan.FromSeconds(45);
-    private static readonly TimeSpan CopyCommandTimeout = TimeSpan.FromHours(12);
+    private static readonly TimeSpan MountCommandTimeout = TimeSpan.FromMinutes(2);
 
     private readonly string _executable;
     private readonly IRcloneProcessRunner _runner;
@@ -404,32 +404,68 @@ public sealed partial class RcloneCliHost
             .ConfigureAwait(false);
     }
 
-    public async Task<RcloneCommandResult> CopyToLocalAsync(
+    public async Task<RcloneCommandResult> MountReadOnlyAsync(
         string remoteName,
         string? remotePath,
-        string localPath,
+        string mountPath,
+        string cachePath,
+        int cacheMaxSizeGiB,
+        int cacheMaxAgeHours,
+        int cacheMinFreeSpaceGiB,
         CancellationToken cancellationToken = default)
     {
         var remote = NormalizeRemoteName(remoteName);
         var path = NormalizeRemotePath(remotePath);
-        ArgumentException.ThrowIfNullOrWhiteSpace(localPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(mountPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(cachePath);
 
-        if (!Path.IsPathFullyQualified(localPath))
+        if (cacheMaxSizeGiB <= 0)
         {
-            throw new ArgumentException("Local projection path must be absolute.", nameof(localPath));
+            throw new ArgumentOutOfRangeException(nameof(cacheMaxSizeGiB));
         }
 
-        var fullLocalPath = Path.GetFullPath(localPath);
+        if (cacheMaxAgeHours <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(cacheMaxAgeHours));
+        }
+
+        if (cacheMinFreeSpaceGiB < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(cacheMinFreeSpaceGiB));
+        }
+
+        if (!Path.IsPathFullyQualified(mountPath) || !Path.IsPathFullyQualified(cachePath))
+        {
+            throw new ArgumentException("Cloud mount and cache paths must be absolute.");
+        }
+
+        var fullMountPath = Path.GetFullPath(mountPath);
+        var fullCachePath = Path.GetFullPath(cachePath);
+        Directory.CreateDirectory(fullMountPath);
+        Directory.CreateDirectory(fullCachePath);
+
         return await RunAsync(
                 [
-                    "copy",
+                    "mount",
                     BuildRemoteSpec(remote, path),
-                    fullLocalPath,
-                    "--create-empty-src-dirs",
+                    fullMountPath,
+                    "--daemon",
+                    "--daemon-wait=20s",
+                    "--read-only",
+                    "--vfs-cache-mode=full",
+                    string.Concat("--cache-dir=", fullCachePath),
+                    string.Concat("--vfs-cache-max-size=", cacheMaxSizeGiB, "Gi"),
+                    string.Concat("--vfs-cache-max-age=", cacheMaxAgeHours, "h"),
+                    string.Concat("--vfs-cache-min-free-space=", cacheMinFreeSpaceGiB, "Gi"),
+                    "--vfs-cache-poll-interval=1m",
+                    "--dir-cache-time=5m",
+                    "--poll-interval=1m",
+                    "--buffer-size=16Mi",
+                    "--vfs-read-ahead=64Mi",
                     "--stats=0",
                     "--log-level=ERROR",
                 ],
-                CopyCommandTimeout,
+                MountCommandTimeout,
                 cancellationToken)
             .ConfigureAwait(false);
     }
@@ -646,6 +682,30 @@ public sealed partial class RcloneCliHost
         string code,
         bool truncated)
         => new(false, Array.Empty<CloudBrowserEntry>(), code, truncated);
+
+    internal static string? ClassifyMountFailure(RcloneCommandResult result)
+    {
+        var combined = string.Concat(
+            result.StandardError,
+            "\n",
+            result.StandardOutput);
+
+        if (combined.Contains("already mounted", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("mountpoint is in use", StringComparison.OrdinalIgnoreCase))
+        {
+            return "mount-already-active";
+        }
+
+        if (combined.Contains("fusermount", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("fuse", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("WinFsp", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("mount helper", StringComparison.OrdinalIgnoreCase))
+        {
+            return "mount-filesystem-unavailable";
+        }
+
+        return ClassifyRemoteFailure(result);
+    }
 
     internal static string? ClassifyRemoteFailure(RcloneCommandResult result)
     {
