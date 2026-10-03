@@ -301,6 +301,60 @@ public class CloudProjectionTests
     }
 
     [Fact]
+    public async Task Reconcile_ExistingVfsLibrary_AppliesCloudSafeScanPolicyBeforeScan()
+    {
+        using var temp = new TempDirectory();
+        var projectionPath = Path.Combine(temp.Path, "projection");
+        var config = EnabledConfig(projectionPath);
+        var library = new FakeLibraryProjection();
+
+        await CreateService(
+            config,
+            HealthyRunner(Result(0), Result(0)),
+            library)
+            .ReconcileAsync();
+        File.WriteAllText(Path.Combine(projectionPath, "track.flac"), "fixture");
+
+        var result = await CreateService(
+            config,
+            HealthyRunner(Result(0)),
+            library)
+            .ReconcileAsync();
+
+        Assert.Equal("scan-queued", result.Status);
+        Assert.Equal(1, library.ScanPolicyCalls);
+        Assert.Equal(2, library.ScanCalls);
+    }
+
+    [Fact]
+    public async Task Reconcile_ExistingVfsLibrary_BlocksWhenScanPolicyCannotBeHardened()
+    {
+        using var temp = new TempDirectory();
+        var projectionPath = Path.Combine(temp.Path, "projection");
+        var config = EnabledConfig(projectionPath);
+        var library = new FakeLibraryProjection();
+
+        await CreateService(
+            config,
+            HealthyRunner(Result(0), Result(0)),
+            library)
+            .ReconcileAsync();
+        File.WriteAllText(Path.Combine(projectionPath, "track.flac"), "fixture");
+        library.ScanPolicyAvailable = false;
+
+        var result = await CreateService(
+            config,
+            HealthyRunner(Result(0)),
+            library)
+            .ReconcileAsync();
+
+        Assert.Equal("blocked", result.Status);
+        Assert.Equal("library-scan-policy-unavailable", result.Code);
+        Assert.Equal(1, library.ScanPolicyCalls);
+        Assert.Equal(1, library.ScanCalls);
+    }
+
+    [Fact]
     public async Task Reconcile_LegacyMaterializedProjection_FailsClosedWithoutDeletingFiles()
     {
         using var temp = new TempDirectory();
@@ -615,6 +669,39 @@ public class CloudProjectionTests
             return Task.FromResult(
                 new CloudLibraryEnsureResult(true, true, "library-created"));
         }
+
+        public CloudLibraryScanPolicy? CaptureScanPolicy(
+            string libraryName,
+            string projectionPath)
+            => new(
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false);
+
+        public bool ApplyCloudSafeScanPolicy(
+            string libraryName,
+            string projectionPath)
+        {
+            ScanPolicyCalls++;
+            return ScanPolicyAvailable;
+        }
+
+        public bool RestoreScanPolicy(
+            string libraryName,
+            string projectionPath,
+            CloudLibraryScanPolicy policy)
+            => true;
+
+        public int ScanPolicyCalls { get; private set; }
+
+        public bool ScanPolicyAvailable { get; set; } = true;
 
         public void QueueScan()
         {
