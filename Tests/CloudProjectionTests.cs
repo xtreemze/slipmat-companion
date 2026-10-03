@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.AudioGateway.Configuration;
+using Jellyfin.Plugin.AudioGateway.Models;
 using Jellyfin.Plugin.AudioGateway.Services;
 using MediaBrowser.Model.Entities;
 using Microsoft.Extensions.Logging.Abstractions;
