@@ -1,0 +1,90 @@
+{
+  "items": [
+    {
+      "track": {
+        "itemId": "11111111-1111-1111-1111-111111111111",
+        "title": "So What",
+        "durationMs": 562000,
+        "trackNumber": 1,
+        "discNumber": 1,
+        "container": "flac"
+      },
+      "waveform": {
+        "itemId": "11111111-1111-1111-1111-111111111111",
+        "variant": "awf_v1_riff_mono_u8_peak",
+        "pps": 10,
+        "etag": "\"etag-10\"",
+        "path": "waveforms/asv1-45babe3bb1fb2875c1a1185d168399d182a45f0bc2bfef66be054439121570e4/awf_v1_riff_mono_u8_peak/pps_10.dat",
+        "url": "/Plugins/AudioGateway/artifacts/waveform/11111111-1111-1111-1111-111111111111?variant=awf_v1_riff_mono_u8_peak&pps=10",
+        "durationSamples": null
+      },
+      "sidecar": {
+        "itemId": "11111111-1111-1111-1111-111111111111",
+        "sourceFingerprint": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "durationMs": 562000,
+        "generatedAt": "2026-10-03T00:00:00Z"
+      },
+      "analysis": {
+        "timing": {
+          "bpm": 136.7,
+          "bpmConfidence": 0.92,
+          "downbeats": [0, 1752, 3504, 5256],
+          "beatGrid": {
+            "startOffsetMs": 0,
+            "intervalMs": 438.9
+          }
+        },
+        "harmonic": {
+          "key": "A Minor",
+          "camelotKey": "8A",
+          "keyConfidence": 0.88
+        },
+        "loudness": {
+          "integratedLufs": -17.3,
+          "truePeak": -2.1,
+          "dynamicRange": 14.8
+        },
+        "loudnessMeasurement": {
+          "version": 1,
+          "scope": "track",
+          "authority": "server-analysis",
+          "semantics": "ffmpeg-loudnorm-input",
+          "analyzer": {
+            "name": "ffmpeg-loudnorm",
+            "version": "1",
+            "configurationDigest": "sha256:d067e146e6dd806228d993e7cb40501a80c464fb84af3af7ecfa32f5fca2b4ec"
+          },
+          "integratedLufs": -17.3,
+          "truePeakDbtp": -2.1,
+          "loudnessRangeLu": 14.8
+        }
+      },
+      "availability": {
+        "hasWaveform": true,
+        "hasSidecar": true,
+        "hasDerivedAnalysis": true,
+        "hasArtworkPalette": true
+      },
+      "artworkPalette": {
+        "version": 1,
+        "sourceKind": "album-primary",
+        "sourceItemId": "22222222-2222-2222-2222-222222222222",
+        "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "swatches": [
+          {
+            "red": 210,
+            "green": 70,
+            "blue": 40,
+            "weight": 0.65
+          },
+          {
+            "red": 35,
+            "green": 90,
+            "blue": 180,
+            "weight": 0.35
+          }
+        ]
+      }
+    }
+  ]
+}

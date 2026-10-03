@@ -99,6 +99,25 @@ public class ModelRoundTripTests
     }
 
     [Fact]
+    public void TrackPlaybackEventBatch_CanonicalExample_Deserializes()
+    {
+        var path = ExamplePath("server_extension_track_playback_batch.example.json");
+        var response = Deserialize<BatchTrackPlaybackEventResponse>(path);
+
+        Assert.Single(response.Items);
+        var evt = response.Items[0];
+        Assert.Equal("11111111-1111-1111-1111-111111111111", evt.Track.ItemId);
+        Assert.NotNull(evt.Waveform);
+        Assert.Null(evt.Waveform!.DurationSamples);
+        Assert.NotNull(evt.Analysis?.LoudnessMeasurement);
+        Assert.Equal(
+            "server-analysis",
+            evt.Analysis!.LoudnessMeasurement!.Authority);
+        Assert.True(evt.Availability.HasArtworkPalette);
+        Assert.NotNull(evt.ArtworkPalette);
+    }
+
+    [Fact]
     public void AlbumEvent_FullExample_Deserializes()
     {
         var path = ExamplePath("album_event.example.json");
