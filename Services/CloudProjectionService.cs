@@ -121,11 +121,17 @@ public sealed class CloudProjectionService
             ? _libraryProjection.Inspect(resolved.LibraryName, resolved.ProjectionPath)
             : new CloudLibraryEnsureResult(false, false, "library-not-ready");
 
+        var remoteProbe = await cli
+            .ListAsync(resolved.RemoteName, resolved.RemotePath, cancellationToken)
+            .ConfigureAwait(false);
+
         return new CloudProjectionStatusResponse(
             Configured: true,
             Enabled: true,
-            Health: HealthName(cliStatus.Health),
-            Code: cliStatus.Code,
+            Health: remoteProbe.Success ? HealthName(cliStatus.Health) : "degraded",
+            Code: remoteProbe.Success
+                ? cliStatus.Code
+                : remoteProbe.ErrorCode ?? "remote-unavailable",
             RcloneVersion: cliStatus.Version,
             RemoteCount: cliStatus.Remotes.Count,
             SelectedRemote: resolved.RemoteName,
@@ -214,7 +220,9 @@ public sealed class CloudProjectionService
             return "mkdir-timeout";
         }
 
-        return result.ExitCode == 0 ? "created" : "mkdir-failed";
+        return result.ExitCode == 0
+            ? "created"
+            : RcloneCliHost.ClassifyRemoteFailure(result) ?? "mkdir-failed";
     }
 
     public async Task<CloudProjectionReconcileResponse> ReconcileAsync(
@@ -285,7 +293,9 @@ public sealed class CloudProjectionService
                 _logger.LogWarning(
                     "rclone cloud copy failed with exit code {ExitCode}",
                     copy.ExitCode);
-                return Reconcile("failed", "copy-failed");
+                return Reconcile(
+                    "failed",
+                    RcloneCliHost.ClassifyRemoteFailure(copy) ?? "copy-failed");
             }
 
             root = InspectProjectionRoot(resolved, remote.Type, createIfMissing: false);
