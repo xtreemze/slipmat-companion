@@ -334,3 +334,19 @@ This is the standalone Slipmat companion repository. Slipmat remains authoritati
 To publish a new version, update the same four-part version in `build.yaml` and `Directory.Build.props`, update the quoted `changelog` in `build.yaml`, and merge to `main`. CI and release publication then proceed automatically. Commits that keep an already-published version still run CI but do not create or replace a release. The Pages manifest preserves previously published versions for Jellyfin compatibility selection.
 
 The generated Pages artifact contains `manifest.json`. GitHub Pages is a distribution surface only; Slipmat must continue to work with stock Jellyfin when this companion is absent or unavailable.
+
+
+## Cross-repository fixture parity
+
+Slipmat owns the canonical portable analysis contracts and examples mirrored under `schema/examples/`.
+The companion keeps reviewed copies so normal builds and tests remain deterministic and do not depend
+on cross-repository credentials or network availability. `schema/upstream-parity-files.txt` declares
+the shared mirror set. `schema/upstream-parity-provenance.json` records the exact reviewed Slipmat
+commit plus each canonical file's Git blob identity. Companion CI and the focused
+`Canonical Fixture Provenance` workflow recompute those blob identities locally and fail closed on
+unreviewed mirror drift.
+
+Updating the snapshot is an explicit cross-repository contract action: inspect the new Slipmat
+canonical commit, update the mirrored files and provenance together, then review the resulting
+companion PR. This records exact authority without giving the companion workflow credentials to the
+Slipmat repository.
