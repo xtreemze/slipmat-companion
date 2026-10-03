@@ -87,6 +87,10 @@ public class AmplitudeEnvelopeBuilderTests
         Assert.Equal(
             Enumerable.Range(0, 101).Select(index => (byte)index).ToArray(),
             tiers[100]);
+
+        var riff = AmplitudeEnvelopeBuilder.EncodeRiff(10, tiers[10]);
+        Assert.Equal(72, riff.Length);
+        Assert.Equal(0x6134_D217u, SpectralArtifactEncoder.Crc32(riff));
     }
 
     [Fact]
