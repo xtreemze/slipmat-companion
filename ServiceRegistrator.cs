@@ -31,9 +31,20 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<ILiveTvService, IptvOrgLiveTvService>();
 
         serviceCollection.AddSingleton<IRcloneProcessRunner, RcloneProcessRunner>();
-        serviceCollection.AddSingleton<ICloudProjectionConfigurationSource, PluginCloudProjectionConfigurationSource>();
+        serviceCollection.AddSingleton<PluginCloudProjectionConfigurationSource>();
+        serviceCollection.AddSingleton<ICloudProjectionConfigurationSource>(
+            services => services.GetRequiredService<PluginCloudProjectionConfigurationSource>());
+        serviceCollection.AddSingleton<ICloudProjectionConfigurationStore>(
+            services => services.GetRequiredService<PluginCloudProjectionConfigurationSource>());
         serviceCollection.AddSingleton<ICloudLibraryProjection, JellyfinCloudLibraryProjection>();
         serviceCollection.AddSingleton<CloudProjectionService>();
         serviceCollection.AddSingleton<IScheduledTask, CloudProjectionRefreshTask>();
+
+        serviceCollection.AddSingleton<CloudMigrationStore>();
+        serviceCollection.AddSingleton<CloudMigrationQueue>();
+        serviceCollection.AddSingleton<CloudMigrationCoordinator>();
+        serviceCollection.AddSingleton<CloudMigrationWorker>();
+        serviceCollection.AddSingleton<IHostedService>(
+            services => services.GetRequiredService<CloudMigrationWorker>());
     }
 }
