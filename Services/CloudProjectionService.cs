@@ -24,20 +24,21 @@ public sealed class PluginCloudProjectionConfigurationSource
 }
 
 /// <summary>
-/// Coordinates safe, unidirectional rclone remote-to-local materialization and
-/// Jellyfin library projection. rclone remains the cloud-provider/auth adapter.
+/// Coordinates a bounded, read-only rclone VFS mount and Jellyfin library projection.
+/// Cloud media remains remote-authoritative; local bytes are only a disposable cache.
 /// </summary>
 public sealed class CloudProjectionService
 {
-    private const int MarkerVersion = 1;
-    private const string MarkerFileName = ".slipmat-rclone-cloud-projection.json";
+    private const int MarkerVersion = 2;
+    private const string LegacyMarkerFileName = ".slipmat-rclone-cloud-projection.json";
+    private const string MountMarkerSuffix = ".slipmat-rclone-cloud-mount.json";
 
     private readonly ICloudProjectionConfigurationSource _configurationSource;
     private readonly IRcloneProcessRunner _runner;
     private readonly ICloudLibraryProjection _libraryProjection;
     private readonly ILogger<CloudProjectionService> _logger;
     private readonly SemaphoreSlim _reconcileGate = new(1, 1);
-    private int _syncInProgress;
+    private int _mountInProgress;
 
     public CloudProjectionService(
         ICloudProjectionConfigurationSource configurationSource,
@@ -51,7 +52,7 @@ public sealed class CloudProjectionService
         _logger = logger;
     }
 
-    public bool SyncInProgress => Volatile.Read(ref _syncInProgress) != 0;
+    public bool MountInProgress => Volatile.Read(ref _mountInProgress) != 0;
 
     public async Task<CloudProjectionStatusResponse> GetStatusAsync(
         CancellationToken cancellationToken = default)
@@ -113,7 +114,7 @@ public sealed class CloudProjectionService
                 RemotePath: NormalizeOptional(config.CloudRemotePath),
                 ProjectionPath: null,
                 ProjectionPathManaged: string.IsNullOrWhiteSpace(config.CloudProjectionPath),
-                SyncInProgress: SyncInProgress,
+                MountInProgress: MountInProgress,
                 ProjectionPathReady: false,
                 ProjectionHasFiles: false,
                 LibraryReady: false,
@@ -138,7 +139,7 @@ public sealed class CloudProjectionService
                 RemotePath: resolved.RemotePath,
                 ProjectionPath: resolved.ProjectionPath,
                 ProjectionPathManaged: resolved.ProjectionPathManaged,
-                SyncInProgress: SyncInProgress,
+                MountInProgress: MountInProgress,
                 ProjectionPathReady: false,
                 ProjectionHasFiles: false,
                 LibraryReady: false,
@@ -173,7 +174,7 @@ public sealed class CloudProjectionService
             RemotePath: resolved.RemotePath,
             ProjectionPath: resolved.ProjectionPath,
             ProjectionPathManaged: resolved.ProjectionPathManaged,
-            SyncInProgress: SyncInProgress,
+            MountInProgress: MountInProgress,
             ProjectionPathReady: root.Ready,
             ProjectionHasFiles: root.HasFiles,
             LibraryReady: library.Ready,
@@ -289,58 +290,79 @@ public sealed class CloudProjectionService
                 return Reconcile("blocked", "selected-remote-missing");
             }
 
+            var remoteProbe = await cli
+                .ProbeAsync(resolved.RemoteName, resolved.RemotePath, cancellationToken)
+                .ConfigureAwait(false);
+            if (!remoteProbe.Success)
+            {
+                return Reconcile("failed", remoteProbe.ErrorCode ?? "remote-unavailable");
+            }
+
             var root = InspectProjectionRoot(resolved, remote.Type, createIfMissing: true);
             if (!root.Ready)
             {
                 return Reconcile("blocked", root.Code);
             }
 
-            Interlocked.Exchange(ref _syncInProgress, 1);
-            RcloneCommandResult copy;
-            try
+            var mountReady = root.MarkerPresent && root.HasFiles;
+            if (!mountReady)
             {
-                copy = await cli
-                    .CopyToLocalAsync(
+                Interlocked.Exchange(ref _mountInProgress, 1);
+                RcloneCommandResult mount;
+                try
+                {
+                    mount = await cli
+                        .MountReadOnlyAsync(
+                            resolved.RemoteName,
+                            resolved.RemotePath,
+                            resolved.ProjectionPath,
+                            resolved.CachePath,
+                            resolved.CacheMaxSizeGiB,
+                            resolved.CacheMaxAgeHours,
+                            resolved.CacheMinFreeSpaceGiB,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref _mountInProgress, 0);
+                }
+
+                if (!mount.StartSucceeded)
+                {
+                    return Reconcile("failed", "rclone-unavailable");
+                }
+
+                if (mount.TimedOut)
+                {
+                    return Reconcile("failed", "mount-timeout");
+                }
+
+                var mountFailure = mount.ExitCode == 0
+                    ? null
+                    : RcloneCliHost.ClassifyMountFailure(mount) ?? "mount-failed";
+                if (mountFailure is not null && mountFailure != "mount-already-active")
+                {
+                    _logger.LogWarning(
+                        "rclone cloud mount failed with exit code {ExitCode}",
+                        mount.ExitCode);
+                    return Reconcile("failed", mountFailure);
+                }
+
+                WriteProjectionMarker(
+                    GetMountMarkerPath(resolved.ProjectionPath),
+                    new ProjectionMarker(
+                        MarkerVersion,
                         resolved.RemoteName,
-                        resolved.RemotePath,
-                        resolved.ProjectionPath,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            finally
-            {
-                Interlocked.Exchange(ref _syncInProgress, 0);
-            }
-
-            if (!copy.StartSucceeded)
-            {
-                return Reconcile("failed", "rclone-unavailable");
-            }
-
-            if (copy.TimedOut)
-            {
-                return Reconcile("failed", "copy-timeout");
-            }
-
-            if (copy.ExitCode != 0)
-            {
-                _logger.LogWarning(
-                    "rclone cloud copy failed with exit code {ExitCode}",
-                    copy.ExitCode);
-                return Reconcile(
-                    "failed",
-                    RcloneCliHost.ClassifyRemoteFailure(copy) ?? "copy-failed");
+                        remote.Type,
+                        resolved.RemotePath));
+                mountReady = true;
             }
 
             root = InspectProjectionRoot(resolved, remote.Type, createIfMissing: false);
             if (!root.Ready)
             {
-                return Reconcile("blocked", root.Code, copyCompleted: true);
-            }
-
-            if (!root.HasFiles)
-            {
-                return Reconcile("idle", "projection-empty", copyCompleted: true);
+                return Reconcile("blocked", root.Code, mountReady: mountReady);
             }
 
             var library = _libraryProjection.Inspect(
@@ -363,23 +385,23 @@ public sealed class CloudProjectionService
                 return Reconcile(
                     "blocked",
                     library.Code,
-                    copyCompleted: true);
+                    mountReady: mountReady);
             }
 
             if (_libraryProjection.IsScanRunning)
             {
                 return Reconcile(
                     "completed",
-                    "copy-complete-library-scan-active",
-                    copyCompleted: true,
+                    "mount-ready-library-scan-active",
+                    mountReady: mountReady,
                     libraryReady: true);
             }
 
             _libraryProjection.QueueScan();
             return Reconcile(
                 "scan-queued",
-                "copy-complete-scan-queued",
-                copyCompleted: true,
+                "mount-ready-scan-queued",
+                mountReady: mountReady,
                 libraryReady: true,
                 libraryScanQueued: true);
         }
@@ -413,7 +435,7 @@ public sealed class CloudProjectionService
             RemotePath: NormalizeOptional(config.CloudRemotePath),
             ProjectionPath: null,
             ProjectionPathManaged: string.IsNullOrWhiteSpace(config.CloudProjectionPath),
-            SyncInProgress: false,
+            MountInProgress: false,
             ProjectionPathReady: false,
             ProjectionHasFiles: false,
             LibraryReady: false,
@@ -423,13 +445,13 @@ public sealed class CloudProjectionService
     private static CloudProjectionReconcileResponse Reconcile(
         string status,
         string code,
-        bool copyCompleted = false,
+        bool mountReady = false,
         bool libraryReady = false,
         bool libraryScanQueued = false)
         => new(
             status,
             code,
-            copyCompleted,
+            mountReady,
             libraryReady,
             libraryScanQueued);
 
@@ -457,7 +479,16 @@ public sealed class CloudProjectionService
         var libraryName = NormalizeOptional(config.CloudLibraryName);
         var collectionTypeText = NormalizeOptional(config.CloudCollectionType);
 
+        if (config.CloudCacheMaxSizeGiB <= 0
+            || config.CloudCacheMaxAgeHours <= 0
+            || config.CloudCacheMinFreeSpaceGiB < 0)
+        {
+            code = "cache-policy-invalid";
+            return false;
+        }
+
         string projectionPath;
+        string cachePath;
         try
         {
             projectionPath = projectionPathOverride
@@ -465,6 +496,11 @@ public sealed class CloudProjectionService
                     config,
                     remoteName,
                     remotePath);
+            cachePath = RuntimeSettings.ResolveCloudCachePath(
+                config,
+                remoteName,
+                remotePath,
+                Plugin.Instance?.HostApplicationPaths.DataPath);
         }
         catch (Exception)
         {
@@ -472,23 +508,27 @@ public sealed class CloudProjectionService
             return false;
         }
 
-        if (projectionPath.Length > 4096)
+        if (projectionPath.Length > 4096 || cachePath.Length > 4096)
         {
             code = "projection-path-too-long";
             return false;
         }
 
-        if (!Path.IsPathFullyQualified(projectionPath))
+        if (!Path.IsPathFullyQualified(projectionPath)
+            || !Path.IsPathFullyQualified(cachePath))
         {
             code = "projection-path-not-absolute";
             return false;
         }
 
         string fullProjectionPath;
+        string fullCachePath;
         try
         {
             fullProjectionPath = Path.TrimEndingDirectorySeparator(
                 Path.GetFullPath(projectionPath));
+            fullCachePath = Path.TrimEndingDirectorySeparator(
+                Path.GetFullPath(cachePath));
         }
         catch (Exception)
         {
@@ -506,6 +546,17 @@ public sealed class CloudProjectionService
                     : StringComparison.Ordinal))
         {
             code = "projection-path-root-forbidden";
+            return false;
+        }
+
+        if (string.Equals(
+                fullProjectionPath,
+                fullCachePath,
+                OperatingSystem.IsWindows()
+                    ? StringComparison.OrdinalIgnoreCase
+                    : StringComparison.Ordinal))
+        {
+            code = "cache-path-conflicts-with-mount";
             return false;
         }
 
@@ -535,6 +586,10 @@ public sealed class CloudProjectionService
             remotePath,
             fullProjectionPath,
             projectionPathOverride is null,
+            fullCachePath,
+            config.CloudCacheMaxSizeGiB,
+            config.CloudCacheMaxAgeHours,
+            config.CloudCacheMinFreeSpaceGiB,
             libraryName,
             collectionType);
         code = "configured";
@@ -552,18 +607,30 @@ public sealed class CloudProjectionService
             {
                 if (!createIfMissing)
                 {
-                    return new ProjectionRootState(false, false, "projection-path-missing");
+                    return new ProjectionRootState(false, false, false, "projection-path-missing");
                 }
 
                 Directory.CreateDirectory(resolved.ProjectionPath);
             }
 
-            var markerPath = Path.Combine(resolved.ProjectionPath, MarkerFileName);
+            var legacyMarkerPath = Path.Combine(
+                resolved.ProjectionPath,
+                LegacyMarkerFileName);
+            if (File.Exists(legacyMarkerPath))
+            {
+                return new ProjectionRootState(
+                    false,
+                    false,
+                    false,
+                    "legacy-materialized-projection-present");
+            }
+
+            var markerPath = GetMountMarkerPath(resolved.ProjectionPath);
             if (File.Exists(markerPath))
             {
                 if (!TryReadProjectionMarker(markerPath, out var marker))
                 {
-                    return new ProjectionRootState(false, false, "projection-marker-invalid");
+                    return new ProjectionRootState(false, false, false, "projection-marker-invalid");
                 }
 
                 if (marker.Version != MarkerVersion
@@ -580,44 +647,39 @@ public sealed class CloudProjectionService
                         resolved.RemotePath,
                         StringComparison.Ordinal))
                 {
-                    return new ProjectionRootState(false, false, "projection-marker-mismatch");
+                    return new ProjectionRootState(false, false, false, "projection-marker-mismatch");
                 }
 
                 return new ProjectionRootState(
                     true,
-                    HasMaterializedFiles(resolved.ProjectionPath),
+                    HasVisibleEntries(resolved.ProjectionPath),
+                    true,
                     "projection-ready");
             }
 
             if (Directory.EnumerateFileSystemEntries(resolved.ProjectionPath).Any())
             {
-                return new ProjectionRootState(false, false, "projection-path-not-owned");
+                return new ProjectionRootState(false, false, false, "projection-path-not-owned");
             }
 
-            if (!createIfMissing)
-            {
-                return new ProjectionRootState(false, false, "projection-marker-missing");
-            }
-
-            WriteProjectionMarker(
-                resolved.ProjectionPath,
-                new ProjectionMarker(
-                    MarkerVersion,
-                    resolved.RemoteName,
-                    remoteType,
-                    resolved.RemotePath));
-
-            return new ProjectionRootState(true, false, "projection-ready");
+            return createIfMissing
+                ? new ProjectionRootState(true, false, false, "projection-ready")
+                : new ProjectionRootState(false, false, false, "projection-marker-missing");
         }
         catch (UnauthorizedAccessException)
         {
-            return new ProjectionRootState(false, false, "projection-path-permission-denied");
+            return new ProjectionRootState(false, false, false, "projection-path-permission-denied");
         }
         catch (IOException)
         {
-            return new ProjectionRootState(false, false, "projection-path-io-error");
+            return new ProjectionRootState(false, false, false, "projection-path-io-error");
         }
     }
+
+    private static string GetMountMarkerPath(string projectionPath)
+        => string.Concat(
+            Path.TrimEndingDirectorySeparator(projectionPath),
+            MountMarkerSuffix);
 
     private static bool TryReadProjectionMarker(
         string markerPath,
@@ -648,26 +710,22 @@ public sealed class CloudProjectionService
     }
 
     private static void WriteProjectionMarker(
-        string projectionPath,
+        string markerPath,
         ProjectionMarker marker)
     {
-        var markerPath = Path.Combine(projectionPath, MarkerFileName);
+        var markerDirectory = Path.GetDirectoryName(markerPath);
+        if (!string.IsNullOrWhiteSpace(markerDirectory))
+        {
+            Directory.CreateDirectory(markerDirectory);
+        }
+
         var tempPath = string.Concat(markerPath, ".tmp");
         File.WriteAllText(tempPath, JsonSerializer.Serialize(marker));
         File.Move(tempPath, markerPath, overwrite: true);
     }
 
-    private static bool HasMaterializedFiles(string projectionPath)
-        => Directory
-            .EnumerateFileSystemEntries(projectionPath)
-            .Any(path => !string.Equals(
-                Path.GetFileName(path),
-                MarkerFileName,
-                StringComparison.Ordinal)
-                && !string.Equals(
-                    Path.GetFileName(path),
-                    string.Concat(MarkerFileName, ".tmp"),
-                    StringComparison.Ordinal));
+    private static bool HasVisibleEntries(string projectionPath)
+        => Directory.EnumerateFileSystemEntries(projectionPath).Any();
 
     private static string HealthName(RcloneCliHealth health)
         => health switch
@@ -689,6 +747,10 @@ public sealed class CloudProjectionService
         string RemotePath,
         string ProjectionPath,
         bool ProjectionPathManaged,
+        string CachePath,
+        int CacheMaxSizeGiB,
+        int CacheMaxAgeHours,
+        int CacheMinFreeSpaceGiB,
         string LibraryName,
         CollectionTypeOptions CollectionType);
 
@@ -701,5 +763,6 @@ public sealed class CloudProjectionService
     private sealed record ProjectionRootState(
         bool Ready,
         bool HasFiles,
+        bool MarkerPresent,
         string Code);
 }
