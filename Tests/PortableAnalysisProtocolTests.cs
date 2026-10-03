@@ -43,6 +43,38 @@ public class PortableAnalysisProtocolTests
     }
 
     [Fact]
+    public void CapabilityFixtures_RoundTripWithoutHostSpecificFields()
+    {
+        AssertRoundTrip<PortableServerExtensionCapabilitiesV1>(
+            "server_extension_capabilities.example.json");
+        AssertRoundTrip<PortableServerExtensionCapabilitiesV1>(
+            "server_extension_capabilities.degraded.example.json");
+
+        var healthy = Read<PortableServerExtensionCapabilitiesV1>(
+            "server_extension_capabilities.example.json");
+        var degraded = Read<PortableServerExtensionCapabilitiesV1>(
+            "server_extension_capabilities.degraded.example.json");
+
+        Assert.Equal(PortableAnalysisProtocolV1.Version, healthy.ProtocolVersion);
+        Assert.Equal("optional-acceleration", healthy.Mode);
+        Assert.False(healthy.Authoritative);
+        Assert.True(healthy.Modules.AnalysisArtifacts);
+        Assert.True(healthy.Modules.AnalysisCoverage);
+        Assert.Equal("healthy", healthy.Health.Analyzer.Status);
+        Assert.Empty(healthy.DegradedReasons);
+
+        Assert.False(degraded.Modules.AnalysisArtifacts);
+        Assert.True(degraded.Modules.AnalysisCoverage);
+        Assert.Equal("unavailable", degraded.Health.Analyzer.Status);
+        Assert.NotEmpty(degraded.DegradedReasons);
+
+        var raw = File.ReadAllText(
+            ExamplePath("server_extension_capabilities.example.json"));
+        Assert.DoesNotContain("supportedJellyfinVersion", raw, StringComparison.Ordinal);
+        Assert.DoesNotContain("jellyfin", raw, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ArtifactDescriptorFixture_RoundTrips()
     {
         AssertRoundTrip<PortableAnalysisArtifactDescriptorV1>(
