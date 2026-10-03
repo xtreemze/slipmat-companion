@@ -91,6 +91,27 @@ public class CloudProjectionTests
     }
 
     [Fact]
+    public async Task RcloneHost_Probe_UsesBoundedLsjsonStat()
+    {
+        var runner = new FakeRunner(Result(0, "{\"Path\":\"Media/Music\",\"IsDir\":true}"));
+        var host = new RcloneCliHost(runner: runner);
+
+        var probe = await host.ProbeAsync("tele2", "Media/Music");
+
+        Assert.True(probe.Success);
+        Assert.Equal(
+            new[]
+            {
+                "lsjson",
+                "tele2:Media/Music",
+                "--stat",
+                "--no-modtime",
+                "--no-mimetype",
+            },
+            runner.Invocations[0].Arguments);
+    }
+
+    [Fact]
     public async Task RcloneHost_ExpiredOAuth_ClassifiesAuthenticationRequired()
     {
         var runner = new FakeRunner(Result(1, stderr: ExpiredOAuthError));
@@ -120,6 +141,28 @@ public class CloudProjectionTests
         Assert.Equal("tele2", status.SelectedRemote);
         Assert.Equal("jottacloud", status.SelectedRemoteType);
         Assert.Equal(projectionPath, status.ProjectionPath);
+    }
+
+    [Fact]
+    public async Task GetStatus_DisabledSelectedRemoteExpiredOAuth_StillRequiresReconnect()
+    {
+        var config = new PluginConfiguration
+        {
+            CloudProjectionEnabled = false,
+            CloudRemoteName = "tele2",
+            CloudRemotePath = string.Empty,
+            CloudLibraryName = "Cloud Media",
+            CloudCollectionType = "music",
+        };
+        var runner = HealthyRunner(Result(1, stderr: ExpiredOAuthError));
+        var service = CreateService(config, runner, new FakeLibraryProjection());
+
+        var status = await service.GetStatusAsync();
+
+        Assert.False(status.Enabled);
+        Assert.Equal("degraded", status.Health);
+        Assert.Equal("remote-authentication-required", status.Code);
+        Assert.Equal("jottacloud", status.SelectedRemoteType);
     }
 
     [Fact]
