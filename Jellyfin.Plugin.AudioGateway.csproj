@@ -20,6 +20,11 @@
     <PackageReference Include="Jellyfin.Model" Version="12.1.0">
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
+    <!-- Jellyfin 12.1 ships SkiaSharp 3.119.4; compile against the host image stack
+         rather than introducing a second image-decoder implementation. -->
+    <PackageReference Include="SkiaSharp" Version="3.119.4">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 

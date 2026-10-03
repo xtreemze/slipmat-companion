@@ -24,6 +24,18 @@ public class TrackPlaybackEventComposerTests
             GeneratedAt: "2026-04-06T00:00:00Z",
             Analysis: analysis);
 
+    private static ArtworkPaletteV1 MakePalette()
+        => new(
+            Version: ArtworkPaletteV1.CurrentVersion,
+            SourceKind: "album-primary",
+            SourceItemId: "album-1",
+            Revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            Swatches:
+            [
+                new ArtworkPaletteSwatchV1(210, 70, 40, 0.65),
+                new ArtworkPaletteSwatchV1(35, 90, 180, 0.35),
+            ]);
+
     [Fact]
     public void Compose_ProjectsJellyfinItemIdOnlyAtClientBoundary()
     {
@@ -86,14 +98,18 @@ public class TrackPlaybackEventComposerTests
             Loudness: new LoudnessAnalysis(-14.0, -1.0, 8.0));
         var sidecar = MakeSidecar(analysis: analysis);
 
+        var palette = MakePalette();
         var result = TrackPlaybackEventComposer.Compose(
             track,
             "abc123",
             sidecar,
             IncludeFlags.Analysis,
-            10);
+            10,
+            palette);
 
         Assert.Same(analysis, result.Analysis);
+        Assert.Same(palette, result.ArtworkPalette);
         Assert.True(result.Availability.HasDerivedAnalysis);
+        Assert.True(result.Availability.HasArtworkPalette);
     }
 }

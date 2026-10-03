@@ -57,6 +57,7 @@ public class ExtensionContractTests
             "Jellyfin.Plugin.AudioGateway.Api.CapabilitiesController",
             "Jellyfin.Plugin.AudioGateway.Api.ArtifactsController",
             "Jellyfin.Plugin.AudioGateway.Api.EventsController",
+            "Jellyfin.Plugin.AudioGateway.Api.ArtworkPaletteController",
             "Jellyfin.Plugin.AudioGateway.Api.PodcastSubscriptionsController",
             "Jellyfin.Plugin.AudioGateway.Api.PodcastDirectoryController",
             "Jellyfin.Plugin.AudioGateway.Api.PodcastResourceFetchController",

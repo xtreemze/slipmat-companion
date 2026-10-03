@@ -16,19 +16,22 @@ public class TrackPlaybackEventService
     private readonly SidecarLoader _sidecarLoader;
     private readonly JellyfinAnalysisSubjectFactory _subjectFactory;
     private readonly IntegratedAnalysisWorker _analysisWorker;
+    private readonly ArtworkPaletteService _artworkPaletteService;
 
     public TrackPlaybackEventService(
         ILibraryManager library,
         JellyfinMetadataAdapter metadataAdapter,
         SidecarLoader sidecarLoader,
         JellyfinAnalysisSubjectFactory subjectFactory,
-        IntegratedAnalysisWorker analysisWorker)
+        IntegratedAnalysisWorker analysisWorker,
+        ArtworkPaletteService artworkPaletteService)
     {
         _library = library;
         _metadataAdapter = metadataAdapter;
         _sidecarLoader = sidecarLoader;
         _subjectFactory = subjectFactory;
         _analysisWorker = analysisWorker;
+        _artworkPaletteService = artworkPaletteService;
     }
 
     public TrackPlaybackEvent? ComposeTrackEvent(
@@ -38,7 +41,7 @@ public class TrackPlaybackEventService
         string storeRoot)
     {
         var item = _library.GetItemById(itemGuid);
-        if (item is not Audio)
+        if (item is not Audio audio)
         {
             return null;
         }
@@ -57,12 +60,15 @@ public class TrackPlaybackEventService
             _analysisWorker.TryEnqueue(itemGuid);
         }
 
+        var artworkPalette = _artworkPaletteService.ResolveForTrack(audio);
+
         return TrackPlaybackEventComposer.Compose(
             track,
             artifactItemId,
             sidecar,
             include,
-            waveformPps);
+            waveformPps,
+            artworkPalette);
     }
 
     public IReadOnlyList<TrackPlaybackEvent> ComposeTrackEvents(
