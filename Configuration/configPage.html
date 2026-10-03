@@ -16,8 +16,8 @@
                         <h3 class="sectionTitle">Installation</h3>
                         <div class="fieldDescription">
                             Audio analysis is built into the plugin and uses Jellyfin's managed FFmpeg.
-                            No analyzer URL, second container, or shared media mount is required.
-                            Missing artifacts are generated asynchronously and the scheduled backfill reconciles the library.
+                            No analyzer URL or second analyzer container is required. Local libraries are backfilled normally;
+                            cloud libraries use the managed rclone VFS mount below and generate missing analysis on demand.
                         </div>
                     </div>
 
@@ -644,8 +644,8 @@
                             'server with "rclone lsd ' + remote + ':" and, if necessary, edit that existing ' +
                             'remote with "rclone config" to select the root that actually contains your files. ' +
                             'If you change the backing account or root while keeping the same remote name, use ' +
-                            'a new local projection folder before syncing so previously projected media cannot ' +
-                            'be mixed with the new source.';
+                            'a new local mount folder before refreshing so cached or previously materialized media cannot ' +
+                            'be confused with the new source.';
                     } else {
                         empty.textContent = 'This folder is empty.';
                     }
