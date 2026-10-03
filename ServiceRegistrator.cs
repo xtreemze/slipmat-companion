@@ -21,6 +21,7 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<SidecarLoader>();
         serviceCollection.AddSingleton(_ => new JellyfinAnalysisSubjectFactory(applicationHost));
         serviceCollection.AddSingleton<JellyfinMetadataAdapter>();
+        serviceCollection.AddSingleton<ArtworkPaletteService>();
         serviceCollection.AddSingleton<IntegratedAudioAnalyzer>();
         serviceCollection.AddSingleton<IntegratedAnalysisWorker>();
         serviceCollection.AddSingleton<IHostedService>(

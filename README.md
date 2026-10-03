@@ -34,6 +34,7 @@ The current build advertises and ships only capabilities that are already client
 
 - `analysisArtifacts` — optional precomputed waveform/spectral/analysis artifacts;
 - `trackMetadataBatching` — optional reduction of Jellyfin metadata request fan-out;
+- `artworkPalette` — optional bounded extraction of provenance-bearing RGB swatches from album/track primary artwork so clients can receive colour evidence in pre-playback metadata instead of decoding artwork locally;
 - `podcastDirectorySearch` — optional authenticated server-side Podcast Index search; API credentials never leave the Jellyfin process;
 - `podcastSubscriptions` — optional authenticated per-user replica of Slipmat podcast subscription intent for cross-device continuity;
 - `podcastFeedRefresh` — optional authenticated bounded server fetch for podcast feeds, chapters, and transcripts when direct browser acquisition is blocked by CORS;
@@ -59,8 +60,9 @@ Presence of experimental source code does not grant product authority. The capab
 | GET | `/Plugins/AudioGateway/diagnostics/capabilities` | Public extension protocol/module negotiation |
 | GET | `/Plugins/AudioGateway/artifacts/analysis/{itemId}` | Authenticated precomputed analyzer sidecar with ETag / 304 support |
 | GET | `/Plugins/AudioGateway/artifacts/waveform/{itemId}?variant=awf_v1_riff_mono_u8_peak&pps=10` | Authenticated waveform/spectral artifact with ETag / 304 support |
-| GET | `/Plugins/AudioGateway/events/track/{itemId}?include=waveform,sidecar&waveformPps=10` | Authenticated optional track metadata composition |
-| POST | `/Plugins/AudioGateway/events/track/batch` | Authenticated batch track metadata lookup |
+| GET | `/Plugins/AudioGateway/events/track/{itemId}?include=waveform,sidecar&waveformPps=10` | Authenticated optional track metadata composition, including artwork palette evidence when available |
+| POST | `/Plugins/AudioGateway/events/track/batch` | Authenticated batch track metadata lookup, including artwork palette evidence before activation |
+| GET | `/Plugins/AudioGateway/artwork/palette/{itemId}` | Authenticated presentation-neutral palette evidence for any Jellyfin item with primary artwork |
 | GET | `/Plugins/AudioGateway/podcasts/subscriptions` | Authenticated current-user podcast subscription replica |
 | POST | `/Plugins/AudioGateway/podcasts/subscriptions/sync` | Authenticated deterministic merge of the current user's client/server subscription replicas |
 | POST | `/Plugins/AudioGateway/podcasts/resources/fetch` | Authenticated bounded feed/chapter/transcript acquisition for browser CORS fallback |
@@ -131,6 +133,8 @@ This projection is optional server acceleration. It does not own Slipmat media i
 - analyzer/store health and degraded reasons.
 
 A module being unavailable is not a product failure. It means Slipmat uses its canonical local/client implementation.
+
+Artwork palette extraction is intentionally presentation-neutral. The companion samples Jellyfin-owned primary artwork with the same SkiaSharp image stack used by Jellyfin, emits at most six representative RGB swatches with normalized sampling weights plus an opaque artwork revision, and caches the result in bounded memory. Album-primary artwork is preferred with embedded track art as the fallback, matching the existing artwork URL projection. Filesystem paths and UI-specific CSS/token decisions never leave the server boundary.
 
 ## Jellyfin host integration
 

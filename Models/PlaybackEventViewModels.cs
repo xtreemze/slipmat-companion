@@ -19,7 +19,8 @@ public record AnalysisSidecarSummary(
 public record TrackPlaybackAvailability(
     [property: JsonPropertyName("hasWaveform")] bool HasWaveform,
     [property: JsonPropertyName("hasSidecar")] bool HasSidecar,
-    [property: JsonPropertyName("hasDerivedAnalysis")] bool HasDerivedAnalysis
+    [property: JsonPropertyName("hasDerivedAnalysis")] bool HasDerivedAnalysis,
+    [property: JsonPropertyName("hasArtworkPalette")] bool HasArtworkPalette = false
 );
 
 /// <summary>
@@ -30,7 +31,8 @@ public record TrackPlaybackEvent(
     [property: JsonPropertyName("waveform")] WaveformRef? Waveform,
     [property: JsonPropertyName("sidecar")] AnalysisSidecarSummary? Sidecar,
     [property: JsonPropertyName("analysis")] AnalysisBlocks? Analysis,
-    [property: JsonPropertyName("availability")] TrackPlaybackAvailability Availability
+    [property: JsonPropertyName("availability")] TrackPlaybackAvailability Availability,
+    [property: JsonPropertyName("artworkPalette")] ArtworkPaletteV1? ArtworkPalette = null
 );
 
 /// <summary>
