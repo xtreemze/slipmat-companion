@@ -192,7 +192,7 @@ public class CloudProjectionTests
 
         Assert.Equal("failed", result.Status);
         Assert.Equal("remote-authentication-required", result.Code);
-        Assert.False(result.CopyCompleted);
+        Assert.False(result.MountReady);
     }
 
     [Fact]
@@ -213,81 +213,100 @@ public class CloudProjectionTests
     }
 
     [Fact]
-    public async Task Reconcile_EmptyOwnedRoot_UsesOneWayRcloneCopy()
+    public async Task Reconcile_EmptyOwnedRoot_StartsBoundedReadOnlyVfsMount()
     {
         using var temp = new TempDirectory();
         var projectionPath = Path.Combine(temp.Path, "projection");
         var config = EnabledConfig(projectionPath);
-        var runner = HealthyRunner(Result(0));
+        var runner = HealthyRunner(Result(0), Result(0));
         var library = new FakeLibraryProjection();
         var service = CreateService(config, runner, library);
 
         var result = await service.ReconcileAsync();
 
-        Assert.Equal("idle", result.Status);
-        Assert.Equal("projection-empty", result.Code);
-        Assert.True(result.CopyCompleted);
-        Assert.True(File.Exists(Path.Combine(
-            projectionPath,
-            ".slipmat-rclone-cloud-projection.json")));
+        Assert.Equal("scan-queued", result.Status);
+        Assert.Equal("mount-ready-scan-queued", result.Code);
+        Assert.True(result.MountReady);
+        Assert.True(File.Exists(
+            string.Concat(projectionPath, ".slipmat-rclone-cloud-mount.json")));
 
-        Assert.Equal(
-            new[]
-            {
-                "copy",
-                "tele2:Media/Music",
-                projectionPath,
-                "--create-empty-src-dirs",
-                "--stats=0",
-                "--log-level=ERROR",
-            },
-            runner.Invocations[^1].Arguments);
-
+        var mount = runner.Invocations[^1].Arguments;
+        Assert.Equal("mount", mount[0]);
+        Assert.Equal("tele2:Media/Music", mount[1]);
+        Assert.Equal(projectionPath, mount[2]);
+        Assert.Contains("--read-only", mount);
+        Assert.Contains("--vfs-cache-mode=full", mount);
+        Assert.Contains("--vfs-cache-max-size=16G", mount);
+        Assert.Contains("--vfs-cache-max-age=24h", mount);
+        Assert.Contains("--vfs-cache-min-free-space=4G", mount);
         Assert.DoesNotContain(
             runner.Invocations.SelectMany(invocation => invocation.Arguments),
-            argument => argument is "sync" or "move" or "delete" or "purge" or "rc" or "rcd");
+            argument => argument is "copy" or "sync" or "move" or "delete" or "purge" or "rc" or "rcd");
     }
 
     [Fact]
-    public async Task Reconcile_CompletedProjection_CreatesLibraryAndQueuesScan()
+    public async Task Reconcile_ReadyMount_CreatesLibraryAndQueuesScanWithoutRemounting()
     {
         using var temp = new TempDirectory();
         var projectionPath = Path.Combine(temp.Path, "projection");
         var config = EnabledConfig(projectionPath);
         var library = new FakeLibraryProjection();
 
-        var first = CreateService(
-            config,
-            HealthyRunner(Result(0)),
-            library);
-        await first.ReconcileAsync();
+        var firstRunner = HealthyRunner(Result(0), Result(0));
+        await CreateService(config, firstRunner, library).ReconcileAsync();
         File.WriteAllText(Path.Combine(projectionPath, "track.flac"), "fixture");
 
-        var second = CreateService(
-            config,
-            HealthyRunner(Result(0)),
-            library);
-        var result = await second.ReconcileAsync();
+        var secondRunner = HealthyRunner(Result(0));
+        var result = await CreateService(config, secondRunner, library).ReconcileAsync();
 
         Assert.Equal("scan-queued", result.Status);
-        Assert.True(result.CopyCompleted);
+        Assert.True(result.MountReady);
         Assert.True(result.LibraryReady);
         Assert.True(result.LibraryScanQueued);
-        Assert.Equal(1, library.EnsureCalls);
-        Assert.Equal(1, library.ScanCalls);
+        Assert.DoesNotContain(
+            secondRunner.Invocations,
+            invocation => invocation.Arguments.Count > 0 && invocation.Arguments[0] == "mount");
         Assert.Equal("Cloud Music", library.LastLibraryName);
         Assert.Equal(CollectionTypeOptions.music, library.LastCollectionType);
     }
 
     [Fact]
-    public async Task Reconcile_NonEmptyUnmanagedDirectory_FailsClosedBeforeCopy()
+    public async Task Reconcile_LegacyMaterializedProjection_FailsClosedWithoutDeletingFiles()
+    {
+        using var temp = new TempDirectory();
+        var projectionPath = Path.Combine(temp.Path, "projection");
+        Directory.CreateDirectory(projectionPath);
+        var mediaPath = Path.Combine(projectionPath, "keep.flac");
+        File.WriteAllText(mediaPath, "legacy-media");
+        File.WriteAllText(
+            Path.Combine(projectionPath, ".slipmat-rclone-cloud-projection.json"),
+            "{}");
+
+        var runner = HealthyRunner(Result(0));
+        var result = await CreateService(
+            EnabledConfig(projectionPath),
+            runner,
+            new FakeLibraryProjection())
+            .ReconcileAsync();
+
+        Assert.Equal("blocked", result.Status);
+        Assert.Equal("legacy-materialized-projection-present", result.Code);
+        Assert.True(File.Exists(mediaPath));
+        Assert.Equal("legacy-media", File.ReadAllText(mediaPath));
+        Assert.DoesNotContain(
+            runner.Invocations,
+            invocation => invocation.Arguments.Count > 0 && invocation.Arguments[0] == "mount");
+    }
+
+    [Fact]
+    public async Task Reconcile_NonEmptyUnmanagedDirectory_FailsClosedBeforeMount()
     {
         using var temp = new TempDirectory();
         var projectionPath = Path.Combine(temp.Path, "projection");
         Directory.CreateDirectory(projectionPath);
         File.WriteAllText(Path.Combine(projectionPath, "foreign.txt"), "keep");
 
-        var runner = HealthyRunner();
+        var runner = HealthyRunner(Result(0));
         var service = CreateService(
             EnabledConfig(projectionPath),
             runner,
@@ -297,11 +316,13 @@ public class CloudProjectionTests
 
         Assert.Equal("blocked", result.Status);
         Assert.Equal("projection-path-not-owned", result.Code);
-        Assert.Equal(2, runner.Invocations.Count);
+        Assert.DoesNotContain(
+            runner.Invocations,
+            invocation => invocation.Arguments.Count > 0 && invocation.Arguments[0] == "mount");
     }
 
     [Fact]
-    public async Task Reconcile_RemoteRootChange_RejectsExistingMarker()
+    public async Task Reconcile_RemoteRootChange_RejectsExistingMountMarker()
     {
         using var temp = new TempDirectory();
         var projectionPath = Path.Combine(temp.Path, "projection");
@@ -309,14 +330,14 @@ public class CloudProjectionTests
 
         await CreateService(
             config,
-            HealthyRunner(Result(0)),
+            HealthyRunner(Result(0), Result(0)),
             new FakeLibraryProjection())
             .ReconcileAsync();
 
         var changed = EnabledConfig(projectionPath);
         changed.CloudRemotePath = "Media/Other";
 
-        var runner = HealthyRunner();
+        var runner = HealthyRunner(Result(0));
         var result = await CreateService(
             changed,
             runner,
@@ -325,11 +346,13 @@ public class CloudProjectionTests
 
         Assert.Equal("blocked", result.Status);
         Assert.Equal("projection-marker-mismatch", result.Code);
-        Assert.Equal(2, runner.Invocations.Count);
+        Assert.DoesNotContain(
+            runner.Invocations,
+            invocation => invocation.Arguments.Count > 0 && invocation.Arguments[0] == "mount");
     }
 
     [Fact]
-    public async Task Reconcile_SelectedRemoteMissing_FailsBeforeCopy()
+    public async Task Reconcile_SelectedRemoteMissing_FailsBeforeMount()
     {
         using var temp = new TempDirectory();
         var config = EnabledConfig(Path.Combine(temp.Path, "projection"));

@@ -41,7 +41,7 @@ public sealed record CloudProjectionStatusResponse(
     [property: JsonPropertyName("remotePath")] string? RemotePath,
     [property: JsonPropertyName("projectionPath")] string? ProjectionPath,
     [property: JsonPropertyName("projectionPathManaged")] bool ProjectionPathManaged,
-    [property: JsonPropertyName("syncInProgress")] bool SyncInProgress,
+    [property: JsonPropertyName("mountInProgress")] bool MountInProgress,
     [property: JsonPropertyName("projectionPathReady")] bool ProjectionPathReady,
     [property: JsonPropertyName("projectionHasFiles")] bool ProjectionHasFiles,
     [property: JsonPropertyName("libraryReady")] bool LibraryReady,
@@ -51,6 +51,6 @@ public sealed record CloudProjectionStatusResponse(
 public sealed record CloudProjectionReconcileResponse(
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("code")] string Code,
-    [property: JsonPropertyName("copyCompleted")] bool CopyCompleted,
+    [property: JsonPropertyName("mountReady")] bool MountReady,
     [property: JsonPropertyName("libraryReady")] bool LibraryReady,
     [property: JsonPropertyName("libraryScanQueued")] bool LibraryScanQueued);

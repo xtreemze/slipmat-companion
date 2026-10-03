@@ -16,7 +16,7 @@ No separate artifact-store mount or analyzer service is required for the plugin'
 
 The dashboard's **Artifact store override** is advanced configuration only. Existing deployments with a real `/store` mount remain compatible, and `SLIPMAT_ARTIFACT_STORE_ROOT` can override the managed path.
 
-Audio analysis is integrated into the plugin and uses the FFmpeg binary already managed by Jellyfin. The companion amplitude fallback is explicitly identified as `awf_v1_riff_mono_u8_peak`; it is a mono RIFF/WAVE u8 max-peak envelope and is not byte-compatible with Slipmat's retired `audiowaveform` `awf_v1_native_mono_b8` DAT format. No second analyzer service, URL, container, or media mount is required. Missing artifacts are queued asynchronously from normal companion requests and Jellyfin library changes; the dashboard also exposes a daily **Slipmat audio analysis** scheduled task for idempotent backfill. The integrated analyzer preserves the source-declared sample rate and the first one or two source channels, matching Slipmat's canonical Rust accumulator topology. It writes amplitude envelopes, SLWS v2 five-band spectral tiers with Rust-matching proportional max-pooling for coarse tiers, canonical v6 `SBND` source-boundary evidence, conservative `SRHY` rhythm evidence with Rust-equivalent candidate/phase tie-breaking and f32 BPM quantization, and `AnalysisBlocks` containing timing, harmonic, legacy-compatible loudness fields, provider-neutral measured EBU loudness evidence (LUFS/dBTP/LRA with analyzer provenance), and an energy curve. Multichannel sources select their first two lanes rather than downmixing. Missing source stream metadata or weak evidence fails closed while Slipmat retains its local fallback.
+Audio analysis is integrated into the plugin and uses the FFmpeg binary already managed by Jellyfin. The companion amplitude fallback is explicitly identified as `awf_v1_riff_mono_u8_peak`; it is a mono RIFF/WAVE u8 max-peak envelope and is not byte-compatible with Slipmat's retired `audiowaveform` `awf_v1_native_mono_b8` DAT format. No second analyzer service, URL, or analyzer container is required. Missing artifacts are queued asynchronously from normal companion requests. Local Jellyfin audio additions/updates are also analyzed through the bounded worker and the daily **Slipmat audio analysis** task; cloud-mounted media is intentionally excluded from automatic worker/backfill traversal so the analyzer cannot materialize an entire remote library merely by scanning it. Missing cloud analysis remains request-driven. The integrated analyzer preserves the source-declared sample rate and the first one or two source channels, matching Slipmat's canonical Rust accumulator topology. It writes amplitude envelopes, SLWS v2 five-band spectral tiers with Rust-matching proportional max-pooling for coarse tiers, canonical v6 `SBND` source-boundary evidence, conservative `SRHY` rhythm evidence with Rust-equivalent candidate/phase tie-breaking and f32 BPM quantization, and `AnalysisBlocks` containing timing, harmonic, legacy-compatible loudness fields, provider-neutral measured EBU loudness evidence (LUFS/dBTP/LRA with analyzer provenance), and an energy curve. Multichannel sources select their first two lanes rather than downmixing. Missing source stream metadata or weak evidence fails closed while Slipmat retains its local fallback.
 
 ## Compatibility policy
 
@@ -78,7 +78,7 @@ Presence of experimental source code does not grant product authority. The capab
 | GET | `/Plugins/AudioGateway/cloud/rclone/remotes` | Elevated configured-rclone remote descriptors (no credentials) |
 | GET | `/Plugins/AudioGateway/cloud/rclone/browse` | Elevated structured browse of one configured rclone remote |
 | POST | `/Plugins/AudioGateway/cloud/rclone/mkdir` | Elevated creation of a folder within a configured rclone remote |
-| POST | `/Plugins/AudioGateway/cloud/rclone/reconcile` | Elevated one-way rclone copy into the Jellyfin projection |
+| POST | `/Plugins/AudioGateway/cloud/rclone/reconcile` | Elevated preparation/refresh of the bounded read-only rclone VFS mount and Jellyfin projection |
 
 Podcast routes never accept a user ID parameter. The Jellyfin `Jellyfin-UserId` authentication claim selects the storage namespace for subscription replication; a client payload cannot address another user's subscriptions.
 
@@ -96,28 +96,38 @@ The Jellyfin plugin settings provide:
 - a structured remote file manager backed by `rclone lsjson`;
 - remote folder creation through `rclone mkdir`;
 - **Use this folder** selection for the media root;
-- automatic Jellyfin-managed local materialization storage, with an advanced absolute-path override;
-- manual and six-hour scheduled reconciliation.
+- a Jellyfin-managed read-only VFS mount path, with an advanced absolute-path override;
+- a separate disposable VFS cache path;
+- bounded cache policy with defaults of 16 GiB target maximum, 24-hour idle expiry, and 4 GiB minimum free space;
+- manual and six-hour scheduled mount/library reconciliation.
 
-The executable is operator-owned. Audio Gateway invokes `rclone` from Jellyfin's service `PATH`, or `SLIPMAT_RCLONE` when explicitly provided by the host. rclone's own `RCLONE_CONFIG` mechanism may point the service at the intended config file. The plugin never calls `config dump`, `config show`, or any other command that returns provider secrets.
+The executable is operator-owned. Audio Gateway invokes `rclone` from Jellyfin's service `PATH`, or `SLIPMAT_RCLONE` when explicitly provided by the host. rclone's own `RCLONE_CONFIG` mechanism may point the service at the intended config file. The plugin never calls `config dump`, `config show`, or any other command that returns provider secrets. The Jellyfin service/container must also have the platform mount support required by `rclone mount` (for example FUSE on Linux); otherwise reconciliation fails closed rather than falling back to full-library copying.
 
 Audio Gateway intentionally does **not** start or expose rclone's remote-control API. rclone documents RC access as shell-equivalent and capable of reading stored credentials and running broad filesystem/command operations; that authority is too wide for this companion boundary.
 
-Materialization is one-way and additive:
+The cloud projection is a namespace mount plus disposable cache:
 
 ```text
-operator-configured rclone remote
+operator-configured rclone remote  (authoritative media)
         |
-     rclone copy
-        |
-        v
-marker-owned local projection
+   rclone mount --read-only
         |
         v
-Jellyfin virtual folder + guarded library scan
+Jellyfin-visible VFS namespace
+        |
+   reads populate bounded local cache
+        |
+        v
+Jellyfin playback / FFmpeg on-demand analysis
 ```
 
-`rclone copy` updates/adds remote content without deleting destination files. Audio Gateway does not automatically delete cloud objects or local projected media. The projection marker binds to the configured rclone remote name/type and selected remote root; changing that source against an existing marker fails closed.
+The remote namespace is visible without pre-copying its media. A file is downloaded only when Jellyfin/FFmpeg reads it; cached bytes can then be reused by later playback/seeks until rclone evicts them according to cache age/size/free-space policy. Cache eviction deletes only local cache data and never the cloud object. Open files can temporarily keep the cache above its target until they are eligible for eviction.
+
+Jellyfin catalog metadata remains in Jellyfin's own data/database storage. Slipmat waveform/spectral/analysis sidecars remain in the companion artifact store and are not deleted when a media cache entry is evicted. Artwork palette evidence remains a bounded derived cache keyed by artwork revision. The cloud media mount is read-only, so server-side metadata writers cannot mutate the remote media tree through this projection.
+
+The six-hour reconciliation task verifies/prepares the mount and queues a Jellyfin library scan; it does not copy the remote library. rclone's directory cache/polling provides nearer-term remote namespace visibility between scans.
+
+Legacy materialized projections are deliberately not auto-migrated or deleted. A directory containing the former `.slipmat-rclone-cloud-projection.json` marker fails closed with `legacy-materialized-projection-present`. Verify the cloud source, remove/archive the old local copy manually or choose a new mount path, then reconcile again. This protects local bytes from destructive migration.
 
 This projection is optional server acceleration. It does not own Slipmat media identity, source selection, playback, queue, Rail, podcast identity, or offline-retention policy.
 
@@ -170,7 +180,7 @@ V2-family sidecars currently use schema 2.1.0 and carry the subject/store schema
 
 Because Slipmat is unreleased, the former raw-`itemId` artifact layout is regenerated rather than dual-written or retained behind an indefinite compatibility shim.
 
-Integrated analysis observes Jellyfin audio additions/updates through a bounded single-worker queue, and the scheduled backfill reconciles existing local audio without blocking playback. One Jellyfin-FFmpeg source decode feeds exact-source-rate amplitude/spectral/source-boundary/rhythm analysis plus harmonic key/Camelot analysis aligned to Slipmat's Rust/WASM first-channel, framing, Hann-window, single-precision FFT, chroma, and profile-scoring semantics, a bounded energy curve, and EBU R128 loudness/true-peak/LRA measurement. `SBND` v6 is derived from the same 20 Hz four-band/RMS envelope contract and is embedded ahead of `SRHY` exactly as the client parser expects. Host-neutral subject identity remains canonical. Pairwise transition selection, playback policy, and client fallback remain Slipmat-owned.
+Integrated analysis observes local Jellyfin audio additions/updates through a bounded single-worker queue, and the scheduled backfill reconciles existing local audio without blocking playback. Cloud-mounted audio is excluded from these automatic paths; companion artifact/track requests may enqueue analysis for a specific cloud item on demand, which can cause that source file to enter the VFS cache. One Jellyfin-FFmpeg source decode feeds exact-source-rate amplitude/spectral/source-boundary/rhythm analysis plus harmonic key/Camelot analysis aligned to Slipmat's Rust/WASM first-channel, framing, Hann-window, single-precision FFT, chroma, and profile-scoring semantics, a bounded energy curve, and EBU R128 loudness/true-peak/LRA measurement. `SBND` v6 is derived from the same 20 Hz four-band/RMS envelope contract and is embedded ahead of `SRHY` exactly as the client parser expects. Host-neutral subject identity remains canonical. Pairwise transition selection, playback policy, and client fallback remain Slipmat-owned.
 
 ## Podcast Index directory search
 

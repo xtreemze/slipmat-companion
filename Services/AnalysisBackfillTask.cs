@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
+using Jellyfin.Plugin.AudioGateway.Configuration;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Audio;
 using MediaBrowser.Controller.Library;
@@ -19,13 +20,16 @@ public sealed class AnalysisBackfillTask : IScheduledTask
 {
     private readonly ILibraryManager _library;
     private readonly IntegratedAudioAnalyzer _analyzer;
+    private readonly ICloudProjectionConfigurationSource _configurationSource;
 
     public AnalysisBackfillTask(
         ILibraryManager library,
-        IntegratedAudioAnalyzer analyzer)
+        IntegratedAudioAnalyzer analyzer,
+        ICloudProjectionConfigurationSource configurationSource)
     {
         _library = library;
         _analyzer = analyzer;
+        _configurationSource = configurationSource;
     }
 
     public string Name => "Slipmat audio analysis";
@@ -33,7 +37,7 @@ public sealed class AnalysisBackfillTask : IScheduledTask
     public string Key => "SlipmatAudioGatewayAnalysis";
 
     public string Description =>
-        "Precomputes optional Slipmat waveform artifacts for local Jellyfin audio.";
+        "Precomputes optional Slipmat waveform artifacts for local Jellyfin audio; cloud mounts are request-driven.";
 
     public string Category => "Library";
 
@@ -48,6 +52,7 @@ public sealed class AnalysisBackfillTask : IScheduledTask
             Recursive = true,
         });
 
+        var config = _configurationSource.GetCurrent();
         var total = items.Count;
         if (total == 0)
         {
@@ -58,7 +63,9 @@ public sealed class AnalysisBackfillTask : IScheduledTask
         for (var index = 0; index < total; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (items[index] is Audio audio && audio.IsFileProtocol)
+            if (items[index] is Audio audio
+                && audio.IsFileProtocol
+                && !RuntimeSettings.IsCloudProjectionPath(config, audio.Path))
             {
                 await _analyzer.AnalyzeItemAsync(audio.Id, cancellationToken).ConfigureAwait(false);
             }

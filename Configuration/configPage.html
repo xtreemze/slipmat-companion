@@ -16,8 +16,8 @@
                         <h3 class="sectionTitle">Installation</h3>
                         <div class="fieldDescription">
                             Audio analysis is built into the plugin and uses Jellyfin's managed FFmpeg.
-                            No analyzer URL, second container, or shared media mount is required.
-                            Missing artifacts are generated asynchronously and the scheduled backfill reconciles the library.
+                            No analyzer URL or second analyzer container is required. Local libraries are backfilled normally;
+                            cloud libraries use the managed rclone VFS mount below and generate missing analysis on demand.
                         </div>
                     </div>
 
@@ -173,28 +173,70 @@
                                    autocomplete="off"
                                    placeholder="Choose a folder above" />
                             <div class="fieldDescription">
-                                This remote root is copied one-way into the managed Jellyfin projection. Audio Gateway does
-                                not automatically delete local projected files when objects disappear from the cloud.
+                                This remote root is exposed to Jellyfin through a read-only rclone VFS mount. Media bytes are
+                                fetched only when read and kept in a bounded local cache; cache eviction never deletes the cloud object.
                             </div>
                         </div>
 
                         <details style="margin:1em 0">
                             <summary>Advanced local storage</summary>
                             <div class="inputContainer" style="margin-top:0.75em">
-                                <label class="inputLabel inputLabelUnfocused" for="CloudProjectionPath">Local projection folder override</label>
+                                <label class="inputLabel inputLabelUnfocused" for="CloudProjectionPath">Local cloud mount folder override</label>
                                 <input id="CloudProjectionPath"
                                        name="CloudProjectionPath"
                                        type="text"
                                        is="emby-input"
                                        autocomplete="off"
-                                       placeholder="Automatic Jellyfin-managed storage" />
+                                       placeholder="Automatic Jellyfin-managed mount point" />
                                 <div class="fieldDescription">
-                                    Leave blank for a dedicated directory under Jellyfin's managed data path. Set an absolute
-                                    path only when cloud cache bytes belong on another mounted volume.
+                                    Leave blank for a dedicated mount point under Jellyfin's managed data path. This path is
+                                    the remote namespace visible to Jellyfin, not the directory that stores cached bytes.
                                 </div>
                             </div>
                             <div id="CloudResolvedProjectionPath"
                                  class="fieldDescription"></div>
+                            <div class="inputContainer" style="margin-top:0.75em">
+                                <label class="inputLabel inputLabelUnfocused" for="CloudCachePath">VFS cache folder override</label>
+                                <input id="CloudCachePath"
+                                       name="CloudCachePath"
+                                       type="text"
+                                       is="emby-input"
+                                       autocomplete="off"
+                                       placeholder="Automatic Jellyfin-managed cache" />
+                                <div class="fieldDescription">
+                                    Optional absolute path for disposable cached media bytes. Keep this separate from the mount point.
+                                </div>
+                            </div>
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="CloudCacheMaxSizeGiB">Cache target maximum (GiB)</label>
+                                <input id="CloudCacheMaxSizeGiB"
+                                       name="CloudCacheMaxSizeGiB"
+                                       type="number"
+                                       min="1"
+                                       step="1"
+                                       is="emby-input" />
+                                <div class="fieldDescription">
+                                    rclone evicts least-recently-accessed closed files when this target is exceeded. Open files can temporarily exceed it.
+                                </div>
+                            </div>
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="CloudCacheMaxAgeHours">Cache idle expiry (hours)</label>
+                                <input id="CloudCacheMaxAgeHours"
+                                       name="CloudCacheMaxAgeHours"
+                                       type="number"
+                                       min="1"
+                                       step="1"
+                                       is="emby-input" />
+                            </div>
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="CloudCacheMinFreeSpaceGiB">Minimum free cache-volume space (GiB)</label>
+                                <input id="CloudCacheMinFreeSpaceGiB"
+                                       name="CloudCacheMinFreeSpaceGiB"
+                                       type="number"
+                                       min="0"
+                                       step="1"
+                                       is="emby-input" />
+                            </div>
                         </details>
 
                         <div class="inputContainer">
@@ -229,7 +271,7 @@
                                        name="CloudAutoCreateLibrary"
                                        type="checkbox"
                                        is="emby-checkbox" />
-                                <span>Create the Jellyfin library after a successful cloud copy</span>
+                                <span>Create the Jellyfin library after the cloud mount is ready</span>
                             </label>
                         </div>
 
@@ -238,7 +280,7 @@
                                     is="emby-button"
                                     type="button"
                                     class="raised emby-button">
-                                <span>Sync cloud library now</span>
+                                <span>Mount / refresh cloud library</span>
                             </button>
                         </div>
 
@@ -247,7 +289,7 @@
                              role="status"
                              aria-live="polite"
                              style="margin-top:0.75em">
-                            Save settings before the first sync.
+                            Save settings before the first mount.
                         </div>
                     </div>
 
@@ -602,8 +644,8 @@
                             'server with "rclone lsd ' + remote + ':" and, if necessary, edit that existing ' +
                             'remote with "rclone config" to select the root that actually contains your files. ' +
                             'If you change the backing account or root while keeping the same remote name, use ' +
-                            'a new local projection folder before syncing so previously projected media cannot ' +
-                            'be mixed with the new source.';
+                            'a new local mount folder before refreshing so cached or previously materialized media cannot ' +
+                            'be confused with the new source.';
                     } else {
                         empty.textContent = 'This folder is empty.';
                     }
@@ -774,13 +816,13 @@
                     describeCloudSetup(response);
 
                     const projection = response.projectionHasFiles
-                        ? 'projection materialized'
-                        : (response.projectionPathReady ? 'projection ready' : 'projection not materialized yet');
+                        ? 'remote namespace visible'
+                        : (response.projectionPathReady ? 'mount point ready' : 'mount not ready yet');
                     const library = response.libraryReady ? 'library ready' : 'library not ready';
-                    const sync = response.syncInProgress ? 'copy in progress' : 'idle';
+                    const mount = response.mountInProgress ? 'mount starting' : 'idle';
 
                     status.textContent = response.health + ' · ' + response.code + ' · ' +
-                        sync + ' · ' + projection + ' · ' + library;
+                        mount + ' · ' + projection + ' · ' + library;
 
                     resolvedPath.textContent = response.projectionPath
                         ? (response.projectionPathManaged ? 'Managed path: ' : 'Resolved override: ') + response.projectionPath
@@ -884,7 +926,7 @@
 
             async function reconcileCloud() {
                 const status = document.querySelector('#CloudStatus');
-                status.textContent = 'Copying cloud changes into the Jellyfin projection. Large first syncs can take time…';
+                status.textContent = 'Preparing the read-only cloud mount and refreshing the Jellyfin library…';
                 try {
                     const response = await ApiClient.ajax({
                         type: 'POST',
@@ -894,7 +936,7 @@
                     status.textContent = response.status + ' · ' + response.code;
                     await loadCloudStatus();
                 } catch {
-                    status.textContent = 'Unable to reconcile the cloud projection.';
+                    status.textContent = 'Unable to prepare or refresh the cloud mount.';
                 }
             }
 
@@ -988,7 +1030,7 @@
                     document.querySelector('#CloudProjectionEnabled').checked = true;
                     document.querySelector('#CloudBrowserStatus').textContent =
                         'Selected ' + remote + ':' + (CloudBrowserCurrentPath || '/') +
-                        '. Save settings, then sync the cloud library.';
+                        '. Save settings, then mount / refresh the cloud library.';
                 });
 
             document.querySelector('#CloudCreateFolderButton')
@@ -1053,6 +1095,16 @@
                                 config.CloudRemotePath || '';
                             document.querySelector('#CloudProjectionPath').value =
                                 config.CloudProjectionPath || '';
+                            document.querySelector('#CloudCachePath').value =
+                                config.CloudCachePath || '';
+                            document.querySelector('#CloudCacheMaxSizeGiB').value =
+                                config.CloudCacheMaxSizeGiB || 16;
+                            document.querySelector('#CloudCacheMaxAgeHours').value =
+                                config.CloudCacheMaxAgeHours || 24;
+                            document.querySelector('#CloudCacheMinFreeSpaceGiB').value =
+                                Number.isInteger(config.CloudCacheMinFreeSpaceGiB)
+                                    ? config.CloudCacheMinFreeSpaceGiB
+                                    : 4;
                             document.querySelector('#CloudLibraryName').value =
                                 config.CloudLibraryName || 'Cloud Media';
                             document.querySelector('#CloudCollectionType').value =
@@ -1096,6 +1148,14 @@
                                 document.querySelector('#CloudRemotePath').value.trim();
                             config.CloudProjectionPath =
                                 document.querySelector('#CloudProjectionPath').value.trim();
+                            config.CloudCachePath =
+                                document.querySelector('#CloudCachePath').value.trim();
+                            config.CloudCacheMaxSizeGiB =
+                                Math.max(1, Number.parseInt(document.querySelector('#CloudCacheMaxSizeGiB').value, 10) || 16);
+                            config.CloudCacheMaxAgeHours =
+                                Math.max(1, Number.parseInt(document.querySelector('#CloudCacheMaxAgeHours').value, 10) || 24);
+                            config.CloudCacheMinFreeSpaceGiB =
+                                Math.max(0, Number.parseInt(document.querySelector('#CloudCacheMinFreeSpaceGiB').value, 10) || 0);
                             config.CloudLibraryName =
                                 document.querySelector('#CloudLibraryName').value.trim() || 'Cloud Media';
                             config.CloudCollectionType =

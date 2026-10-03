@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.AudioGateway.Configuration;
 using MediaBrowser.Controller.Entities.Audio;
 using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.Hosting;
@@ -20,6 +21,7 @@ public sealed class IntegratedAnalysisWorker : BackgroundService
 
     private readonly ILibraryManager _library;
     private readonly IntegratedAudioAnalyzer _analyzer;
+    private readonly ICloudProjectionConfigurationSource _configurationSource;
     private readonly ILogger<IntegratedAnalysisWorker> _logger;
     private readonly Channel<Guid> _queue = Channel.CreateBounded<Guid>(
         new BoundedChannelOptions(QueueCapacity)
@@ -34,10 +36,12 @@ public sealed class IntegratedAnalysisWorker : BackgroundService
     public IntegratedAnalysisWorker(
         ILibraryManager library,
         IntegratedAudioAnalyzer analyzer,
+        ICloudProjectionConfigurationSource configurationSource,
         ILogger<IntegratedAnalysisWorker> logger)
     {
         _library = library;
         _analyzer = analyzer;
+        _configurationSource = configurationSource;
         _logger = logger;
     }
 
@@ -102,7 +106,11 @@ public sealed class IntegratedAnalysisWorker : BackgroundService
 
     private void OnLibraryItemChanged(object? sender, ItemChangeEventArgs args)
     {
-        if (args.Item is Audio audio && audio.IsFileProtocol)
+        if (args.Item is Audio audio
+            && audio.IsFileProtocol
+            && !RuntimeSettings.IsCloudProjectionPath(
+                _configurationSource.GetCurrent(),
+                audio.Path))
         {
             TryEnqueue(audio.Id);
         }

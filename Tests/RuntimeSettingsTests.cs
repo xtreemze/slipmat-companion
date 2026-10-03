@@ -118,4 +118,66 @@ public class RuntimeSettingsTests
         Assert.Equal(Path.GetFullPath(overridePath), resolved);
     }
 
+    [Fact]
+    public void ResolveCloudCachePath_FreshInstall_UsesSeparateDeterministicManagedPath()
+    {
+        var config = new PluginConfiguration();
+        var dataPath = Path.Combine(Path.GetTempPath(), "jellyfin-data");
+
+        var mount = RuntimeSettings.ResolveCloudProjectionPath(
+            config,
+            "tele2",
+            "Archive/Music",
+            dataPath);
+        var cache = RuntimeSettings.ResolveCloudCachePath(
+            config,
+            "tele2",
+            "Archive/Music",
+            dataPath);
+
+        Assert.StartsWith(
+            Path.Combine(dataPath, "audio-gateway", "cloud", "rclone", "cache"),
+            cache);
+        Assert.NotEqual(mount, cache);
+    }
+
+    [Fact]
+    public void IsCloudProjectionPath_MatchesOnlyFilesWithinConfiguredMount()
+    {
+        using var temp = new TemporaryDirectory();
+        var mount = Path.Combine(temp.Path, "mount");
+        var config = new PluginConfiguration
+        {
+            CloudRemoteName = "tele2",
+            CloudRemotePath = "Archive/Music",
+            CloudProjectionPath = mount,
+        };
+
+        Assert.True(RuntimeSettings.IsCloudProjectionPath(
+            config,
+            Path.Combine(mount, "Artist", "Album", "track.flac")));
+        Assert.False(RuntimeSettings.IsCloudProjectionPath(
+            config,
+            Path.Combine(temp.Path, "local", "track.flac")));
+    }
+
+
+    private sealed class TemporaryDirectory : System.IDisposable
+    {
+        public TemporaryDirectory()
+        {
+            Path = Directory.CreateTempSubdirectory("audio-gateway-runtime-settings").FullName;
+        }
+
+        public string Path { get; }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(Path))
+            {
+                Directory.Delete(Path, recursive: true);
+            }
+        }
+    }
+
 }

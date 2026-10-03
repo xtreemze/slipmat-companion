@@ -9,10 +9,10 @@ description: >
   Audio Gateway reduces Jellyfin request fan-out, serves precomputed audio-analysis
   artifacts, provides bounded podcast/directory/media acquisition when browser networking
   prevents direct access, projects selected iptv-org channels through Jellyfin Live TV,
-  and can materialize an operator-configured rclone remote into a guarded Jellyfin
-  library. Slipmat remains fully functional without the companion and retains all product authority.
+  and can expose an operator-configured rclone remote through a bounded read-only VFS cache
+  as a guarded Jellyfin library. Slipmat remains fully functional without the companion and retains all product authority.
 category: "General"
 owner: "xtreemze"
 artifacts:
 - "Jellyfin.Plugin.AudioGateway.dll"
-changelog: "Classify expired rclone provider OAuth as remote-authentication-required, probe selected remote reachability with lsjson --stat, and document the headless SSH-tunnel reconnect flow for Tele2/Jottacloud traditional OAuth."
+changelog: "Expose cloud media through a bounded read-only rclone VFS cache instead of materializing the full remote, keep cloud analysis request-driven, and preserve legacy copied projections for explicit operator migration."

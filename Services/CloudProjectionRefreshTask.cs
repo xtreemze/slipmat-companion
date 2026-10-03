@@ -28,7 +28,7 @@ public sealed class CloudProjectionRefreshTask : IScheduledTask, IConfigurableSc
     public string Key => "SlipmatRcloneCloudProjectionRefresh";
 
     public string Description =>
-        "Copies the configured rclone remote folder into the local Jellyfin cloud-media projection.";
+        "Checks the bounded read-only rclone cloud mount and queues a Jellyfin library scan without copying the media library.";
 
     public string Category => "Slipmat";
 
@@ -64,7 +64,7 @@ public sealed class CloudProjectionRefreshTask : IScheduledTask, IConfigurableSc
             {
                 Type = TaskTriggerInfoType.IntervalTrigger,
                 IntervalTicks = TimeSpan.FromHours(6).Ticks,
-                MaxRuntimeTicks = TimeSpan.FromHours(12).Ticks,
+                MaxRuntimeTicks = TimeSpan.FromMinutes(5).Ticks,
             },
         ];
     }
