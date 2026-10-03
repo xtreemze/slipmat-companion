@@ -128,7 +128,7 @@ public class JellyfinHostIntegrationTests
     }
 
     [Fact]
-    public void Plugin_ConfigurationPage_UsesThemeAdaptiveAccessibleFormControls()
+    public void Plugin_ConfigurationPage_UsesJellyfinWebNativeFormComponents()
     {
         var resourceName = "Jellyfin.Plugin.AudioGateway.Configuration.configPage.html";
         using var stream = typeof(Plugin).Assembly.GetManifestResourceStream(resourceName);
@@ -136,15 +136,21 @@ public class JellyfinHostIntegrationTests
         using var reader = new StreamReader(stream!);
         var html = reader.ReadToEnd();
 
-        Assert.Contains("--slipmat-control-surface", html);
-        Assert.Contains("color-mix(in srgb, currentColor", html);
-        Assert.Contains(":focus-visible", html);
-        Assert.Contains("::placeholder", html);
-        Assert.Contains("@media (forced-colors: active)", html);
-        Assert.Contains("background: Canvas !important", html);
-        Assert.Contains("color: CanvasText !important", html);
-        Assert.DoesNotContain("background: white", html, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("background-color: white", html, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "data-require=\"emby-input,emby-button,emby-select,emby-checkbox\"",
+            html);
+        Assert.Contains("class=\"selectContainer\"", html);
+        Assert.Contains("class=\"selectLabel\"", html);
+        Assert.Contains("class=\"emby-select-withcolor emby-select\"", html);
+        Assert.Contains("class=\"checkboxContainer checkboxContainer-withDescription\"", html);
+        Assert.Contains("class=\"emby-checkbox-label\"", html);
+        Assert.Contains("is=\"emby-checkbox\"", html);
+        Assert.Contains("class=\"raised emby-button\"", html);
+        Assert.Contains("class=\"raised button-submit block emby-button\"", html);
+        Assert.Contains("button.className = 'raised emby-button';", html);
+        Assert.DoesNotContain("class=\"emby-button\"", html);
+        Assert.DoesNotContain("--slipmat-control-surface", html);
+        Assert.DoesNotContain("color-mix(in srgb, currentColor", html);
     }
 
     [Fact]
