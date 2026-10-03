@@ -79,14 +79,14 @@ public sealed class CloudProjectionService
                 };
             }
 
-            var remoteProbe = await cli
+            var disabledRemoteProbe = await cli
                 .ProbeAsync(
                     selectedRemoteName,
                     NormalizeOptional(config.CloudRemotePath),
                     cancellationToken)
                 .ConfigureAwait(false);
 
-            return remoteProbe.Success
+            return disabledRemoteProbe.Success
                 ? disabledStatus with
                 {
                     SelectedRemoteType = selectedRemote.Type,
@@ -94,7 +94,7 @@ public sealed class CloudProjectionService
                 : disabledStatus with
                 {
                     Health = "degraded",
-                    Code = remoteProbe.ErrorCode ?? "remote-unavailable",
+                    Code = disabledRemoteProbe.ErrorCode ?? "remote-unavailable",
                     SelectedRemoteType = selectedRemote.Type,
                 };
         }
