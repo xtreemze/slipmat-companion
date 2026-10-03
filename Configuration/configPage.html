@@ -337,6 +337,56 @@
                              style="margin-top:0.75em">
                             Save settings before the first mount.
                         </div>
+
+                        <div class="verticalSection" style="margin-top:1.5em">
+                            <h4 class="sectionTitle">Library migration</h4>
+                            <div class="fieldDescription">
+                                Migration is staged. Prepare performs additive copy and exact verification only.
+                                Cutover is a separate action. For local → VFS, the original local directory is retained
+                                as a rollback backup until you explicitly finalize cleanup. Cloud media is never deleted.
+                                “Prepare all eligible” processes only one-path Jellyfin libraries with exactly one matching VFS profile.
+                            </div>
+
+                            <div class="selectContainer" style="margin-top:0.75em">
+                                <label class="selectLabel" for="CloudMigrationDirection">Direction</label>
+                                <select id="CloudMigrationDirection"
+                                        is="emby-select"
+                                        class="emby-select-withcolor emby-select">
+                                    <option value="local-to-vfs">Local Jellyfin library → cloud VFS</option>
+                                    <option value="vfs-to-local">Cloud VFS → local Jellyfin library</option>
+                                </select>
+                            </div>
+
+                            <div style="display:flex;gap:0.5em;flex-wrap:wrap;margin-bottom:0.75em">
+                                <button id="CloudMigrationRefreshButton"
+                                        is="emby-button"
+                                        type="button"
+                                        class="raised emby-button">
+                                    <span>Refresh migration status</span>
+                                </button>
+                                <button id="CloudMigrationBulkButton"
+                                        is="emby-button"
+                                        type="button"
+                                        class="raised emby-button">
+                                    <span>Prepare all eligible</span>
+                                </button>
+                            </div>
+
+                            <div id="CloudMigrationStatus"
+                                 class="fieldDescription"
+                                 role="status"
+                                 aria-live="polite">
+                                Migration status has not been loaded.
+                            </div>
+                            <div id="CloudMigrationCandidates"
+                                 role="list"
+                                 aria-label="Eligible Jellyfin library migrations"
+                                 style="margin-top:0.75em"></div>
+                            <div id="CloudMigrationJobs"
+                                 role="list"
+                                 aria-label="Cloud migration jobs"
+                                 style="margin-top:1em"></div>
+                        </div>
                     </div>
 
                     <div class="verticalSection">
@@ -1164,6 +1214,264 @@
                 }
             }
 
+            function migrationDirection() {
+                return document.querySelector('#CloudMigrationDirection').value;
+            }
+
+            async function loadMigrationCandidates() {
+                const container = document.querySelector('#CloudMigrationCandidates');
+                container.replaceChildren();
+                try {
+                    const candidates = await ApiClient.getJSON(
+                        ApiClient.getUrl('Plugins/AudioGateway/cloud/migrations/candidates', {
+                            direction: migrationDirection()
+                        })
+                    );
+                    (Array.isArray(candidates) ? candidates : []).forEach(function(candidate) {
+                        const row = document.createElement('div');
+                        row.setAttribute('role', 'listitem');
+                        row.style.padding = '0.65em 0';
+                        row.style.borderBottom = '1px solid currentColor';
+
+                        const title = document.createElement('div');
+                        title.style.fontWeight = '600';
+                        title.textContent = candidate.libraryName || 'Unnamed library';
+                        row.appendChild(title);
+
+                        const details = document.createElement('div');
+                        details.className = 'fieldDescription';
+                        details.textContent =
+                            (candidate.localPath || '') + ' · ' +
+                            (candidate.eligible ? 'eligible' : (candidate.code || 'not eligible'));
+                        row.appendChild(details);
+
+                        if (candidate.eligible && candidate.profileId) {
+                            const button = document.createElement('button');
+                            button.type = 'button';
+                            button.setAttribute('is', 'emby-button');
+                            button.className = 'raised emby-button';
+                            button.textContent = 'Prepare migration';
+                            button.style.marginTop = '0.35em';
+                            button.addEventListener('click', function() {
+                                startMigration(candidate);
+                            });
+                            row.appendChild(button);
+                        }
+
+                        container.appendChild(row);
+                    });
+                } catch {
+                    const error = document.createElement('div');
+                    error.className = 'fieldDescription';
+                    error.textContent = 'Unable to inspect Jellyfin migration candidates.';
+                    container.appendChild(error);
+                }
+            }
+
+            function migrationActionButton(label, action) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.setAttribute('is', 'emby-button');
+                button.className = 'raised emby-button';
+                button.textContent = label;
+                button.addEventListener('click', action);
+                return button;
+            }
+
+            function renderMigrationJobs(response) {
+                const container = document.querySelector('#CloudMigrationJobs');
+                container.replaceChildren();
+                const jobs = response && Array.isArray(response.jobs) ? response.jobs : [];
+                if (jobs.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.className = 'fieldDescription';
+                    empty.textContent = 'No migration jobs.';
+                    container.appendChild(empty);
+                    return;
+                }
+
+                jobs.forEach(function(job) {
+                    const row = document.createElement('div');
+                    row.setAttribute('role', 'listitem');
+                    row.style.padding = '0.75em 0';
+                    row.style.borderBottom = '1px solid currentColor';
+
+                    const title = document.createElement('div');
+                    title.style.fontWeight = '600';
+                    title.textContent = job.libraryName + ' · ' + job.direction;
+                    row.appendChild(title);
+
+                    const status = document.createElement('div');
+                    status.className = 'fieldDescription';
+                    status.textContent = job.phase + ' · ' + job.code +
+                        ' · ' + job.remoteName + ':' + (job.remotePath || '/');
+                    row.appendChild(status);
+
+                    if (job.verification) {
+                        const verification = document.createElement('div');
+                        verification.className = 'fieldDescription';
+                        verification.textContent = 'Verification: ' + job.verification;
+                        row.appendChild(verification);
+                    }
+
+                    const actions = document.createElement('div');
+                    actions.style.display = 'flex';
+                    actions.style.gap = '0.5em';
+                    actions.style.flexWrap = 'wrap';
+                    actions.style.marginTop = '0.4em';
+
+                    if (job.phase === 'ready-for-cutover') {
+                        actions.appendChild(migrationActionButton('Cut over', function() {
+                            transitionMigration(job.id, 'cutover');
+                        }));
+                    }
+
+                    if (job.phase === 'ready-to-finalize') {
+                        actions.appendChild(migrationActionButton('Rollback to local', function() {
+                            transitionMigration(job.id, 'rollback');
+                        }));
+
+                        if (job.backupPath) {
+                            const confirmation = document.createElement('input');
+                            confirmation.type = 'text';
+                            confirmation.setAttribute('is', 'emby-input');
+                            confirmation.autocomplete = 'off';
+                            confirmation.placeholder = 'Type exact rollback backup path to delete it';
+                            confirmation.setAttribute(
+                                'aria-label',
+                                'Exact backup path confirmation for ' + job.libraryName);
+                            confirmation.style.flex = '1 1 28em';
+                            actions.appendChild(confirmation);
+
+                            const finalize = migrationActionButton('Finalize and free local space', function() {
+                                finalizeMigration(job.id, confirmation.value, job.backupPath);
+                            });
+                            actions.appendChild(finalize);
+
+                            const backup = document.createElement('div');
+                            backup.className = 'fieldDescription';
+                            backup.style.width = '100%';
+                            backup.textContent = 'Rollback backup retained at: ' + job.backupPath;
+                            actions.appendChild(backup);
+                        }
+                    }
+
+                    if (actions.children.length > 0) {
+                        row.appendChild(actions);
+                    }
+
+                    container.appendChild(row);
+                });
+            }
+
+            async function loadMigrationJobs() {
+                try {
+                    const response = await ApiClient.getJSON(
+                        ApiClient.getUrl('Plugins/AudioGateway/cloud/migrations')
+                    );
+                    renderMigrationJobs(response);
+                    return response;
+                } catch {
+                    renderMigrationJobs({ jobs: [] });
+                    return null;
+                }
+            }
+
+            async function refreshMigrations() {
+                const status = document.querySelector('#CloudMigrationStatus');
+                status.textContent = 'Reading migration state…';
+                await Promise.all([loadMigrationCandidates(), loadMigrationJobs()]);
+                status.textContent =
+                    'Migration state refreshed. Transfers may continue in the background; refresh to see current phase.';
+            }
+
+            async function startMigration(candidate) {
+                const status = document.querySelector('#CloudMigrationStatus');
+                status.textContent = 'Queuing verified migration for ' + candidate.libraryName + '…';
+                try {
+                    await ApiClient.ajax({
+                        type: 'POST',
+                        contentType: 'application/json',
+                        dataType: 'json',
+                        data: JSON.stringify({
+                            profileId: candidate.profileId,
+                            libraryName: candidate.libraryName,
+                            direction: migrationDirection()
+                        }),
+                        url: ApiClient.getUrl('Plugins/AudioGateway/cloud/migrations')
+                    });
+                    status.textContent =
+                        'Migration preparation queued. No local media will be deleted during copy or verification.';
+                    await refreshMigrations();
+                } catch {
+                    status.textContent = 'Unable to start migration; inspect eligibility and cloud destination state.';
+                }
+            }
+
+            async function startBulkMigrations() {
+                const status = document.querySelector('#CloudMigrationStatus');
+                status.textContent = 'Queuing all eligible mapped libraries for copy and verification…';
+                try {
+                    const response = await ApiClient.ajax({
+                        type: 'POST',
+                        contentType: 'application/json',
+                        dataType: 'json',
+                        data: JSON.stringify({ direction: migrationDirection() }),
+                        url: ApiClient.getUrl('Plugins/AudioGateway/cloud/migrations/bulk')
+                    });
+                    const started = response && Array.isArray(response.started) ? response.started.length : 0;
+                    const skipped = response && Array.isArray(response.skipped) ? response.skipped.length : 0;
+                    status.textContent = 'Queued ' + started + ' migration' +
+                        (started === 1 ? '' : 's') + '; skipped ' + skipped +
+                        '. Cutover and local cleanup remain separate.';
+                    await refreshMigrations();
+                } catch {
+                    status.textContent = 'Unable to prepare bulk migrations.';
+                }
+            }
+
+            async function transitionMigration(jobId, action) {
+                const status = document.querySelector('#CloudMigrationStatus');
+                status.textContent = action === 'cutover'
+                    ? 'Queuing final copy/check and cutover…'
+                    : 'Queuing rollback to retained local media…';
+                try {
+                    await ApiClient.ajax({
+                        type: 'POST',
+                        dataType: 'json',
+                        url: ApiClient.getUrl(
+                            'Plugins/AudioGateway/cloud/migrations/' + encodeURIComponent(jobId) + '/' + action)
+                    });
+                    await refreshMigrations();
+                } catch {
+                    status.textContent = 'Migration ' + action + ' was not accepted in the current phase.';
+                }
+            }
+
+            async function finalizeMigration(jobId, confirmation, expectedPath) {
+                const status = document.querySelector('#CloudMigrationStatus');
+                if (String(confirmation || '').trim() !== String(expectedPath || '').trim()) {
+                    status.textContent =
+                        'Local cleanup not queued: the confirmation must exactly match the displayed rollback backup path.';
+                    return;
+                }
+
+                status.textContent = 'Queuing explicit deletion of the retained local rollback backup…';
+                try {
+                    await ApiClient.ajax({
+                        type: 'POST',
+                        contentType: 'application/json',
+                        dataType: 'json',
+                        data: JSON.stringify({ confirmationPath: confirmation }),
+                        url: ApiClient.getUrl(
+                            'Plugins/AudioGateway/cloud/migrations/' + encodeURIComponent(jobId) + '/finalize')
+                    });
+                    await refreshMigrations();
+                } catch {
+                    status.textContent = 'Local cleanup was not accepted; the rollback backup remains retained.';
+                }
+            }
+
             async function loadAudioGatewayStatus() {
                 const status = document.querySelector('#AudioGatewayStatus');
                 try {
@@ -1330,6 +1638,21 @@
                     reconcileCloud();
                 });
 
+            document.querySelector('#CloudMigrationRefreshButton')
+                .addEventListener('click', function() {
+                    refreshMigrations();
+                });
+
+            document.querySelector('#CloudMigrationBulkButton')
+                .addEventListener('click', function() {
+                    startBulkMigrations();
+                });
+
+            document.querySelector('#CloudMigrationDirection')
+                .addEventListener('change', function() {
+                    refreshMigrations();
+                });
+
             document.querySelector('#IptvOrgBrowseButton')
                 .addEventListener('click', function() {
                     browseIptvOrg(true);
@@ -1389,7 +1712,8 @@
                                     }
                                     return null;
                                 }),
-                                browseIptvOrg(true)
+                                browseIptvOrg(true),
+                                refreshMigrations()
                             ]);
                         })
                         .finally(function() {
