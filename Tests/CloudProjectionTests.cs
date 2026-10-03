@@ -124,6 +124,36 @@ public class CloudProjectionTests
     }
 
     [Fact]
+    public async Task RcloneHost_MigrationTransfer_UsesOnlyAdditiveCopyAndExactCheck()
+    {
+        using var temp = new TempDirectory();
+        var localPath = Path.Combine(temp.Path, "library");
+        Directory.CreateDirectory(localPath);
+        var runner = new FakeRunner(Result(0), Result(0), Result(0));
+        var host = new RcloneCliHost(runner: runner);
+
+        await host.CopyLocalToRemoteAsync(localPath, "tele2", "Media/Music");
+        await host.CheckLocalAndRemoteAsync(localPath, "tele2", "Media/Music");
+        await host.CopyRemoteToLocalAsync("tele2", "Media/Music", Path.Combine(temp.Path, "restore"));
+
+        Assert.Equal("copy", runner.Invocations[0].Arguments[0]);
+        Assert.Equal(Path.GetFullPath(localPath), runner.Invocations[0].Arguments[1]);
+        Assert.Equal("tele2:Media/Music", runner.Invocations[0].Arguments[2]);
+
+        Assert.Equal("check", runner.Invocations[1].Arguments[0]);
+        Assert.Equal(Path.GetFullPath(localPath), runner.Invocations[1].Arguments[1]);
+        Assert.Equal("tele2:Media/Music", runner.Invocations[1].Arguments[2]);
+        Assert.DoesNotContain("--one-way", runner.Invocations[1].Arguments);
+
+        Assert.Equal("copy", runner.Invocations[2].Arguments[0]);
+        Assert.Equal("tele2:Media/Music", runner.Invocations[2].Arguments[1]);
+
+        Assert.DoesNotContain(
+            runner.Invocations.SelectMany(invocation => invocation.Arguments),
+            argument => argument is "sync" or "move" or "delete" or "purge" or "rc" or "rcd");
+    }
+
+    [Fact]
     public async Task GetStatus_SelectedRemoteExpiredOAuth_IsDegradedButKeepsLocalProjectionState()
     {
         using var temp = new TempDirectory();
