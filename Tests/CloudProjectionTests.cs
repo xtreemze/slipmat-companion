@@ -236,9 +236,9 @@ public class CloudProjectionTests
         Assert.Equal(projectionPath, mount[2]);
         Assert.Contains("--read-only", mount);
         Assert.Contains("--vfs-cache-mode=full", mount);
-        Assert.Contains("--vfs-cache-max-size=16Gi", mount);
+        Assert.Contains("--vfs-cache-max-size=16G", mount);
         Assert.Contains("--vfs-cache-max-age=24h", mount);
-        Assert.Contains("--vfs-cache-min-free-space=4Gi", mount);
+        Assert.Contains("--vfs-cache-min-free-space=4G", mount);
         Assert.DoesNotContain(
             runner.Invocations.SelectMany(invocation => invocation.Arguments),
             argument => argument is "copy" or "sync" or "move" or "delete" or "purge" or "rc" or "rcd");
