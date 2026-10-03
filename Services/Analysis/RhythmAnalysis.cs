@@ -36,6 +36,12 @@ internal sealed class RhythmAccumulator
     public RhythmAccumulator(int sampleRate, int channelCount)
     {
         _sampleRate = sampleRate;
+        if (sampleRate <= 0)
+        {
+            _splitters = Array.Empty<AnalysisBandSplitter>();
+            return;
+        }
+
         var lanes = Math.Clamp(channelCount, 1, 2);
         _splitters = new AnalysisBandSplitter[lanes];
         for (var lane = 0; lane < lanes; lane++)
