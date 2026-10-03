@@ -192,6 +192,11 @@ public static class RuntimeSettings
 
         foreach (var profile in GetCloudLibraries(config))
         {
+            if (!profile.Enabled)
+            {
+                continue;
+            }
+
             try
             {
                 string projectionRoot;
@@ -242,6 +247,37 @@ public static class RuntimeSettings
 
         var prefix = string.Concat(root, Path.DirectorySeparatorChar);
         return candidate.StartsWith(prefix, comparison);
+    }
+
+    public static void ApplyCloudLibraries(
+        PluginConfiguration config,
+        IReadOnlyList<CloudLibraryProfile> profiles)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(profiles);
+
+        config.CloudLibraries = profiles
+            .Select(NormalizeCloudLibrary)
+            .ToArray();
+
+        var first = config.CloudLibraries.FirstOrDefault();
+        if (first is null)
+        {
+            config.CloudProjectionEnabled = false;
+            return;
+        }
+
+        config.CloudProjectionEnabled = first.Enabled;
+        config.CloudRemoteName = first.RemoteName;
+        config.CloudRemotePath = first.RemotePath;
+        config.CloudProjectionPath = first.ProjectionPath;
+        config.CloudCachePath = first.CachePath;
+        config.CloudCacheMaxSizeGiB = first.CacheMaxSizeGiB;
+        config.CloudCacheMaxAgeHours = first.CacheMaxAgeHours;
+        config.CloudCacheMinFreeSpaceGiB = first.CacheMinFreeSpaceGiB;
+        config.CloudLibraryName = first.LibraryName;
+        config.CloudCollectionType = first.CollectionType;
+        config.CloudAutoCreateLibrary = first.AutoCreateLibrary;
     }
 
     public static PluginConfiguration ProfileAsLegacyConfiguration(CloudLibraryProfile profile)
