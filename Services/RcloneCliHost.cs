@@ -218,6 +218,8 @@ public sealed partial class RcloneCliHost
     private const int MaxListingEntries = 2000;
     private static readonly TimeSpan DefaultCommandTimeout = TimeSpan.FromSeconds(45);
     private static readonly TimeSpan MountCommandTimeout = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan MigrationCommandTimeout = TimeSpan.FromDays(7);
+    private static readonly TimeSpan UnmountCommandTimeout = TimeSpan.FromSeconds(30);
 
     private readonly string _executable;
     private readonly IRcloneProcessRunner _runner;
@@ -402,6 +404,136 @@ public sealed partial class RcloneCliHost
                 _timeout,
                 cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    public async Task<RcloneCommandResult> CopyLocalToRemoteAsync(
+        string localPath,
+        string remoteName,
+        string remotePath,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(localPath);
+        if (!Path.IsPathFullyQualified(localPath))
+        {
+            throw new ArgumentException("Migration source path must be absolute.", nameof(localPath));
+        }
+
+        return await RunAsync(
+                [
+                    "copy",
+                    Path.GetFullPath(localPath),
+                    BuildRemoteSpec(remoteName, remotePath),
+                    "--create-empty-src-dirs",
+                    "--stats=0",
+                    "--log-level=ERROR",
+                ],
+                MigrationCommandTimeout,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<RcloneCommandResult> CopyRemoteToLocalAsync(
+        string remoteName,
+        string remotePath,
+        string localPath,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(localPath);
+        if (!Path.IsPathFullyQualified(localPath))
+        {
+            throw new ArgumentException("Migration destination path must be absolute.", nameof(localPath));
+        }
+
+        Directory.CreateDirectory(Path.GetFullPath(localPath));
+        return await RunAsync(
+                [
+                    "copy",
+                    BuildRemoteSpec(remoteName, remotePath),
+                    Path.GetFullPath(localPath),
+                    "--create-empty-src-dirs",
+                    "--stats=0",
+                    "--log-level=ERROR",
+                ],
+                MigrationCommandTimeout,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<RcloneCommandResult> CheckLocalAndRemoteAsync(
+        string localPath,
+        string remoteName,
+        string remotePath,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(localPath);
+        if (!Path.IsPathFullyQualified(localPath))
+        {
+            throw new ArgumentException("Verification path must be absolute.", nameof(localPath));
+        }
+
+        return await RunAsync(
+                [
+                    "check",
+                    Path.GetFullPath(localPath),
+                    BuildRemoteSpec(remoteName, remotePath),
+                    "--one-way",
+                    "--stats=0",
+                    "--log-level=ERROR",
+                ],
+                MigrationCommandTimeout,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<RcloneCommandResult> UnmountAsync(
+        string mountPath,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(mountPath);
+        if (!Path.IsPathFullyQualified(mountPath))
+        {
+            throw new ArgumentException("Cloud mount path must be absolute.", nameof(mountPath));
+        }
+
+        var fullMountPath = Path.GetFullPath(mountPath);
+        if (OperatingSystem.IsLinux())
+        {
+            var result = await _runner.RunAsync(
+                    "fusermount3",
+                    ["-u", fullMountPath],
+                    UnmountCommandTimeout,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (result.StartSucceeded)
+            {
+                return result;
+            }
+
+            return await _runner.RunAsync(
+                    "fusermount",
+                    ["-u", fullMountPath],
+                    UnmountCommandTimeout,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (OperatingSystem.IsMacOS() || OperatingSystem.IsFreeBSD())
+        {
+            return await _runner.RunAsync(
+                    "umount",
+                    [fullMountPath],
+                    UnmountCommandTimeout,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        return new RcloneCommandResult(
+            false,
+            null,
+            string.Empty,
+            "managed-unmount-unsupported",
+            false,
+            false);
     }
 
     public async Task<RcloneCommandResult> MountReadOnlyAsync(
