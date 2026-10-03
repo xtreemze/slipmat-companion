@@ -88,6 +88,10 @@ public sealed class IntegratedAudioAnalyzer
             {
                 if (!string.Equals(_probedEncoderPath, encoderPath, StringComparison.Ordinal))
                 {
+                    // Jellyfin's SupportsFilter surface intentionally reports only its
+                    // own transcoding allowlist, which does not include loudnorm even
+                    // when the managed FFmpeg binary supports it. Probe the binary we
+                    // will actually execute instead.
                     _probedAvailability = ProbeLoudnormSupport(encoderPath);
                     _probedEncoderPath = encoderPath;
                     if (!_probedAvailability)
@@ -158,7 +162,7 @@ public sealed class IntegratedAudioAnalyzer
                     // Best effort. Availability remains false.
                 }
 
-                Task.WaitAll([stdoutTask, stderrTask], 1_000);
+                Task.WaitAll(new Task[] { stdoutTask, stderrTask }, 1_000);
                 return false;
             }
 
