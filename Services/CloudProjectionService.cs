@@ -122,7 +122,7 @@ public sealed class CloudProjectionService
             : new CloudLibraryEnsureResult(false, false, "library-not-ready");
 
         var remoteProbe = await cli
-            .ListAsync(resolved.RemoteName, resolved.RemotePath, cancellationToken)
+            .ProbeAsync(resolved.RemoteName, resolved.RemotePath, cancellationToken)
             .ConfigureAwait(false);
 
         return new CloudProjectionStatusResponse(
