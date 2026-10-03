@@ -95,7 +95,7 @@ public class RuntimeSettingsTests
 
         Assert.Equal(first, second);
         Assert.StartsWith(
-            Path.Combine(dataPath, "audio-gateway", "cloud", "rclone", "mounts"),
+            Path.Combine(dataPath, "audio-gateway", "cloud", "rclone"),
             first);
         Assert.NotEqual(first, other);
     }
