@@ -21,6 +21,7 @@ public sealed class CloudMigrationCoordinator
     private readonly CloudMigrationQueue _queue;
     private readonly ICloudProjectionConfigurationSource _configurationSource;
     private readonly ILibraryManager _library;
+    private readonly ICloudLibraryProjection _libraryProjection;
     private readonly CloudProjectionService _projectionService;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
@@ -29,12 +30,14 @@ public sealed class CloudMigrationCoordinator
         CloudMigrationQueue queue,
         ICloudProjectionConfigurationSource configurationSource,
         ILibraryManager library,
+        ICloudLibraryProjection libraryProjection,
         CloudProjectionService projectionService)
     {
         _store = store;
         _queue = queue;
         _configurationSource = configurationSource;
         _library = library;
+        _libraryProjection = libraryProjection;
         _projectionService = projectionService;
     }
 
@@ -96,6 +99,7 @@ public sealed class CloudMigrationCoordinator
 
             var localPath = Path.GetFullPath(folder.Locations[0]);
             var currentJobs = await _store.LoadAllAsync(cancellationToken).ConfigureAwait(false);
+            CloudLibraryScanPolicy? previousScanPolicy = null;
             if (currentJobs.Any(job =>
                     string.Equals(job.ProfileId, profile.Id, StringComparison.OrdinalIgnoreCase)
                     && !IsTerminal(job.Phase)))
@@ -105,6 +109,11 @@ public sealed class CloudMigrationCoordinator
 
             if (request.Direction == CloudMigrationDirections.LocalToVfs)
             {
+                previousScanPolicy = _libraryProjection.CaptureScanPolicy(
+                    folder.Name,
+                    localPath)
+                    ?? throw new InvalidOperationException("library-scan-policy-unavailable");
+
                 if (profile.Enabled)
                 {
                     throw new InvalidOperationException("profile-must-be-disabled-before-migration");
@@ -152,6 +161,18 @@ public sealed class CloudMigrationCoordinator
                 {
                     throw new InvalidOperationException("library-not-vfs");
                 }
+
+                previousScanPolicy = currentJobs
+                    .Where(job =>
+                        string.Equals(
+                            job.ProfileId,
+                            profile.Id,
+                            StringComparison.OrdinalIgnoreCase)
+                        && job.Direction == CloudMigrationDirections.LocalToVfs
+                        && job.PreviousLibraryScanPolicy is not null)
+                    .OrderByDescending(job => job.UpdatedAt)
+                    .Select(job => job.PreviousLibraryScanPolicy)
+                    .FirstOrDefault();
             }
 
             var id = Guid.NewGuid().ToString("N");
@@ -175,7 +196,8 @@ public sealed class CloudMigrationCoordinator
                 PreviousEnabled: profile.Enabled,
                 Verification: null,
                 CreatedAt: now,
-                UpdatedAt: now);
+                UpdatedAt: now,
+                PreviousLibraryScanPolicy: previousScanPolicy);
 
             await _store.SaveAsync(job, cancellationToken).ConfigureAwait(false);
             if (!_queue.TryEnqueue(job.Id))
