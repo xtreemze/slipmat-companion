@@ -58,9 +58,9 @@ public static class RuntimeSettings
             "Jellyfin.AudioGateway");
     }
     /// <summary>
-    /// Resolves the local materialization directory for one configured rclone root.
+    /// Resolves the local read-only mount point for one configured rclone root.
     /// A configured absolute override wins. Fresh installs use a deterministic
-    /// Jellyfin-managed directory keyed by remote name + remote path.
+    /// Jellyfin-managed mount directory keyed by remote name + remote path.
     /// </summary>
     public static string ResolveCloudProjectionPath(
         PluginConfiguration config,
@@ -93,20 +93,108 @@ public static class RuntimeSettings
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "Jellyfin.AudioGateway");
 
-        var normalizedIdentity = string.Concat(
-            remoteName.Trim().TrimEnd(':').ToLowerInvariant(),
-            "\n",
-            remotePath.Trim().Replace('\\', '/'));
-
-        var digest = Convert.ToHexString(
-                SHA256.HashData(Encoding.UTF8.GetBytes(normalizedIdentity)))
-            .ToLowerInvariant()[..16];
+        var digest = CloudIdentityDigest(remoteName, remotePath);
 
         return Path.Combine(
             managedBase,
             "cloud",
             "rclone",
+            "mounts",
             digest);
+    }
+
+    public static string ResolveCloudCachePath(
+        PluginConfiguration config,
+        string remoteName,
+        string remotePath,
+        string? jellyfinDataPath = null)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentException.ThrowIfNullOrWhiteSpace(remoteName);
+
+        var configuredRoot = config.CloudCachePath?.Trim();
+        if (!string.IsNullOrWhiteSpace(configuredRoot))
+        {
+            return Path.GetFullPath(configuredRoot);
+        }
+
+        var managedBase = !string.IsNullOrWhiteSpace(jellyfinDataPath)
+            ? Path.Combine(jellyfinDataPath, "audio-gateway")
+            : !string.IsNullOrWhiteSpace(Plugin.Instance?.HostApplicationPaths.DataPath)
+                ? Path.Combine(Plugin.Instance.HostApplicationPaths.DataPath, "audio-gateway")
+                : Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "Jellyfin.AudioGateway");
+
+        return Path.Combine(
+            managedBase,
+            "cloud",
+            "rclone",
+            "cache",
+            CloudIdentityDigest(remoteName, remotePath));
+    }
+
+    public static bool IsCloudProjectionPath(
+        PluginConfiguration config,
+        string? itemPath,
+        string? jellyfinDataPath = null)
+    {
+        if (string.IsNullOrWhiteSpace(itemPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            string projectionRoot;
+            if (!string.IsNullOrWhiteSpace(config.CloudProjectionPath))
+            {
+                projectionRoot = Path.GetFullPath(config.CloudProjectionPath.Trim());
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(config.CloudRemoteName))
+                {
+                    return false;
+                }
+
+                projectionRoot = ResolveCloudProjectionPath(
+                    config,
+                    config.CloudRemoteName,
+                    config.CloudRemotePath ?? string.Empty,
+                    jellyfinDataPath ?? Plugin.Instance?.HostApplicationPaths.DataPath);
+            }
+
+            var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectionRoot));
+            var candidate = Path.GetFullPath(itemPath);
+            var comparison = OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+
+            if (string.Equals(candidate, root, comparison))
+            {
+                return true;
+            }
+
+            var prefix = string.Concat(root, Path.DirectorySeparatorChar);
+            return candidate.StartsWith(prefix, comparison);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string CloudIdentityDigest(string remoteName, string remotePath)
+    {
+        var normalizedIdentity = string.Concat(
+            remoteName.Trim().TrimEnd(':').ToLowerInvariant(),
+            "\n",
+            remotePath.Trim().Replace('\\', '/'));
+
+        return Convert.ToHexString(
+                SHA256.HashData(Encoding.UTF8.GetBytes(normalizedIdentity)))
+            .ToLowerInvariant()[..16];
     }
 
 }
