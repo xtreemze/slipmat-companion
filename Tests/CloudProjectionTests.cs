@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.AudioGateway.Configuration;
+using Jellyfin.Plugin.AudioGateway.Models;
 using Jellyfin.Plugin.AudioGateway.Services;
 using MediaBrowser.Model.Entities;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -271,6 +272,57 @@ public class CloudProjectionTests
     }
 
     [Fact]
+    public async Task Reconcile_ExistingVfsLibrary_AppliesCloudSafeScanPolicyBeforeScan()
+    {
+        using var temp = new TempDirectory();
+        var projectionPath = Path.Combine(temp.Path, "projection");
+        var config = EnabledConfig(projectionPath);
+        var library = new FakeLibraryProjection();
+
+        await CreateService(
+            config,
+            HealthyRunner(Result(0), Result(0)),
+            library)
+            .ReconcileAsync();
+        File.WriteAllText(Path.Combine(projectionPath, "track.flac"), "fixture");
+
+        var runner = HealthyRunner(Result(0));
+        var result = await CreateService(config, runner, library).ReconcileAsync();
+
+        Assert.Equal("scan-queued", result.Status);
+        Assert.Equal(1, library.ScanPolicyCalls);
+        Assert.Equal(2, library.ScanCalls);
+    }
+
+    [Fact]
+    public async Task Reconcile_ExistingVfsLibrary_BlocksWhenScanPolicyCannotBeHardened()
+    {
+        using var temp = new TempDirectory();
+        var projectionPath = Path.Combine(temp.Path, "projection");
+        var config = EnabledConfig(projectionPath);
+        var library = new FakeLibraryProjection();
+
+        await CreateService(
+            config,
+            HealthyRunner(Result(0), Result(0)),
+            library)
+            .ReconcileAsync();
+        File.WriteAllText(Path.Combine(projectionPath, "track.flac"), "fixture");
+        library.ScanPolicyAvailable = false;
+
+        var result = await CreateService(
+            config,
+            HealthyRunner(Result(0)),
+            library)
+            .ReconcileAsync();
+
+        Assert.Equal("blocked", result.Status);
+        Assert.Equal("library-scan-policy-unavailable", result.Code);
+        Assert.Equal(1, library.ScanPolicyCalls);
+        Assert.Equal(1, library.ScanCalls);
+    }
+
+    [Fact]
     public async Task Reconcile_LegacyMaterializedProjection_FailsClosedWithoutDeletingFiles()
     {
         using var temp = new TempDirectory();
@@ -372,6 +424,127 @@ public class CloudProjectionTests
         Assert.Equal(2, runner.Invocations.Count);
     }
 
+    [Fact]
+    public async Task GetStatus_ProfileId_SelectsIndependentVfsLibrary()
+    {
+        using var temp = new TempDirectory();
+        var musicMount = Path.Combine(temp.Path, "music");
+        var movieMount = Path.Combine(temp.Path, "movies");
+        var config = new PluginConfiguration
+        {
+            CloudLibraries =
+            [
+                new CloudLibraryProfile
+                {
+                    Id = "music",
+                    Enabled = true,
+                    RemoteName = "tele2",
+                    RemotePath = "Media/Music",
+                    ProjectionPath = musicMount,
+                    CachePath = Path.Combine(temp.Path, "music-cache"),
+                    LibraryName = "Cloud Music",
+                    CollectionType = "music",
+                },
+                new CloudLibraryProfile
+                {
+                    Id = "movies",
+                    Enabled = true,
+                    RemoteName = "tele2",
+                    RemotePath = "Media/Movies",
+                    ProjectionPath = movieMount,
+                    CachePath = Path.Combine(temp.Path, "movie-cache"),
+                    LibraryName = "Cloud Movies",
+                    CollectionType = "movies",
+                },
+            ],
+        };
+
+        var service = CreateService(
+            config,
+            HealthyRunner(Result(0)),
+            new FakeLibraryProjection());
+
+        var status = await service.GetStatusAsync("movies");
+
+        Assert.Equal("tele2", status.SelectedRemote);
+        Assert.Equal("Media/Movies", status.RemotePath);
+        Assert.Equal(movieMount, status.ProjectionPath);
+        Assert.Equal("Cloud Movies", status.LibraryName);
+        Assert.Equal("movies", status.CollectionType);
+    }
+
+    [Fact]
+    public async Task Reconcile_OverlappingProfileStorage_FailsClosed()
+    {
+        using var temp = new TempDirectory();
+        var shared = Path.Combine(temp.Path, "shared");
+        var config = new PluginConfiguration
+        {
+            CloudLibraries =
+            [
+                new CloudLibraryProfile
+                {
+                    Id = "music",
+                    Enabled = true,
+                    RemoteName = "tele2",
+                    RemotePath = "Media/Music",
+                    ProjectionPath = shared,
+                    CachePath = Path.Combine(temp.Path, "cache-a"),
+                    LibraryName = "Cloud Music",
+                },
+                new CloudLibraryProfile
+                {
+                    Id = "movies",
+                    Enabled = true,
+                    RemoteName = "tele2",
+                    RemotePath = "Media/Movies",
+                    ProjectionPath = shared,
+                    CachePath = Path.Combine(temp.Path, "cache-b"),
+                    LibraryName = "Cloud Movies",
+                    CollectionType = "movies",
+                },
+            ],
+        };
+
+        var service = CreateService(
+            config,
+            new FakeRunner(),
+            new FakeLibraryProjection());
+
+        var result = await service.ReconcileAsync("movies");
+
+        Assert.Equal("blocked", result.Status);
+        Assert.Equal("projection-storage-conflict", result.Code);
+    }
+
+    [Fact]
+    public async Task GetStatus_UnknownProfile_FailsWithoutRcloneMutation()
+    {
+        var service = CreateService(
+            new PluginConfiguration
+            {
+                CloudLibraries =
+                [
+                    new CloudLibraryProfile
+                    {
+                        Id = "music",
+                        RemoteName = "tele2",
+                        RemotePath = "Media/Music",
+                        LibraryName = "Cloud Music",
+                    },
+                ],
+            },
+            new FakeRunner(
+                Result(0, "rclone v1.71.2\n"),
+                Result(0, RemotesJson)),
+            new FakeLibraryProjection());
+
+        var status = await service.GetStatusAsync("missing");
+
+        Assert.Equal("projection-not-found", status.Code);
+        Assert.False(status.Enabled);
+    }
+
     private static PluginConfiguration EnabledConfig(string projectionPath)
         => new()
         {
@@ -464,6 +637,39 @@ public class CloudProjectionTests
             return Task.FromResult(
                 new CloudLibraryEnsureResult(true, true, "library-created"));
         }
+
+        public CloudLibraryScanPolicy? CaptureScanPolicy(
+            string libraryName,
+            string projectionPath)
+            => new(
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false);
+
+        public bool ApplyCloudSafeScanPolicy(
+            string libraryName,
+            string projectionPath)
+        {
+            ScanPolicyCalls++;
+            return ScanPolicyAvailable;
+        }
+
+        public bool RestoreScanPolicy(
+            string libraryName,
+            string projectionPath,
+            CloudLibraryScanPolicy policy)
+            => true;
+
+        public int ScanPolicyCalls { get; private set; }
+
+        public bool ScanPolicyAvailable { get; set; } = true;
 
         public void QueueScan()
         {

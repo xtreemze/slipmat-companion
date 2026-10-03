@@ -29,9 +29,10 @@ public sealed class CloudProjectionController : ControllerBase
     [HttpGet("status")]
     [ProducesResponseType(typeof(CloudProjectionStatusResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<CloudProjectionStatusResponse>> GetStatus(
-        CancellationToken cancellationToken)
+        [FromQuery] string? projectionId = null,
+        CancellationToken cancellationToken = default)
         => Ok(await _projectionService
-            .GetStatusAsync(cancellationToken)
+            .GetStatusAsync(projectionId, cancellationToken)
             .ConfigureAwait(false));
 
     [HttpGet("remotes")]
@@ -110,8 +111,9 @@ public sealed class CloudProjectionController : ControllerBase
     [HttpPost("reconcile")]
     [ProducesResponseType(typeof(CloudProjectionReconcileResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<CloudProjectionReconcileResponse>> Reconcile(
-        CancellationToken cancellationToken)
+        [FromQuery] string? projectionId = null,
+        CancellationToken cancellationToken = default)
         => Ok(await _projectionService
-            .ReconcileAsync(cancellationToken)
+            .ReconcileAsync(projectionId, cancellationToken)
             .ConfigureAwait(false));
 }

@@ -12,7 +12,9 @@ The Jellyfin service/container must be able to execute the intended rclone binar
 
 The selected cloud library is exposed with `rclone mount`, not `rclone copy`. The Jellyfin service/container must therefore also have the platform filesystem-mount dependency required by rclone. On Linux this normally means FUSE is installed and the service/container can access the FUSE device. Audio Gateway does not elevate privileges or add container capabilities itself.
 
-The plugin starts the mount read-only with a full VFS cache. Fresh installs default to:
+Each configured cloud-library profile starts its own read-only mount with an independent full VFS cache. A profile owns one rclone remote/root, one Jellyfin library projection, one mount path, and one cache path/policy. Existing single-projection configuration is imported as the stable `legacy` profile.
+
+Fresh profiles default to:
 
 - 16 GiB target cache maximum;
 - 24 hours maximum idle cache age;
@@ -93,11 +95,13 @@ The cloud media tree and the local caches have deliberately different lifetimes:
 
 The mount is read-only. Do not enable a workflow that expects Jellyfin to write `.nfo`, artwork, or other metadata files back through this mount. Cloud-side metadata mutation should be a separate explicit operator workflow if ever required.
 
-Automatic analysis deliberately skips cloud-mounted items. Otherwise a scheduled backfill or Jellyfin library-refresh event could force every remote file through FFmpeg and defeat the bounded-cache design. A Slipmat artifact/track request can still enqueue analysis for the specific item being used; that read may temporarily cache the full source file.
+Automatic Companion analysis deliberately skips every cloud-mounted item, across every configured VFS profile. Otherwise a scheduled backfill or library-change callback could force remote files through FFmpeg and defeat the bounded-cache design. A Slipmat artifact/track request can still enqueue analysis for the specific item being used; that explicit read may temporarily cache the full source file.
+
+Jellyfin's own catalog/library scan is a different operation: it enumerates the mounted namespace so remote files can exist in the Jellyfin catalog and may perform lightweight media reads required by Jellyfin. Audio Gateway does not describe that as analysis or promise that a Jellyfin catalog refresh is payload-free. Before an existing VFS library is scanned, Audio Gateway forces cloud-safe Jellyfin library options: realtime monitoring, LUFS scanning, chapter-image extraction, trickplay extraction, local metadata saving, and subtitle/lyrics/trickplay writes beside media are disabled. Reconciliation fails closed if those settings cannot be applied. The Companion waveform/peak/spectral/loudness/rhythm backfill also never walks VFS media in the background.
 
 ## Namespace refresh
 
-rclone maintains directory metadata for the mounted namespace and polls supported remotes. Audio Gateway also reconciles the mount and queues a Jellyfin library scan every six hours. That task refreshes visibility; it does not copy the media collection.
+rclone maintains directory metadata for the mounted namespace and polls supported remotes. Audio Gateway reconciles every enabled VFS profile every six hours. Each profile is handled independently, so an unavailable provider does not block unrelated mounts. The task can queue Jellyfin namespace/catalog refresh after a mount is ready; it never performs Companion analysis backfill or copies the media collection.
 
 ## Migration from the former copy projection
 
@@ -106,3 +110,44 @@ Older Audio Gateway builds used additive `rclone copy` materialization and wrote
 The VFS implementation does not automatically delete or reuse that directory. Reconciliation returns `legacy-materialized-projection-present` so the operator can inspect it safely. After confirming that the remote contains the authoritative media, either archive/remove the old local materialized directory manually or configure a new empty mount path, then reconcile again.
 
 This migration rule is intentionally conservative: the plugin never decides that previously downloaded media is safe to delete.
+
+
+## Multiple VFS libraries
+
+The dashboard can maintain multiple cloud-library profiles. Use a separate profile for each independent Jellyfin library/root rather than collapsing several local paths into one remote namespace.
+
+For each profile:
+
+1. select an operator-configured rclone remote;
+2. browse to or create the cloud folder;
+3. choose the Jellyfin library name and collection type;
+4. optionally override the local mount/cache paths;
+5. set a bounded cache policy;
+6. save the profile;
+7. mount/refresh that profile.
+
+Mount and cache paths must not overlap across profiles. A conflicting profile fails closed.
+
+## Library migration model
+
+Migration is intentionally staged because the local source is the rollback authority until the cloud copy and cutover have both been verified.
+
+### Local Jellyfin library -> cloud VFS
+
+1. Copy the local library to an empty cloud destination using additive `rclone copy`; do not use `sync`, `move`, `delete`, or `purge`.
+2. Verify the local source against the cloud destination with `rclone check` and report whether the backend supplied checksums or only weaker size/modification evidence.
+3. Create a VFS profile for that remote root.
+4. Cut the Jellyfin library over only after the VFS mount is healthy. The migration program in issue #50 preserves the existing Jellyfin library path where possible to minimize catalog identity churn.
+5. Keep the original local directory as a rollback backup.
+6. After the VFS-backed library has been rescanned and validated, explicitly finalize cleanup to reclaim local disk space. Cleanup is never automatic.
+
+### Cloud VFS -> local Jellyfin library
+
+1. Choose an empty local destination with enough free space.
+2. Copy the cloud root to the local destination and verify it.
+3. Switch the Jellyfin library back to the verified local path.
+4. Keep the cloud source unchanged unless a separate explicit cloud-deletion workflow is ever approved.
+
+### Bulk migration
+
+Multiple libraries are migrated independently. A future bulk coordinator may run the same staged state machine for every eligible library, but it must never merge roots, silently skip verification, or turn local cleanup into a background eviction policy.

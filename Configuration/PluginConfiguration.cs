@@ -4,6 +4,37 @@ using MediaBrowser.Model.Plugins;
 namespace Jellyfin.Plugin.AudioGateway.Configuration;
 
 /// <summary>
+/// One independently managed read-only cloud/VFS library projection.
+/// Provider credentials remain owned by the operator-configured rclone remote.
+/// </summary>
+public sealed class CloudLibraryProfile
+{
+    public string Id { get; set; } = string.Empty;
+
+    public bool Enabled { get; set; }
+
+    public string RemoteName { get; set; } = string.Empty;
+
+    public string RemotePath { get; set; } = string.Empty;
+
+    public string ProjectionPath { get; set; } = string.Empty;
+
+    public string CachePath { get; set; } = string.Empty;
+
+    public int CacheMaxSizeGiB { get; set; } = 16;
+
+    public int CacheMaxAgeHours { get; set; } = 24;
+
+    public int CacheMinFreeSpaceGiB { get; set; } = 4;
+
+    public string LibraryName { get; set; } = "Cloud Media";
+
+    public string CollectionType { get; set; } = "music";
+
+    public bool AutoCreateLibrary { get; set; } = true;
+}
+
+/// <summary>
 /// Persisted Audio Gateway configuration. Catalog installs are self-contained;
 /// only storage placement remains user-overridable.
 /// </summary>
@@ -23,8 +54,14 @@ public class PluginConfiguration : BasePluginConfiguration
     public string[] IptvOrgLiveTvChannelIds { get; set; } = Array.Empty<string>();
 
     /// <summary>
-    /// Gets or sets a value indicating whether the operator-managed rclone cloud
-    /// projection is enabled. rclone installation/authentication remain external.
+    /// Gets or sets independently managed cloud/VFS library profiles.
+    /// Empty preserves the pre-multi-library fields below as one legacy profile.
+    /// </summary>
+    public CloudLibraryProfile[] CloudLibraries { get; set; } = Array.Empty<CloudLibraryProfile>();
+
+    /// <summary>
+    /// Legacy single-projection compatibility field. New writes also populate
+    /// <see cref="CloudLibraries"/>; remove only after deployed configs migrate.
     /// </summary>
     public bool CloudProjectionEnabled { get; set; }
 

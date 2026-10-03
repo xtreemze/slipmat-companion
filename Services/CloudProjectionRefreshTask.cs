@@ -28,7 +28,7 @@ public sealed class CloudProjectionRefreshTask : IScheduledTask, IConfigurableSc
     public string Key => "SlipmatRcloneCloudProjectionRefresh";
 
     public string Description =>
-        "Checks the bounded read-only rclone cloud mount and queues a Jellyfin library scan without copying the media library.";
+        "Checks every configured bounded read-only rclone cloud mount and queues Jellyfin namespace scans without copying the media libraries or scheduling cloud analysis backfill.";
 
     public string Category => "Slipmat";
 
@@ -44,16 +44,43 @@ public sealed class CloudProjectionRefreshTask : IScheduledTask, IConfigurableSc
     {
         progress.Report(0);
 
-        var result = await _projectionService
-            .ReconcileAsync(cancellationToken)
-            .ConfigureAwait(false);
+        var projectionIds = _projectionService.GetProjectionIds();
+        if (projectionIds.Count == 0)
+        {
+            progress.Report(100);
+            return;
+        }
 
-        _logger.LogInformation(
-            "Cloud projection reconcile completed with status {Status} ({Code})",
-            result.Status,
-            result.Code);
+        for (var index = 0; index < projectionIds.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var projectionId = projectionIds[index];
+            try
+            {
+                var result = await _projectionService
+                    .ReconcileAsync(projectionId, cancellationToken)
+                    .ConfigureAwait(false);
 
-        progress.Report(100);
+                _logger.LogInformation(
+                    "Cloud projection {ProjectionId} reconcile completed with status {Status} ({Code})",
+                    projectionId,
+                    result.Status,
+                    result.Code);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Cloud projection {ProjectionId} reconcile failed; continuing with other profiles",
+                    projectionId);
+            }
+
+            progress.Report((index + 1) * 100d / projectionIds.Count);
+        }
     }
 
     public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
