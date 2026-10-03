@@ -99,7 +99,6 @@ public static class RuntimeSettings
             managedBase,
             "cloud",
             "rclone",
-            "mounts",
             digest);
     }
 
