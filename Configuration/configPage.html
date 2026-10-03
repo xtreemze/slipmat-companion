@@ -1216,6 +1216,13 @@
                     }
                     captureCloudProfileFromForm();
                     const removedId = CloudActiveProfileId;
+                    if (CloudPersistedProfileIds.has(removedId)) {
+                        document.querySelector('#CloudStatus').textContent =
+                            'Persisted VFS profiles cannot be removed while mount lifecycle is detached. ' +
+                            'Keep or disable this profile until managed unmount/rollback is available; ' +
+                            'this prevents orphaning an active mount.';
+                        return;
+                    }
                     CloudLibraryProfiles = CloudLibraryProfiles.filter(function(profile) {
                         return profile.Id !== removedId;
                     });
