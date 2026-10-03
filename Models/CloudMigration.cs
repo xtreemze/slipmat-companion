@@ -64,7 +64,8 @@ public sealed record CloudMigrationJob(
     [property: JsonPropertyName("previousEnabled")] bool PreviousEnabled,
     [property: JsonPropertyName("verification")] string? Verification,
     [property: JsonPropertyName("createdAt")] DateTimeOffset CreatedAt,
-    [property: JsonPropertyName("updatedAt")] DateTimeOffset UpdatedAt);
+    [property: JsonPropertyName("updatedAt")] DateTimeOffset UpdatedAt,
+    [property: JsonPropertyName("previousLibraryScanPolicy")] CloudLibraryScanPolicy? PreviousLibraryScanPolicy = null);
 
 public sealed record CloudMigrationListResponse(
     [property: JsonPropertyName("jobs")] IReadOnlyList<CloudMigrationJob> Jobs);
