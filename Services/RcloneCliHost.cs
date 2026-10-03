@@ -476,7 +476,6 @@ public sealed partial class RcloneCliHost
                     "check",
                     Path.GetFullPath(localPath),
                     BuildRemoteSpec(remoteName, remotePath),
-                    "--one-way",
                     "--stats=0",
                     "--log-level=ERROR",
                 ],
