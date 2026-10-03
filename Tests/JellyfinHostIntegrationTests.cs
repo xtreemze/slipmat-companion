@@ -119,6 +119,9 @@ public class JellyfinHostIntegrationTests
         Assert.Contains("Use this folder", html);
         Assert.Contains("CloudRemoteName", html);
         Assert.Contains("CloudCreateFolderButton", html);
+        Assert.Contains("This remote root is empty", html);
+        Assert.Contains("rclone lsd", html);
+        Assert.Contains("new local projection folder", html);
         Assert.Contains("rclone", html, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Jottacloud", html, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("jotta-cli", html, StringComparison.OrdinalIgnoreCase);
