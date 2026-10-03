@@ -39,10 +39,32 @@ public class PluginConfiguration : BasePluginConfiguration
     public string CloudRemotePath { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets an optional absolute local projection-root override.
-    /// Empty uses a Jellyfin-managed path.
+    /// Gets or sets an optional absolute local mount-point override for the read-only
+    /// cloud projection. Empty uses a Jellyfin-managed mount path.
     /// </summary>
     public string CloudProjectionPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets an optional absolute VFS cache-root override. Empty uses a
+    /// Jellyfin-managed cache directory separate from the mounted media namespace.
+    /// </summary>
+    public string CloudCachePath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the target maximum size of the rclone VFS cache in GiB.
+    /// Open files may temporarily exceed this target until they can be evicted.
+    /// </summary>
+    public int CloudCacheMaxSizeGiB { get; set; } = 16;
+
+    /// <summary>
+    /// Gets or sets the maximum idle age of cached media bytes in hours.
+    /// </summary>
+    public int CloudCacheMaxAgeHours { get; set; } = 24;
+
+    /// <summary>
+    /// Gets or sets the minimum free space rclone should preserve on the cache volume in GiB.
+    /// </summary>
+    public int CloudCacheMinFreeSpaceGiB { get; set; } = 4;
 
     /// <summary>
     /// Gets or sets the Jellyfin library name created for the projection.
@@ -56,7 +78,7 @@ public class PluginConfiguration : BasePluginConfiguration
 
     /// <summary>
     /// Gets or sets a value indicating whether the companion may create the
-    /// Jellyfin virtual folder after a completed materialization.
+    /// Jellyfin virtual folder after the read-only cloud mount is ready.
     /// </summary>
     public bool CloudAutoCreateLibrary { get; set; } = true;
 
