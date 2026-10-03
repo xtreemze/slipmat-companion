@@ -68,3 +68,34 @@ public record PortableAnalysisCoverageResponseV1(
     [property: JsonPropertyName("items")] List<PortableAnalysisCoverageItemV1> Items,
     [property: JsonPropertyName("counts")] PortableAnalysisCoverageCountsV1 Counts
 );
+
+
+public record PortableServerExtensionModulesV1(
+    [property: JsonPropertyName("analysisArtifacts")] bool AnalysisArtifacts,
+    [property: JsonPropertyName("analysisCoverage")] bool AnalysisCoverage
+);
+
+public record PortableComponentHealthV1(
+    [property: JsonPropertyName("status")] string Status
+);
+
+public record PortableServerExtensionHealthV1(
+    [property: JsonPropertyName("analyzer")] PortableComponentHealthV1 Analyzer,
+    [property: JsonPropertyName("artifactStore")] PortableComponentHealthV1 ArtifactStore
+);
+
+/// <summary>
+/// Host-neutral capability/health projection shared with Slipmat's Rust protocol.
+/// Host-specific compatibility such as a Jellyfin version deliberately does not
+/// belong in this contract.
+/// </summary>
+public record PortableServerExtensionCapabilitiesV1(
+    [property: JsonPropertyName("protocolVersion")] string ProtocolVersion,
+    [property: JsonPropertyName("mode")] string Mode,
+    [property: JsonPropertyName("authoritative")] bool Authoritative,
+    [property: JsonPropertyName("serviceIdentity")] string ServiceIdentity,
+    [property: JsonPropertyName("producerVersion")] string ProducerVersion,
+    [property: JsonPropertyName("modules")] PortableServerExtensionModulesV1 Modules,
+    [property: JsonPropertyName("health")] PortableServerExtensionHealthV1 Health,
+    [property: JsonPropertyName("degradedReasons")] List<string> DegradedReasons
+);

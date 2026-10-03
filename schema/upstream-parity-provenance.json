@@ -1,0 +1,19 @@
+{
+  "upstreamRepository": "xtreemze/slipmat",
+  "upstreamCommit": "9e0decdb722c5fc86812a816877231e8a6226006",
+  "files": {
+    "schema/examples/album_event.example.json": "809a57111051c5c5c9c193a72b612c20b82ce951",
+    "schema/examples/analysis_sidecar_v2.example.json": "07f39e99b20328a20ccba802b32caee71a705236",
+    "schema/examples/analysis_subject_v1_vectors.json": "7398e611a4a1bcdeca301f0446f95db810cac0e8",
+    "schema/examples/artist_event.example.json": "6644f3b57e847b4c40bad4f8ed8d6f4448c0f298",
+    "schema/examples/capabilities.degraded.example.json": "0c8665bb0b276c14c296153c81b4ce4b7ffea2dd",
+    "schema/examples/capabilities.example.json": "1d1e96674620a4c162859c391e96269cdb7589c8",
+    "schema/examples/server_extension_analysis_artifact.example.json": "279974444ece3cdf4e6530ee2691d85eec428005",
+    "schema/examples/server_extension_analysis_coverage_request.example.json": "a590696de5a0d22324231b7be3377f75d3ab61ca",
+    "schema/examples/server_extension_analysis_coverage_response.example.json": "156919fb8364dd56be4053455eac20745c8e132a",
+    "schema/examples/server_extension_capabilities.degraded.example.json": "99c49d64698dabffab374ecb9b3a66a3735e269f",
+    "schema/examples/server_extension_capabilities.example.json": "bc8b238145c754f668a53433dda654f14b71859b",
+    "schema/examples/track_event.example.json": "95657dc3b4b36b8e7ebe8d952214d8d577160d19",
+    "schema/examples/track_event.minimal.example.json": "54c63a5da5423ee04102760fa50682ba779942e8"
+  }
+}

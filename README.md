@@ -16,7 +16,7 @@ No separate artifact-store mount or analyzer service is required for the plugin'
 
 The dashboard's **Artifact store override** is advanced configuration only. Existing deployments with a real `/store` mount remain compatible, and `SLIPMAT_ARTIFACT_STORE_ROOT` can override the managed path.
 
-Audio analysis is integrated into the plugin and uses the FFmpeg binary already managed by Jellyfin. The companion amplitude fallback is explicitly identified as `awf_v1_riff_mono_u8_peak`; it is a mono RIFF/WAVE u8 max-peak envelope and is not byte-compatible with Slipmat's retired `audiowaveform` `awf_v1_native_mono_b8` DAT format. No second analyzer service, URL, or analyzer container is required. Missing artifacts are queued asynchronously from normal companion requests. Local Jellyfin audio additions/updates are also analyzed through the bounded worker and the daily **Slipmat audio analysis** task; cloud-mounted media is intentionally excluded from automatic worker/backfill traversal so the analyzer cannot materialize an entire remote library merely by scanning it. Missing cloud analysis remains request-driven. The integrated analyzer preserves the source-declared sample rate and the first one or two source channels, matching Slipmat's canonical Rust accumulator topology. It writes amplitude envelopes, SLWS v2 five-band spectral tiers with Rust-matching proportional max-pooling for coarse tiers, canonical v6 `SBND` source-boundary evidence, conservative `SRHY` rhythm evidence with Rust-equivalent candidate/phase tie-breaking and f32 BPM quantization, and `AnalysisBlocks` containing timing, harmonic, legacy-compatible loudness fields, provider-neutral measured EBU loudness evidence (LUFS/dBTP/LRA with analyzer provenance), and an energy curve. Multichannel sources select their first two lanes rather than downmixing. Missing source stream metadata or weak evidence fails closed while Slipmat retains its local fallback.
+Audio analysis is integrated into the plugin and uses the FFmpeg binary already managed by Jellyfin. The companion amplitude fallback is explicitly identified as `awf_v1_riff_mono_u8_peak`; it is a mono RIFF/WAVE u8 max-peak envelope and is not byte-compatible with Slipmat's retired `audiowaveform` `awf_v1_native_mono_b8` DAT format. No second analyzer service, URL, or analyzer container is required. Missing artifacts are queued asynchronously from normal companion requests. Local Jellyfin audio additions/updates are also analyzed through the bounded worker and the daily **Slipmat audio analysis** task; cloud-mounted media is intentionally excluded from automatic worker/backfill traversal so the analyzer cannot materialize an entire remote library merely by scanning it. Missing cloud analysis remains request-driven. The integrated analyzer preserves the source-declared sample rate and the first one or two source channels, matching Slipmat's canonical Rust accumulator topology. It writes amplitude envelopes, SLWS v2 five-band spectral tiers with Rust-matching proportional max-pooling for coarse tiers, canonical v6 `SBND` source-boundary evidence, conservative `SRHY` rhythm evidence with Rust-equivalent candidate/phase tie-breaking and f32 BPM quantization, optional checksummed `SHRM` v1 harmonic-key evidence with typed pitch/mode/confidence, and `AnalysisBlocks` containing timing, harmonic, legacy-compatible loudness fields, provider-neutral measured EBU loudness evidence (LUFS/dBTP/LRA with analyzer provenance), and an energy curve. Multichannel sources select their first two lanes rather than downmixing. Missing source stream metadata or weak evidence fails closed while Slipmat retains its local fallback.
 
 ## Compatibility policy
 
@@ -352,3 +352,19 @@ This is the standalone Slipmat companion repository. Slipmat remains authoritati
 To publish a new version, update the same four-part version in `build.yaml` and `Directory.Build.props`, update the quoted `changelog` in `build.yaml`, and merge to `main`. CI and release publication then proceed automatically. Commits that keep an already-published version still run CI but do not create or replace a release. The Pages manifest preserves previously published versions for Jellyfin compatibility selection.
 
 The generated Pages artifact contains `manifest.json`. GitHub Pages is a distribution surface only; Slipmat must continue to work with stock Jellyfin when this companion is absent or unavailable.
+
+
+## Cross-repository fixture parity
+
+Slipmat owns the canonical portable analysis contracts and examples mirrored under `schema/examples/`.
+The companion keeps reviewed copies so normal builds and tests remain deterministic and do not depend
+on cross-repository credentials or network availability. `schema/upstream-parity-files.txt` declares
+the shared mirror set. `schema/upstream-parity-provenance.json` records the exact reviewed Slipmat
+commit plus each canonical file's Git blob identity. Companion CI and the focused
+`Canonical Fixture Provenance` workflow recompute those blob identities locally and fail closed on
+unreviewed mirror drift.
+
+Updating the snapshot is an explicit cross-repository contract action: inspect the new Slipmat
+canonical commit, update the mirrored files and provenance together, then review the resulting
+companion PR. This records exact authority without giving the companion workflow credentials to the
+Slipmat repository.
