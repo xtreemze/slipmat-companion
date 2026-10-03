@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Jellyfin.Plugin.AudioGateway.Configuration;
 using Jellyfin.Plugin.AudioGateway.Models;
 using MediaBrowser.Controller.Entities.Audio;
 using MediaBrowser.Controller.Library;
@@ -55,6 +56,14 @@ public class TrackPlaybackEventService
         var artifactItemId = itemGuid.ToString("N");
         var subjectStoreKey = _subjectFactory.ForItem(itemGuid).StoreKey();
         var sidecar = _sidecarLoader.LoadSidecarFromStore(storeRoot, subjectStoreKey);
+        var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+        if (sidecar is not null
+            && RuntimeSettings.IsCloudProjectionPath(config, audio.Path)
+            && !AnalysisSourceStamp.IsCurrent(storeRoot, subjectStoreKey, audio.Path))
+        {
+            sidecar = null;
+        }
+
         if (sidecar is null)
         {
             _analysisWorker.TryEnqueue(itemGuid);

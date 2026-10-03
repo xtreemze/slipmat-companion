@@ -51,6 +51,12 @@ public static class StorePaths
         return Path.Combine(storeRoot, "analysis", $"{storeKey}.json");
     }
 
+    public static string AnalysisSourceStampPath(string storeRoot, string storeKey)
+    {
+        ValidateStoreKey(storeKey);
+        return Path.Combine(storeRoot, "analysis-source", $"{storeKey}.json");
+    }
+
     public static bool IsWithinRoot(string root, string candidatePath)
     {
         var rootFull = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
