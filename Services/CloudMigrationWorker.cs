@@ -523,7 +523,7 @@ public sealed class CloudMigrationWorker : BackgroundService
             },
             cancellationToken).ConfigureAwait(false);
 
-        RestoreProfileState(job);
+        SetProfileState(job.ProfileId, enabled: false, projectionPath: job.LocalPath);
         var unmountCode = await _projectionService
             .UnmountAsync(job.ProfileId, cancellationToken)
             .ConfigureAwait(false);
@@ -554,6 +554,7 @@ public sealed class CloudMigrationWorker : BackgroundService
         try
         {
             Directory.Move(job.BackupPath, job.LocalPath);
+            RestoreProfileState(job);
             _library.QueueLibraryScan();
             await SaveAsync(
                 rolling with
@@ -722,7 +723,7 @@ public sealed class CloudMigrationWorker : BackgroundService
         string code,
         CancellationToken cancellationToken)
     {
-        RestoreProfileState(job);
+        SetProfileState(job.ProfileId, enabled: false, projectionPath: job.LocalPath);
         try
         {
             await _projectionService
@@ -758,6 +759,7 @@ public sealed class CloudMigrationWorker : BackgroundService
                 Directory.Move(job.BackupPath, job.LocalPath);
             }
 
+            RestoreProfileState(job);
             await SaveAsync(
                 job with
                 {
