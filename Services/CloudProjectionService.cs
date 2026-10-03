@@ -17,11 +17,25 @@ public interface ICloudProjectionConfigurationSource
     PluginConfiguration GetCurrent();
 }
 
-public sealed class PluginCloudProjectionConfigurationSource
+public interface ICloudProjectionConfigurationStore
     : ICloudProjectionConfigurationSource
+{
+    void Save(PluginConfiguration configuration);
+}
+
+public sealed class PluginCloudProjectionConfigurationSource
+    : ICloudProjectionConfigurationStore
 {
     public PluginConfiguration GetCurrent()
         => Plugin.Instance?.Configuration ?? new PluginConfiguration();
+
+    public void Save(PluginConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        var plugin = Plugin.Instance
+            ?? throw new InvalidOperationException("Audio Gateway plugin is not initialized.");
+        plugin.SaveConfiguration(configuration);
+    }
 }
 
 /// <summary>
