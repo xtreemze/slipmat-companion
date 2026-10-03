@@ -66,10 +66,12 @@
                                     <li>The cloud object is authoritative. The local VFS cache contains only recently read media and can be evicted without deleting the cloud file.</li>
                                 </ol>
                                 <p>
-                                    Jellyfin catalog scans enumerate the mounted remote namespace and may perform the lightweight reads Jellyfin requires to identify media.
-                                    Companion scheduled waveform/peak/loudness analysis does not traverse VFS libraries at all, cached or uncached, so it cannot download an uncached cloud collection in the background. Cached VFS media is analyzed only when an explicit Slipmat artifact/track request needs it.
-                                    For VFS libraries the plugin also disables Jellyfin realtime monitoring, LUFS scans, chapter-image extraction, trickplay extraction, and media-folder derived-data writes before scanning; if that policy cannot be applied, reconciliation fails closed.
-                                    Jellyfin catalog refresh must still enumerate the full remote namespace and may perform the lightweight reads Jellyfin needs to identify uncached items; making that catalog refresh cache-only would hide the rest of the cloud library. Playback, Jellyfin's ordinary catalog probing, or an explicit Slipmat artifact request may read a cloud item; those bytes then enter the bounded VFS cache and are reused until eviction.
+                                    Automatic Audio Gateway tasks are payload-safe for VFS libraries: the six-hour task verifies/mounts each profile but does not queue a Jellyfin catalog scan, and scheduled waveform/peak/loudness analysis never traverses VFS media at all.
+                                    Playback or an explicit Slipmat artifact request may read a cloud item; those bytes enter the bounded VFS cache and are reused until eviction.
+                                    For VFS libraries the plugin also disables Jellyfin realtime monitoring, LUFS scans, chapter-image extraction, trickplay extraction, and media-folder derived-data writes; if that policy cannot be applied, reconciliation fails closed.
+                                </p>
+                                <p>
+                                    A Jellyfin catalog refresh is an explicit namespace-discovery action. Jellyfin may probe uncached remote media while identifying items, because Jellyfin 12.1 does not expose a supported cache-residency filter for filesystem libraries. Use explicit refresh after initial setup, migration cutover, or when you need new remote objects added to the Jellyfin catalog; routine Audio Gateway reconciliation will not trigger it in the background.
                                 </p>
                                 <p>
                                     To migrate a conventional local Jellyfin library to VFS, copy it to an empty cloud destination, verify source versus remote, cut the same library over to its VFS profile, keep the local source as rollback, and only then explicitly finalize local cleanup.
@@ -344,8 +346,9 @@
                             <div class="fieldDescription">
                                 Migration is staged. Prepare performs additive copy and exact verification only.
                                 Cutover is a separate action. For local → VFS, the original local directory is retained
-                                as a rollback backup until you explicitly finalize cleanup. Cloud media is never deleted.
-                                “Prepare all eligible” processes only one-path Jellyfin libraries with exactly one matching VFS profile.
+                                as a rollback backup until you explicitly finalize cleanup. Finalize is the only step that frees that retained local-media space; it requires exact-path confirmation and never deletes cloud media.
+                                “Prepare all eligible” starts the safe copy/verify stage for every eligible one-path Jellyfin library with exactly one matching VFS profile. Review and cut over each library independently, then finalize each retained rollback backup when you no longer need local rollback.
+                                VFS → local uses the reverse staged flow: copy/verify to local storage first, then cut over without deleting the cloud source.
                             </div>
 
                             <div class="selectContainer" style="margin-top:0.75em">
