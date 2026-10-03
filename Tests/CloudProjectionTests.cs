@@ -271,6 +271,34 @@ public class CloudProjectionTests
     }
 
     [Fact]
+    public async Task Reconcile_LegacyMaterializedProjection_FailsClosedWithoutDeletingFiles()
+    {
+        using var temp = new TempDirectory();
+        var projectionPath = Path.Combine(temp.Path, "projection");
+        Directory.CreateDirectory(projectionPath);
+        var mediaPath = Path.Combine(projectionPath, "keep.flac");
+        File.WriteAllText(mediaPath, "legacy-media");
+        File.WriteAllText(
+            Path.Combine(projectionPath, ".slipmat-rclone-cloud-projection.json"),
+            "{}");
+
+        var runner = HealthyRunner(Result(0));
+        var result = await CreateService(
+            EnabledConfig(projectionPath),
+            runner,
+            new FakeLibraryProjection())
+            .ReconcileAsync();
+
+        Assert.Equal("blocked", result.Status);
+        Assert.Equal("legacy-materialized-projection-present", result.Code);
+        Assert.True(File.Exists(mediaPath));
+        Assert.Equal("legacy-media", File.ReadAllText(mediaPath));
+        Assert.DoesNotContain(
+            runner.Invocations,
+            invocation => invocation.Arguments.Count > 0 && invocation.Arguments[0] == "mount");
+    }
+
+    [Fact]
     public async Task Reconcile_NonEmptyUnmanagedDirectory_FailsClosedBeforeMount()
     {
         using var temp = new TempDirectory();
