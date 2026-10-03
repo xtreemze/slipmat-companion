@@ -26,6 +26,7 @@ public sealed class CloudMigrationWorker : BackgroundService
     private readonly IRcloneProcessRunner _runner;
     private readonly ICloudProjectionConfigurationStore _configurationStore;
     private readonly CloudProjectionService _projectionService;
+    private readonly ICloudLibraryProjection _libraryProjection;
     private readonly ILibraryManager _library;
     private readonly ILogger<CloudMigrationWorker> _logger;
 
@@ -35,6 +36,7 @@ public sealed class CloudMigrationWorker : BackgroundService
         IRcloneProcessRunner runner,
         ICloudProjectionConfigurationStore configurationStore,
         CloudProjectionService projectionService,
+        ICloudLibraryProjection libraryProjection,
         ILibraryManager library,
         ILogger<CloudMigrationWorker> logger)
     {
@@ -43,6 +45,7 @@ public sealed class CloudMigrationWorker : BackgroundService
         _runner = runner;
         _configurationStore = configurationStore;
         _projectionService = projectionService;
+        _libraryProjection = libraryProjection;
         _library = library;
         _logger = logger;
     }
@@ -463,6 +466,18 @@ public sealed class CloudMigrationWorker : BackgroundService
             }
 
             Directory.Move(stagingPath, job.LocalPath);
+            if (!RestorePreviousLibraryScanPolicy(job))
+            {
+                await SaveAsync(
+                    cutting with
+                    {
+                        Phase = CloudMigrationPhases.Failed,
+                        Code = "local-restored-scan-policy-restore-failed",
+                    },
+                    cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
             _library.QueueLibraryScan();
 
             await SaveAsync(
@@ -555,6 +570,18 @@ public sealed class CloudMigrationWorker : BackgroundService
         {
             Directory.Move(job.BackupPath, job.LocalPath);
             RestoreProfileState(job);
+            if (!RestorePreviousLibraryScanPolicy(job))
+            {
+                await SaveAsync(
+                    rolling with
+                    {
+                        Phase = CloudMigrationPhases.Failed,
+                        Code = "local-restored-scan-policy-restore-failed",
+                    },
+                    cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
             _library.QueueLibraryScan();
             await SaveAsync(
                 rolling with
@@ -686,6 +713,18 @@ public sealed class CloudMigrationWorker : BackgroundService
                 && TryDeleteEmptyDirectory(job.LocalPath))
             {
                 Directory.Move(staging, job.LocalPath);
+                if (!RestorePreviousLibraryScanPolicy(job))
+                {
+                    await SaveAsync(
+                        job with
+                        {
+                            Phase = CloudMigrationPhases.Failed,
+                            Code = "local-restored-scan-policy-restore-failed",
+                        },
+                        cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+
                 _library.QueueLibraryScan();
                 await SaveAsync(
                     job with
@@ -699,6 +738,18 @@ public sealed class CloudMigrationWorker : BackgroundService
         }
         else if (Directory.Exists(job.LocalPath))
         {
+            if (!RestorePreviousLibraryScanPolicy(job))
+            {
+                await SaveAsync(
+                    job with
+                    {
+                        Phase = CloudMigrationPhases.Failed,
+                        Code = "local-restored-scan-policy-restore-failed",
+                    },
+                    cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
             await SaveAsync(
                 job with
                 {
@@ -760,6 +811,11 @@ public sealed class CloudMigrationWorker : BackgroundService
             }
 
             RestoreProfileState(job);
+            if (!RestorePreviousLibraryScanPolicy(job))
+            {
+                code = "cutover-recovery-scan-policy-restore-failed";
+            }
+
             await SaveAsync(
                 job with
                 {
@@ -811,6 +867,19 @@ public sealed class CloudMigrationWorker : BackgroundService
                 profile.Id,
                 profileId,
                 StringComparison.OrdinalIgnoreCase));
+
+    private bool RestorePreviousLibraryScanPolicy(CloudMigrationJob job)
+    {
+        if (job.PreviousLibraryScanPolicy is null)
+        {
+            return true;
+        }
+
+        return _libraryProjection.RestoreScanPolicy(
+            job.LibraryName,
+            job.LocalPath,
+            job.PreviousLibraryScanPolicy);
+    }
 
     private async Task<CloudMigrationJob> SaveAsync(
         CloudMigrationJob job,
