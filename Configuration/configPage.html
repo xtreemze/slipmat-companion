@@ -750,14 +750,13 @@
 
                 if (response.code === 'remote-authentication-required') {
                     const remote = response.selectedRemote || document.querySelector('#CloudRemoteName').value || 'REMOTE';
-                    const tele2TraditionalOauthNote =
-                        response.selectedRemoteType === 'jottacloud' && remote.toLowerCase().includes('tele2')
-                            ? ' For Tele2 traditional OAuth, do not use rclone authorize. On a headless server, open "ssh -L localhost:53682:localhost:53682 USER@SERVER" from a browser machine, then run reconnect on the server and answer Y to browser authentication.'
-                            : '';
                     summary.textContent =
                         'The selected cloud remote needs authentication. Run "rclone config reconnect ' +
-                        remote + ':" in the same rclone service/config context used by Jellyfin, then refresh this page.' +
-                        tele2TraditionalOauthNote;
+                        remote + ':" in the same rclone service/config context used by Jellyfin. ' +
+                        'For a headless OAuth remote that requires browser authentication, open ' +
+                        '"ssh -L localhost:53682:localhost:53682 USER@SERVER" from a browser machine and answer Y ' +
+                        'to browser authentication on the server. Do not use rclone authorize when the backend reports it unsupported. ' +
+                        'Refresh this page after reconnecting.';
                     return;
                 }
 
