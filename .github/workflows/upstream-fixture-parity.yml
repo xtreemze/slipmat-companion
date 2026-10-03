@@ -4,6 +4,20 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "17 5 * * *"
+  pull_request:
+    branches: [main]
+    paths:
+      - "schema/examples/**"
+      - "schema/upstream-parity-files.txt"
+      - "scripts/verify_upstream_fixture_parity.py"
+      - ".github/workflows/upstream-fixture-parity.yml"
+  push:
+    branches: [main]
+    paths:
+      - "schema/examples/**"
+      - "schema/upstream-parity-files.txt"
+      - "scripts/verify_upstream_fixture_parity.py"
+      - ".github/workflows/upstream-fixture-parity.yml"
 
 permissions:
   contents: read
