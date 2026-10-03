@@ -67,9 +67,9 @@
                                 </ol>
                                 <p>
                                     Jellyfin catalog scans enumerate the mounted remote namespace and may perform the lightweight reads Jellyfin requires to identify media.
-                                    Companion scheduled waveform/peak/loudness analysis does not traverse VFS libraries at all, so it cannot download an uncached cloud collection in the background.
+                                    Companion scheduled waveform/peak/loudness analysis does not traverse VFS libraries at all, cached or uncached, so it cannot download an uncached cloud collection in the background. Cached VFS media is analyzed only when an explicit Slipmat artifact/track request needs it.
                                     For VFS libraries the plugin also disables Jellyfin realtime monitoring, LUFS scans, chapter-image extraction, trickplay extraction, and media-folder derived-data writes before scanning; if that policy cannot be applied, reconciliation fails closed.
-                                    Playback, Jellyfin's ordinary catalog probing, or an explicit Slipmat artifact request may read a cloud item; those bytes then enter the bounded VFS cache and are reused until eviction.
+                                    Jellyfin catalog refresh must still enumerate the full remote namespace and may perform the lightweight reads Jellyfin needs to identify uncached items; making that catalog refresh cache-only would hide the rest of the cloud library. Playback, Jellyfin's ordinary catalog probing, or an explicit Slipmat artifact request may read a cloud item; those bytes then enter the bounded VFS cache and are reused until eviction.
                                 </p>
                                 <p>
                                     To migrate a conventional local Jellyfin library to VFS, copy it to an empty cloud destination, verify source versus remote, cut the same library over to its VFS profile, keep the local source as rollback, and only then explicitly finalize local cleanup.
