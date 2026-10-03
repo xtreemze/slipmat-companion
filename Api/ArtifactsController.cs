@@ -9,6 +9,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Microsoft.Net.Http.Headers;
+using MediaBrowser.Controller.Entities.Audio;
+using MediaBrowser.Controller.Library;
 
 namespace Jellyfin.Plugin.AudioGateway.Api;
 
@@ -33,17 +35,20 @@ public class ArtifactsController : ControllerBase
     private readonly SidecarLoader _sidecarLoader;
     private readonly JellyfinAnalysisSubjectFactory _subjectFactory;
     private readonly IntegratedAnalysisWorker _analysisWorker;
+    private readonly ILibraryManager _library;
 
     public ArtifactsController(
         ILogger<ArtifactsController> logger,
         SidecarLoader sidecarLoader,
         JellyfinAnalysisSubjectFactory subjectFactory,
-        IntegratedAnalysisWorker analysisWorker)
+        IntegratedAnalysisWorker analysisWorker,
+        ILibraryManager library)
     {
         _logger = logger;
         _sidecarLoader = sidecarLoader;
         _subjectFactory = subjectFactory;
         _analysisWorker = analysisWorker;
+        _library = library;
     }
 
     /// <summary>
@@ -75,13 +80,21 @@ public class ArtifactsController : ControllerBase
         }
 
         var sidecar = _sidecarLoader.LoadSidecarFromStore(storeRoot, subjectStoreKey);
+        var parsedItemId = Guid.TryParse(itemId, out var itemGuid) ? itemGuid : (Guid?)null;
+        if (sidecar is not null
+            && parsedItemId is Guid currentItemId
+            && IsStaleCloudArtifact(config, storeRoot, subjectStoreKey, currentItemId))
+        {
+            sidecar = null;
+        }
+
         if (sidecar is null)
         {
             _logger.LogDebug(
-                "Compatible sidecar not found for itemId={ItemId} subject={SubjectStoreKey}",
+                "Compatible current sidecar not found for itemId={ItemId} subject={SubjectStoreKey}",
                 itemId,
                 subjectStoreKey);
-            if (Guid.TryParse(itemId, out var missingItemId))
+            if (parsedItemId is Guid missingItemId)
             {
                 _analysisWorker.TryEnqueue(missingItemId);
             }
@@ -153,12 +166,23 @@ public class ArtifactsController : ControllerBase
         }
 
         var sidecar = _sidecarLoader.LoadSidecarFromStore(storeRoot, subjectStoreKey);
-        if (sidecar is null)
+        if (sidecar is null
+            || (Guid.TryParse(itemId, out var currentItemId)
+                && IsStaleCloudArtifact(
+                    config,
+                    storeRoot,
+                    subjectStoreKey,
+                    currentItemId)))
         {
             _logger.LogDebug(
-                "Waveform sidecar mismatch for itemId={ItemId} subject={SubjectStoreKey}",
+                "Waveform sidecar missing, mismatched, or stale for itemId={ItemId} subject={SubjectStoreKey}",
                 itemId,
                 subjectStoreKey);
+            if (Guid.TryParse(itemId, out var missingItemId))
+            {
+                _analysisWorker.TryEnqueue(missingItemId);
+            }
+
             return NotFound();
         }
 
@@ -177,6 +201,19 @@ public class ArtifactsController : ControllerBase
         Response.Headers[HeaderNames.CacheControl] = "no-cache";
         var stream = System.IO.File.OpenRead(datPath);
         return File(stream, MediaTypeNames.Application.Octet, enableRangeProcessing: true);
+    }
+
+
+    private bool IsStaleCloudArtifact(
+        PluginConfiguration config,
+        string storeRoot,
+        string subjectStoreKey,
+        Guid itemId)
+    {
+        var audio = _library.GetItemById(itemId) as Audio;
+        return audio is not null
+            && RuntimeSettings.IsCloudProjectionPath(config, audio.Path)
+            && !AnalysisSourceStamp.IsCurrent(storeRoot, subjectStoreKey, audio.Path);
     }
 
     public static string BuildETagForAnalysis(string sourceFingerprint)
