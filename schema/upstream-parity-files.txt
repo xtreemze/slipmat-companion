@@ -11,5 +11,6 @@ schema/examples/server_extension_analysis_coverage_request.example.json
 schema/examples/server_extension_analysis_coverage_response.example.json
 schema/examples/server_extension_capabilities.degraded.example.json
 schema/examples/server_extension_capabilities.example.json
+schema/examples/server_extension_track_playback_event.example.json
 schema/examples/track_event.example.json
 schema/examples/track_event.minimal.example.json

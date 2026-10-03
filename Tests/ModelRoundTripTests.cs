@@ -74,6 +74,31 @@ public class ModelRoundTripTests
     }
 
     [Fact]
+    public void TrackPlaybackEvent_CanonicalCompactExample_Deserializes()
+    {
+        var path = ExamplePath("server_extension_track_playback_event.example.json");
+        var evt = Deserialize<TrackPlaybackEvent>(path);
+
+        Assert.Equal("11111111-1111-1111-1111-111111111111", evt.Track.ItemId);
+        Assert.Equal("So What", evt.Track.Title);
+        Assert.NotNull(evt.Waveform);
+        Assert.Equal("awf_v1_riff_mono_u8_peak", evt.Waveform!.Variant);
+        Assert.NotNull(evt.Waveform.Path);
+        Assert.NotNull(evt.Waveform.Url);
+        Assert.Null(evt.Waveform.DurationSamples);
+        Assert.NotNull(evt.Sidecar);
+        Assert.NotNull(evt.Analysis);
+        Assert.NotNull(evt.Analysis!.LoudnessMeasurement);
+        Assert.Equal(
+            "ffmpeg-loudnorm-input",
+            evt.Analysis.LoudnessMeasurement!.Semantics);
+        Assert.True(evt.Availability.HasArtworkPalette);
+        Assert.NotNull(evt.ArtworkPalette);
+        Assert.Equal("album-primary", evt.ArtworkPalette!.SourceKind);
+        Assert.Equal(2, evt.ArtworkPalette.Swatches.Count);
+    }
+
+    [Fact]
     public void AlbumEvent_FullExample_Deserializes()
     {
         var path = ExamplePath("album_event.example.json");
