@@ -192,6 +192,11 @@ public static class RuntimeSettings
 
         foreach (var profile in GetCloudLibraries(config))
         {
+            if (!profile.Enabled)
+            {
+                continue;
+            }
+
             try
             {
                 string projectionRoot;
