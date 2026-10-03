@@ -1214,6 +1214,7 @@
                     if (CloudLibraryProfiles.length <= 1) {
                         return;
                     }
+                    captureCloudProfileFromForm();
                     const removedId = CloudActiveProfileId;
                     CloudLibraryProfiles = CloudLibraryProfiles.filter(function(profile) {
                         return profile.Id !== removedId;
@@ -1221,7 +1222,18 @@
                     CloudPersistedProfileIds.delete(removedId);
                     CloudActiveProfileId = CloudLibraryProfiles[0].Id;
                     renderCloudProfileSelect();
-                    activateCloudProfile(CloudActiveProfileId);
+                    applyCloudProfileToForm(CloudLibraryProfiles[0]);
+                    loadCloudRemotes(CloudLibraryProfiles[0].RemoteName || '').then(function() {
+                        CloudBrowserCurrentRemote = document.querySelector('#CloudRemoteName').value;
+                        return loadCloudStatus();
+                    }).then(function() {
+                        if (CloudBrowserCurrentRemote) {
+                            return browseCloud(
+                                CloudBrowserCurrentRemote,
+                                CloudLibraryProfiles[0].RemotePath || '');
+                        }
+                        return null;
+                    });
                 });
 
             document.querySelector('#CloudRefreshRemotesButton')
