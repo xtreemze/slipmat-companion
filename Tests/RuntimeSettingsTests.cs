@@ -161,6 +161,90 @@ public class RuntimeSettingsTests
             Path.Combine(temp.Path, "local", "track.flac")));
     }
 
+    [Fact]
+    public void GetCloudLibraries_LegacyConfiguration_ProjectsStableCompatibilityProfile()
+    {
+        var config = new PluginConfiguration
+        {
+            CloudProjectionEnabled = true,
+            CloudRemoteName = "tele2",
+            CloudRemotePath = "Archive/Music",
+            CloudLibraryName = "Music",
+        };
+
+        var profiles = RuntimeSettings.GetCloudLibraries(config);
+
+        var profile = Assert.Single(profiles);
+        Assert.Equal("legacy", profile.Id);
+        Assert.True(profile.Enabled);
+        Assert.Equal("tele2", profile.RemoteName);
+        Assert.Equal("Archive/Music", profile.RemotePath);
+        Assert.Equal("Music", profile.LibraryName);
+    }
+
+    [Fact]
+    public void IsCloudProjectionPath_MatchesEveryConfiguredProfile()
+    {
+        using var temp = new TemporaryDirectory();
+        var firstMount = Path.Combine(temp.Path, "music");
+        var secondMount = Path.Combine(temp.Path, "movies");
+        var config = new PluginConfiguration
+        {
+            CloudLibraries =
+            [
+                new CloudLibraryProfile
+                {
+                    Id = "music",
+                    RemoteName = "tele2",
+                    RemotePath = "Music",
+                    ProjectionPath = firstMount,
+                    LibraryName = "Music",
+                },
+                new CloudLibraryProfile
+                {
+                    Id = "movies",
+                    RemoteName = "tele2",
+                    RemotePath = "Movies",
+                    ProjectionPath = secondMount,
+                    LibraryName = "Movies",
+                    CollectionType = "movies",
+                },
+            ],
+        };
+
+        Assert.True(RuntimeSettings.IsCloudProjectionPath(
+            config,
+            Path.Combine(firstMount, "Artist", "track.flac")));
+        Assert.True(RuntimeSettings.IsCloudProjectionPath(
+            config,
+            Path.Combine(secondMount, "Film.mkv")));
+        Assert.False(RuntimeSettings.IsCloudProjectionPath(
+            config,
+            Path.Combine(temp.Path, "local", "Film.mkv")));
+    }
+
+    [Fact]
+    public void GetCloudLibraries_BlankProfileId_IsNormalizedDeterministically()
+    {
+        var config = new PluginConfiguration
+        {
+            CloudLibraries =
+            [
+                new CloudLibraryProfile
+                {
+                    RemoteName = "tele2",
+                    RemotePath = "Music",
+                    LibraryName = "Music",
+                },
+            ],
+        };
+
+        var first = Assert.Single(RuntimeSettings.GetCloudLibraries(config));
+        var second = Assert.Single(RuntimeSettings.GetCloudLibraries(config));
+
+        Assert.StartsWith("profile-", first.Id);
+        Assert.Equal(first.Id, second.Id);
+    }
 
     private sealed class TemporaryDirectory : System.IDisposable
     {
