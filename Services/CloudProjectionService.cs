@@ -312,6 +312,7 @@ public sealed class CloudProjectionService
 
     public IReadOnlyList<string> GetProjectionIds()
         => RuntimeSettings.GetCloudLibraries(_configurationSource.GetCurrent())
+            .Where(profile => profile.Enabled)
             .Select(profile => profile.Id)
             .ToArray();
 
