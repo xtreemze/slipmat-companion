@@ -167,6 +167,22 @@ public class JellyfinMetadataAdapter
     }
 
     /// <summary>
+    /// Resolves the canonical primary-artwork owner for a track: album first, then
+    /// embedded track art. Palette extraction and URL projection share this rule so
+    /// they cannot drift onto different artwork revisions.
+    /// </summary>
+    public BaseItem? ResolvePrimaryArtworkSource(BaseItem track)
+    {
+        var album = _library.GetItemById(track.ParentId) as MusicAlbum;
+        if (album is not null && album.HasImage(ImageType.Primary))
+        {
+            return album;
+        }
+
+        return track.HasImage(ImageType.Primary) ? track : null;
+    }
+
+    /// <summary>
     /// Constructs an <see cref="ArtworkSet"/> from a track's album (resolved via the
     /// track's parent chain) and the supplied artist items.
     ///
@@ -181,16 +197,14 @@ public class JellyfinMetadataAdapter
         // ── Album cover front ────────────────────────────────────────────────
         string? albumCoverFront = null;
 
-        // Resolve the album from the track's parent (or the track itself if it carries artwork).
-        var album = _library.GetItemById(track.ParentId) as MusicAlbum;
-        if (album is not null && album.HasImage(ImageType.Primary))
+        var primaryArtworkSource = ResolvePrimaryArtworkSource(track);
+        if (primaryArtworkSource is not null)
         {
-            albumCoverFront = BuildImageUrl(album.Id, ImageType.Primary, 800, null);
-        }
-        else if (track.HasImage(ImageType.Primary))
-        {
-            // Fall back to embedded track artwork when album has none.
-            albumCoverFront = BuildImageUrl(track.Id, ImageType.Primary, 800, null);
+            albumCoverFront = BuildImageUrl(
+                primaryArtworkSource.Id,
+                ImageType.Primary,
+                800,
+                null);
         }
 
         // ── Artist avatars ───────────────────────────────────────────────────
