@@ -1,7 +1,7 @@
 ---
 name: "Audio Gateway"
 guid: "d3a2b1c0-e4f5-6789-abcd-ef0123456789"
-version: "0.4.3.0"
+version: "0.4.3.1"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 overview: "Optional Jellyfin companion that accelerates and enriches Slipmat."
@@ -15,4 +15,4 @@ category: "General"
 owner: "xtreemze"
 artifacts:
 - "Jellyfin.Plugin.AudioGateway.dll"
-changelog: "Precompute bounded media-art colour palettes in the Jellyfin companion and expose provenance-bearing swatches through track metadata batching so Slipmat can use colour before playback without decoding artwork client-side."
+changelog: "Classify expired rclone provider OAuth as remote-authentication-required, probe selected remote reachability with lsjson --stat, and document the headless SSH-tunnel reconnect flow for Tele2/Jottacloud traditional OAuth."

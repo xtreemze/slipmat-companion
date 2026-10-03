@@ -748,6 +748,18 @@
                     return;
                 }
 
+                if (response.code === 'remote-authentication-required') {
+                    const remote = response.selectedRemote || document.querySelector('#CloudRemoteName').value || 'REMOTE';
+                    summary.textContent =
+                        'The selected cloud remote needs authentication. Run "rclone config reconnect ' +
+                        remote + ':" in the same rclone service/config context used by Jellyfin. ' +
+                        'For a headless OAuth remote that requires browser authentication, open ' +
+                        '"ssh -L localhost:53682:localhost:53682 USER@SERVER" from a browser machine and answer Y ' +
+                        'to browser authentication on the server. Do not use rclone authorize when the backend reports it unsupported. ' +
+                        'Refresh this page after reconnecting.';
+                    return;
+                }
+
                 summary.textContent = 'rclone cloud access is not ready · ' + response.code + '.';
             }
 
@@ -817,7 +829,15 @@
                         : 'Folder loaded. Open a folder or choose Use this folder.';
                     return response;
                 } catch {
-                    status.textContent = 'Unable to browse that rclone path.';
+                    const cloudStatus = await loadCloudStatus();
+                    if (cloudStatus && cloudStatus.code === 'remote-authentication-required') {
+                        const remote = cloudStatus.selectedRemote || selectedRemote;
+                        status.textContent =
+                            'Cloud authentication expired. Run "rclone config reconnect ' +
+                            remote + ':" on the server, then refresh this remote.';
+                    } else {
+                        status.textContent = 'Unable to browse that rclone path.';
+                    }
                     return null;
                 }
             }
@@ -852,7 +872,13 @@
                     await browseCloud(remote, CloudBrowserCurrentPath);
                     status.textContent = 'Folder created.';
                 } catch {
-                    status.textContent = 'Unable to create the remote folder.';
+                    const cloudStatus = await loadCloudStatus();
+                    if (cloudStatus && cloudStatus.code === 'remote-authentication-required') {
+                        status.textContent =
+                            'Cloud authentication expired. Reconnect the selected rclone remote on the server before creating folders.';
+                    } else {
+                        status.textContent = 'Unable to create the remote folder.';
+                    }
                 }
             }
 

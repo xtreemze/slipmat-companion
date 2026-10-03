@@ -40,6 +40,11 @@ public sealed record RcloneDirectoryListing(
     string? ErrorCode,
     bool OutputTruncated);
 
+public sealed record RcloneRemoteProbe(
+    bool Success,
+    string? ErrorCode,
+    bool OutputTruncated);
+
 public interface IRcloneProcessRunner
 {
     Task<RcloneCommandResult> RunAsync(
@@ -300,6 +305,42 @@ public sealed partial class RcloneCliHost
             : Status(RcloneCliHealth.Ready, version, "ready", remotes);
     }
 
+    public async Task<RcloneRemoteProbe> ProbeAsync(
+        string remoteName,
+        string? remotePath,
+        CancellationToken cancellationToken = default)
+    {
+        var remote = NormalizeRemoteName(remoteName);
+        var path = NormalizeRemotePath(remotePath);
+        var source = BuildRemoteSpec(remote, path);
+
+        var result = await RunAsync(
+                ["lsjson", source, "--stat", "--no-modtime", "--no-mimetype"],
+                _timeout,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!result.StartSucceeded)
+        {
+            return new RcloneRemoteProbe(false, "rclone-unavailable", result.OutputTruncated);
+        }
+
+        if (result.TimedOut)
+        {
+            return new RcloneRemoteProbe(false, "remote-probe-timeout", result.OutputTruncated);
+        }
+
+        if (result.ExitCode != 0)
+        {
+            return new RcloneRemoteProbe(
+                false,
+                ClassifyRemoteFailure(result) ?? "remote-probe-failed",
+                result.OutputTruncated);
+        }
+
+        return new RcloneRemoteProbe(true, null, result.OutputTruncated);
+    }
+
     public async Task<RcloneDirectoryListing> ListAsync(
         string remoteName,
         string? remotePath,
@@ -327,7 +368,9 @@ public sealed partial class RcloneCliHost
 
         if (result.ExitCode != 0)
         {
-            return ListingFailure("browse-failed", result.OutputTruncated);
+            return ListingFailure(
+                ClassifyRemoteFailure(result) ?? "browse-failed",
+                result.OutputTruncated);
         }
 
         if (!TryParseListing(result.StandardOutput, out var entries, out var truncated))
@@ -603,6 +646,26 @@ public sealed partial class RcloneCliHost
         string code,
         bool truncated)
         => new(false, Array.Empty<CloudBrowserEntry>(), code, truncated);
+
+    internal static string? ClassifyRemoteFailure(RcloneCommandResult result)
+    {
+        var combined = string.Concat(
+            result.StandardError,
+            "\n",
+            result.StandardOutput);
+
+        if (combined.Contains("invalid_grant", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("couldn't fetch token", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("could not fetch token", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("token expired", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("failed to refresh token", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("config reconnect", StringComparison.OrdinalIgnoreCase))
+        {
+            return "remote-authentication-required";
+        }
+
+        return null;
+    }
 
     private static string? TryExtractVersion(string output)
     {

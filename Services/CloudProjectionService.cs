@@ -62,7 +62,41 @@ public sealed class CloudProjectionService
 
         if (!config.CloudProjectionEnabled)
         {
-            return StatusForDisabled(config, cliStatus);
+            var disabledStatus = StatusForDisabled(config, cliStatus);
+            var selectedRemoteName = NormalizeOptional(config.CloudRemoteName);
+            if (cliStatus.Health != RcloneCliHealth.Ready || selectedRemoteName is null)
+            {
+                return disabledStatus;
+            }
+
+            var selectedRemote = FindRemote(cliStatus, selectedRemoteName);
+            if (selectedRemote is null)
+            {
+                return disabledStatus with
+                {
+                    Health = "degraded",
+                    Code = "selected-remote-missing",
+                };
+            }
+
+            var disabledRemoteProbe = await cli
+                .ProbeAsync(
+                    selectedRemoteName,
+                    NormalizeOptional(config.CloudRemotePath),
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            return disabledRemoteProbe.Success
+                ? disabledStatus with
+                {
+                    SelectedRemoteType = selectedRemote.Type,
+                }
+                : disabledStatus with
+                {
+                    Health = "degraded",
+                    Code = disabledRemoteProbe.ErrorCode ?? "remote-unavailable",
+                    SelectedRemoteType = selectedRemote.Type,
+                };
         }
 
         if (!TryResolveConfiguration(config, out var resolved, out var configurationCode))
@@ -121,11 +155,17 @@ public sealed class CloudProjectionService
             ? _libraryProjection.Inspect(resolved.LibraryName, resolved.ProjectionPath)
             : new CloudLibraryEnsureResult(false, false, "library-not-ready");
 
+        var remoteProbe = await cli
+            .ProbeAsync(resolved.RemoteName, resolved.RemotePath, cancellationToken)
+            .ConfigureAwait(false);
+
         return new CloudProjectionStatusResponse(
             Configured: true,
             Enabled: true,
-            Health: HealthName(cliStatus.Health),
-            Code: cliStatus.Code,
+            Health: remoteProbe.Success ? HealthName(cliStatus.Health) : "degraded",
+            Code: remoteProbe.Success
+                ? cliStatus.Code
+                : remoteProbe.ErrorCode ?? "remote-unavailable",
             RcloneVersion: cliStatus.Version,
             RemoteCount: cliStatus.Remotes.Count,
             SelectedRemote: resolved.RemoteName,
@@ -214,7 +254,9 @@ public sealed class CloudProjectionService
             return "mkdir-timeout";
         }
 
-        return result.ExitCode == 0 ? "created" : "mkdir-failed";
+        return result.ExitCode == 0
+            ? "created"
+            : RcloneCliHost.ClassifyRemoteFailure(result) ?? "mkdir-failed";
     }
 
     public async Task<CloudProjectionReconcileResponse> ReconcileAsync(
@@ -285,7 +327,9 @@ public sealed class CloudProjectionService
                 _logger.LogWarning(
                     "rclone cloud copy failed with exit code {ExitCode}",
                     copy.ExitCode);
-                return Reconcile("failed", "copy-failed");
+                return Reconcile(
+                    "failed",
+                    RcloneCliHost.ClassifyRemoteFailure(copy) ?? "copy-failed");
             }
 
             root = InspectProjectionRoot(resolved, remote.Type, createIfMissing: false);
