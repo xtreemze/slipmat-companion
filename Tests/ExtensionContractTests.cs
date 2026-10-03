@@ -66,6 +66,7 @@ public class ExtensionContractTests
             "Jellyfin.Plugin.AudioGateway.Api.IptvOrgLiveTvController",
             "Jellyfin.Plugin.AudioGateway.Api.IptvOrgGuideResourceFetchController",
             "Jellyfin.Plugin.AudioGateway.Api.CloudProjectionController",
+            "Jellyfin.Plugin.AudioGateway.Api.CloudMigrationController",
         };
 
         Assert.All(
@@ -174,6 +175,15 @@ public class ExtensionContractTests
             parameter => Assert.DoesNotContain(
                 new[] { "token", "password", "credential", "cookie", "authorization", "secret" },
                 fragment => parameter.Name?.Contains(fragment, StringComparison.OrdinalIgnoreCase) == true));
+    }
+
+    [Fact]
+    public void CloudMigrationController_RequiresElevation()
+    {
+        var controller = typeof(CloudMigrationController);
+        var authorize = Assert.IsType<AuthorizeAttribute>(
+            Attribute.GetCustomAttribute(controller, typeof(AuthorizeAttribute)));
+        Assert.Equal(Policies.RequiresElevation, authorize.Policy);
     }
 
     [Fact]

@@ -17,11 +17,25 @@ public interface ICloudProjectionConfigurationSource
     PluginConfiguration GetCurrent();
 }
 
-public sealed class PluginCloudProjectionConfigurationSource
+public interface ICloudProjectionConfigurationStore
     : ICloudProjectionConfigurationSource
+{
+    void Save(PluginConfiguration configuration);
+}
+
+public sealed class PluginCloudProjectionConfigurationSource
+    : ICloudProjectionConfigurationStore
 {
     public PluginConfiguration GetCurrent()
         => Plugin.Instance?.Configuration ?? new PluginConfiguration();
+
+    public void Save(PluginConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        var plugin = Plugin.Instance
+            ?? throw new InvalidOperationException("Audio Gateway plugin is not initialized.");
+        plugin.SaveConfiguration(configuration);
+    }
 }
 
 /// <summary>
@@ -626,6 +640,78 @@ public sealed class CloudProjectionService
         var rightPrefix = string.Concat(rightFull, Path.DirectorySeparatorChar);
         return leftFull.StartsWith(rightPrefix, comparison)
             || rightFull.StartsWith(leftPrefix, comparison);
+    }
+
+    public async Task<string> UnmountAsync(
+        string projectionId,
+        CancellationToken cancellationToken = default)
+    {
+        await _reconcileGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var rootConfig = _configurationSource.GetCurrent();
+            if (!TrySelectProjectionConfiguration(
+                    rootConfig,
+                    projectionId,
+                    out var config,
+                    out var selectionCode))
+            {
+                return selectionCode;
+            }
+
+            if (!TryResolveConfiguration(config, out var resolved, out var configurationCode))
+            {
+                return configurationCode;
+            }
+
+            var cli = new RcloneCliHost(runner: _runner);
+            var unmount = await cli
+                .UnmountAsync(resolved.ProjectionPath, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!unmount.StartSucceeded)
+            {
+                return string.Equals(
+                        unmount.StandardError,
+                        "managed-unmount-unsupported",
+                        StringComparison.Ordinal)
+                    ? "managed-unmount-unsupported"
+                    : "unmount-helper-unavailable";
+            }
+
+            if (unmount.TimedOut)
+            {
+                return "unmount-timeout";
+            }
+
+            if (unmount.ExitCode != 0)
+            {
+                return "unmount-failed";
+            }
+
+            TryDeleteProjectionMarker(GetMountMarkerPath(resolved.ProjectionPath));
+            return "unmounted";
+        }
+        finally
+        {
+            _reconcileGate.Release();
+        }
+    }
+
+    private static void TryDeleteProjectionMarker(string markerPath)
+    {
+        try
+        {
+            if (File.Exists(markerPath))
+            {
+                File.Delete(markerPath);
+            }
+        }
+        catch
+        {
+            // Marker cleanup is best-effort after a confirmed unmount. A stale
+            // marker will fail closed on the next projection inspection.
+        }
     }
 
     private static RcloneRemoteDescriptor? FindRemote(

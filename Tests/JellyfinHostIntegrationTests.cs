@@ -67,8 +67,13 @@ public class JellyfinHostIntegrationTests
                 && descriptor.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(
             services,
-            descriptor => descriptor.ServiceType == typeof(ICloudProjectionConfigurationSource)
+            descriptor => descriptor.ServiceType == typeof(PluginCloudProjectionConfigurationSource)
                 && descriptor.ImplementationType == typeof(PluginCloudProjectionConfigurationSource)
+                && descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            descriptor => descriptor.ServiceType == typeof(ICloudProjectionConfigurationSource)
+                && descriptor.ImplementationFactory is not null
                 && descriptor.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(
             services,
@@ -83,6 +88,26 @@ public class JellyfinHostIntegrationTests
             services,
             descriptor => descriptor.ServiceType == typeof(IScheduledTask)
                 && descriptor.ImplementationType == typeof(CloudProjectionRefreshTask)
+                && descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            descriptor => descriptor.ServiceType == typeof(ICloudProjectionConfigurationStore)
+                && descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            descriptor => descriptor.ServiceType == typeof(CloudMigrationStore)
+                && descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            descriptor => descriptor.ServiceType == typeof(CloudMigrationQueue)
+                && descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            descriptor => descriptor.ServiceType == typeof(CloudMigrationCoordinator)
+                && descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            descriptor => descriptor.ServiceType == typeof(CloudMigrationWorker)
                 && descriptor.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(
             typeof(ServiceRegistrator).GetInterfaces(),

@@ -23,6 +23,29 @@ public class CloudConfigurationPageTests
     }
 
     [Fact]
+    public void CloudConfigurationPage_ExposesStagedMigrationWorkbench()
+    {
+        const string resourceName =
+            "Jellyfin.Plugin.AudioGateway.Configuration.configPage.html";
+        using var stream = typeof(Plugin).Assembly.GetManifestResourceStream(resourceName);
+        Assert.NotNull(stream);
+        using var reader = new StreamReader(stream!);
+        var html = reader.ReadToEnd();
+
+        Assert.Contains("CloudMigrationDirection", html);
+        Assert.Contains("Prepare all eligible", html);
+        Assert.Contains("Prepare migration", html);
+        Assert.Contains("Cut over", html);
+        Assert.Contains("Rollback to local", html);
+        Assert.Contains("Finalize and free local space", html);
+        Assert.Contains("confirmationPath", html);
+        Assert.Contains("local-to-vfs", html);
+        Assert.Contains("vfs-to-local", html);
+        Assert.Contains("copy and exact verification only", html);
+        Assert.Contains("Cloud media is never deleted", html);
+    }
+
+    [Fact]
     public void CloudConfigurationPage_OnboardsMultiLibraryVfsAndExplainsScanBoundary()
     {
         const string resourceName =

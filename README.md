@@ -79,6 +79,13 @@ Presence of experimental source code does not grant product authority. The capab
 | GET | `/Plugins/AudioGateway/cloud/rclone/browse` | Elevated structured browse of one configured rclone remote |
 | POST | `/Plugins/AudioGateway/cloud/rclone/mkdir` | Elevated creation of a folder within a configured rclone remote |
 | POST | `/Plugins/AudioGateway/cloud/rclone/reconcile` | Elevated preparation/refresh of the bounded read-only rclone VFS mount and Jellyfin projection |
+| GET | `/Plugins/AudioGateway/cloud/migrations/candidates?direction=...` | Elevated eligible-library inspection for staged local/VFS migration |
+| GET | `/Plugins/AudioGateway/cloud/migrations` | Elevated durable migration job status |
+| POST | `/Plugins/AudioGateway/cloud/migrations` | Elevated start of one additive copy + exact verification job |
+| POST | `/Plugins/AudioGateway/cloud/migrations/bulk` | Elevated preparation of all eligible mapped libraries; no automatic cutover or cleanup |
+| POST | `/Plugins/AudioGateway/cloud/migrations/{jobId}/cutover` | Elevated final copy/check and explicit storage-authority cutover |
+| POST | `/Plugins/AudioGateway/cloud/migrations/{jobId}/rollback` | Elevated rollback from VFS to the retained local source |
+| POST | `/Plugins/AudioGateway/cloud/migrations/{jobId}/finalize` | Elevated explicit deletion of the retained local rollback backup after exact-path confirmation |
 
 Podcast routes never accept a user ID parameter. The Jellyfin `Jellyfin-UserId` authentication claim selects the storage namespace for subscription replication; a client payload cannot address another user's subscriptions.
 
