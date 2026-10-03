@@ -15,7 +15,7 @@ public sealed record CloudLibraryEnsureResult(
     string Code);
 
 /// <summary>
-/// Narrow Jellyfin-library projection boundary for a completed local Cloud materialization.
+/// Narrow Jellyfin-library projection boundary for a ready read-only cloud mount.
 /// </summary>
 public interface ICloudLibraryProjection
 {
@@ -33,7 +33,7 @@ public interface ICloudLibraryProjection
 }
 
 /// <summary>
-/// Projects one completed local cloud projection into Jellyfin's supported virtual-folder API.
+/// Projects one read-only cloud mount into Jellyfin's supported virtual-folder API.
 /// It never deletes libraries or remote/local media.
 /// </summary>
 public sealed class JellyfinCloudLibraryProjection : ICloudLibraryProjection
@@ -101,8 +101,8 @@ public sealed class JellyfinCloudLibraryProjection : ICloudLibraryProjection
         var normalizedPath = NormalizePath(projectionPath);
         var options = new LibraryOptions
         {
-            // The cloud materializer controls when a complete projection may be scanned.
-            // Realtime monitoring could observe partially downloaded files.
+            // Remote namespace changes are reconciled by the companion's scheduled scan.
+            // Do not rely on filesystem watcher semantics across a VFS mount.
             EnableRealtimeMonitor = false,
             PathInfos = [new MediaPathInfo(normalizedPath)],
         };
