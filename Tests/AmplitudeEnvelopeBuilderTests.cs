@@ -2,6 +2,7 @@ using System;
 using System.Buffers.Binary;
 using System.Linq;
 using Jellyfin.Plugin.AudioGateway.Services;
+using Jellyfin.Plugin.AudioGateway.Services.Analysis;
 using Xunit;
 
 namespace Jellyfin.Plugin.AudioGateway.Tests;
