@@ -97,7 +97,7 @@ The mount is read-only. Do not enable a workflow that expects Jellyfin to write 
 
 Automatic Companion analysis deliberately skips every cloud-mounted item, across every configured VFS profile. Otherwise a scheduled backfill or library-change callback could force remote files through FFmpeg and defeat the bounded-cache design. A Slipmat artifact/track request can still enqueue analysis for the specific item being used; that explicit read may temporarily cache the full source file.
 
-Jellyfin's own catalog/library scan is a different operation: it enumerates the mounted namespace so remote files can exist in the Jellyfin catalog and may perform lightweight media reads required by Jellyfin. Audio Gateway does not describe that as analysis or promise that a Jellyfin catalog refresh is payload-free. The protection here is that Companion waveform/peak/spectral/loudness/rhythm backfill never walks uncached VFS media in the background.
+Jellyfin's own catalog/library scan is a different operation: it enumerates the mounted namespace so remote files can exist in the Jellyfin catalog and may perform lightweight media reads required by Jellyfin. Audio Gateway does not describe that as analysis or promise that a Jellyfin catalog refresh is payload-free. Before an existing VFS library is scanned, Audio Gateway forces cloud-safe Jellyfin library options: realtime monitoring, LUFS scanning, chapter-image extraction, trickplay extraction, local metadata saving, and subtitle/lyrics/trickplay writes beside media are disabled. Reconciliation fails closed if those settings cannot be applied. The Companion waveform/peak/spectral/loudness/rhythm backfill also never walks VFS media in the background.
 
 ## Namespace refresh
 
