@@ -48,6 +48,18 @@ public sealed record CloudProjectionStatusResponse(
     [property: JsonPropertyName("libraryName")] string? LibraryName,
     [property: JsonPropertyName("collectionType")] string? CollectionType);
 
+public sealed record CloudLibraryScanPolicy(
+    [property: JsonPropertyName("enableRealtimeMonitor")] bool EnableRealtimeMonitor,
+    [property: JsonPropertyName("enableLufsScan")] bool EnableLufsScan,
+    [property: JsonPropertyName("enableChapterImageExtraction")] bool EnableChapterImageExtraction,
+    [property: JsonPropertyName("extractChapterImagesDuringLibraryScan")] bool ExtractChapterImagesDuringLibraryScan,
+    [property: JsonPropertyName("enableTrickplayImageExtraction")] bool EnableTrickplayImageExtraction,
+    [property: JsonPropertyName("extractTrickplayImagesDuringLibraryScan")] bool ExtractTrickplayImagesDuringLibraryScan,
+    [property: JsonPropertyName("saveLocalMetadata")] bool SaveLocalMetadata,
+    [property: JsonPropertyName("saveSubtitlesWithMedia")] bool SaveSubtitlesWithMedia,
+    [property: JsonPropertyName("saveLyricsWithMedia")] bool SaveLyricsWithMedia,
+    [property: JsonPropertyName("saveTrickplayWithMedia")] bool SaveTrickplayWithMedia);
+
 public sealed record CloudProjectionReconcileResponse(
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("code")] string Code,
