@@ -327,7 +327,9 @@ public sealed partial class RcloneCliHost
 
         if (result.ExitCode != 0)
         {
-            return ListingFailure("browse-failed", result.OutputTruncated);
+            return ListingFailure(
+                ClassifyRemoteFailure(result) ?? "browse-failed",
+                result.OutputTruncated);
         }
 
         if (!TryParseListing(result.StandardOutput, out var entries, out var truncated))
@@ -603,6 +605,26 @@ public sealed partial class RcloneCliHost
         string code,
         bool truncated)
         => new(false, Array.Empty<CloudBrowserEntry>(), code, truncated);
+
+    internal static string? ClassifyRemoteFailure(RcloneCommandResult result)
+    {
+        var combined = string.Concat(
+            result.StandardError,
+            "\n",
+            result.StandardOutput);
+
+        if (combined.Contains("invalid_grant", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("couldn't fetch token", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("could not fetch token", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("token expired", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("failed to refresh token", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("config reconnect", StringComparison.OrdinalIgnoreCase))
+        {
+            return "remote-authentication-required";
+        }
+
+        return null;
+    }
 
     private static string? TryExtractVersion(string output)
     {
