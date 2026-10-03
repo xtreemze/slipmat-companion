@@ -48,7 +48,10 @@ internal sealed class RhythmAccumulator
 
     public void PushFrame(ReadOnlySpan<float> samples)
     {
-        if (samples.IsEmpty)
+        // Match Rust RhythmAccumulator::push_interleaved: an invalid zero
+        // source rate produces no evidence rather than attempting to advance
+        // zero-width analysis-frame boundaries.
+        if (_sampleRate <= 0 || samples.IsEmpty)
         {
             return;
         }
@@ -76,6 +79,14 @@ internal sealed class RhythmAccumulator
 
     public RhythmAnalysisResult Complete(TrackBoundaryAnalysis? boundaries)
     {
+        if (_sampleRate <= 0 || _sourceFrameIndex == 0)
+        {
+            return RhythmGridAnalyzer.Analyze(
+                Array.Empty<RhythmEnergyFrame>(),
+                FramesPerSecond,
+                0d);
+        }
+
         if (_frameHasData)
         {
             Emit();
