@@ -222,6 +222,14 @@ public sealed class IntegratedAudioAnalyzer
         var storeRoot = RuntimeSettings.ResolveStoreRoot(config);
         var subject = _subjectFactory.ForItem(audio.Id);
         var storeKey = subject.StoreKey();
+        var sourceStamp = AnalysisSourceStamp.Capture(audio.Path);
+        if (sourceStamp is null)
+        {
+            return new IntegratedAnalysisResult(
+                IntegratedAnalysisStatus.Failed,
+                "Source file metadata is unavailable.");
+        }
+
         var fingerprint = await FingerprintAsync(audio.Path, cancellationToken).ConfigureAwait(false);
 
         var existing = _sidecarLoader.LoadSidecarFromStore(storeRoot, storeKey);
@@ -233,11 +241,18 @@ public sealed class IntegratedAudioAnalyzer
             HasAllAmplitudeTiers(storeRoot, storeKey) &&
             HasCompleteHigherOrderAnalysis(storeRoot, storeKey, matchingExisting))
         {
+            await AnalysisSourceStamp.WriteAsync(
+                    storeRoot,
+                    storeKey,
+                    sourceStamp,
+                    cancellationToken)
+                .ConfigureAwait(false);
             return new IntegratedAnalysisResult(IntegratedAnalysisStatus.Skipped);
         }
 
         var sidecarPath = StorePaths.SidecarPath(storeRoot, storeKey);
         TryDelete(sidecarPath);
+        AnalysisSourceStamp.Delete(storeRoot, storeKey);
 
         try
         {
@@ -250,6 +265,14 @@ public sealed class IntegratedAudioAnalyzer
                 return new IntegratedAnalysisResult(
                     IntegratedAnalysisStatus.Failed,
                     "FFmpeg decoded no audio samples.");
+            }
+
+            var finalSourceStamp = AnalysisSourceStamp.Capture(audio.Path);
+            if (finalSourceStamp is null || finalSourceStamp != sourceStamp)
+            {
+                return new IntegratedAnalysisResult(
+                    IntegratedAnalysisStatus.Failed,
+                    "Source file changed while analysis was running.");
             }
 
             var shortEtag = $"\"{fingerprint[..8]}\"";
@@ -301,6 +324,12 @@ public sealed class IntegratedAudioAnalyzer
                 SpectralAnalysisVersion: SpectralArtifactEncoder.FormatVersion);
 
             var sidecarBytes = JsonSerializer.SerializeToUtf8Bytes(sidecar, SidecarJsonOptions);
+            await AnalysisSourceStamp.WriteAsync(
+                    storeRoot,
+                    storeKey,
+                    finalSourceStamp,
+                    cancellationToken)
+                .ConfigureAwait(false);
             await AtomicWriteAsync(sidecarPath, sidecarBytes, cancellationToken).ConfigureAwait(false);
 
             _logger.LogInformation(
@@ -323,6 +352,7 @@ public sealed class IntegratedAudioAnalyzer
                 "Integrated analysis failed for Jellyfin item {ItemId}",
                 audio.Id);
             TryDelete(sidecarPath);
+            AnalysisSourceStamp.Delete(storeRoot, storeKey);
             return new IntegratedAnalysisResult(
                 IntegratedAnalysisStatus.Failed,
                 ex.GetType().Name);
