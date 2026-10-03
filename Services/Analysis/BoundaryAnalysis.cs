@@ -70,6 +70,12 @@ internal sealed class BoundaryAccumulator
     public BoundaryAccumulator(int sampleRate, int channelCount)
     {
         _sampleRate = sampleRate;
+        if (sampleRate <= 0)
+        {
+            _splitters = Array.Empty<AnalysisBandSplitter>();
+            return;
+        }
+
         var lanes = Math.Clamp(channelCount, 1, 2);
         _splitters = new AnalysisBandSplitter[lanes];
         for (var lane = 0; lane < lanes; lane++)
@@ -80,7 +86,10 @@ internal sealed class BoundaryAccumulator
 
     public void PushFrame(ReadOnlySpan<float> samples)
     {
-        if (samples.IsEmpty)
+        // Match Rust BoundaryEnvelopeAccumulator::push_interleaved: invalid
+        // zero-rate input produces no evidence and never advances zero-width
+        // analysis-frame boundaries.
+        if (_sampleRate <= 0 || samples.IsEmpty)
         {
             return;
         }
