@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -57,6 +59,51 @@ public static class RuntimeSettings
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Jellyfin.AudioGateway");
     }
+    /// <summary>
+    /// Returns normalized cloud-library profiles. Existing single-projection
+    /// configuration is projected as one stable legacy profile.
+    /// </summary>
+    public static IReadOnlyList<CloudLibraryProfile> GetCloudLibraries(PluginConfiguration config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+
+        var configured = (config.CloudLibraries ?? Array.Empty<CloudLibraryProfile>())
+            .Where(profile => profile is not null)
+            .Select(NormalizeCloudLibrary)
+            .ToArray();
+        if (configured.Length > 0)
+        {
+            return configured;
+        }
+
+        if (!config.CloudProjectionEnabled
+            && string.IsNullOrWhiteSpace(config.CloudRemoteName)
+            && string.IsNullOrWhiteSpace(config.CloudRemotePath)
+            && string.IsNullOrWhiteSpace(config.CloudProjectionPath))
+        {
+            return Array.Empty<CloudLibraryProfile>();
+        }
+
+        return
+        [
+            new CloudLibraryProfile
+            {
+                Id = "legacy",
+                Enabled = config.CloudProjectionEnabled,
+                RemoteName = config.CloudRemoteName ?? string.Empty,
+                RemotePath = config.CloudRemotePath ?? string.Empty,
+                ProjectionPath = config.CloudProjectionPath ?? string.Empty,
+                CachePath = config.CloudCachePath ?? string.Empty,
+                CacheMaxSizeGiB = config.CloudCacheMaxSizeGiB,
+                CacheMaxAgeHours = config.CloudCacheMaxAgeHours,
+                CacheMinFreeSpaceGiB = config.CloudCacheMinFreeSpaceGiB,
+                LibraryName = config.CloudLibraryName ?? "Cloud Media",
+                CollectionType = config.CloudCollectionType ?? "music",
+                AutoCreateLibrary = config.CloudAutoCreateLibrary,
+            },
+        ];
+    }
+
     /// <summary>
     /// Resolves the local read-only mount point for one configured rclone root.
     /// A configured absolute override wins. Fresh installs use a deterministic
@@ -143,45 +190,108 @@ public static class RuntimeSettings
             return false;
         }
 
-        try
+        foreach (var profile in GetCloudLibraries(config))
         {
-            string projectionRoot;
-            if (!string.IsNullOrWhiteSpace(config.CloudProjectionPath))
+            try
             {
-                projectionRoot = Path.GetFullPath(config.CloudProjectionPath.Trim());
-            }
-            else
-            {
-                if (string.IsNullOrWhiteSpace(config.CloudRemoteName))
+                string projectionRoot;
+                if (!string.IsNullOrWhiteSpace(profile.ProjectionPath))
                 {
-                    return false;
+                    projectionRoot = Path.GetFullPath(profile.ProjectionPath.Trim());
+                }
+                else
+                {
+                    if (string.IsNullOrWhiteSpace(profile.RemoteName))
+                    {
+                        continue;
+                    }
+
+                    projectionRoot = ResolveCloudProjectionPath(
+                        ProfileAsLegacyConfiguration(profile),
+                        profile.RemoteName,
+                        profile.RemotePath,
+                        jellyfinDataPath ?? Plugin.Instance?.HostApplicationPaths.DataPath);
                 }
 
-                projectionRoot = ResolveCloudProjectionPath(
-                    config,
-                    config.CloudRemoteName,
-                    config.CloudRemotePath ?? string.Empty,
-                    jellyfinDataPath ?? Plugin.Instance?.HostApplicationPaths.DataPath);
+                if (IsWithinPath(itemPath, projectionRoot))
+                {
+                    return true;
+                }
             }
-
-            var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectionRoot));
-            var candidate = Path.GetFullPath(itemPath);
-            var comparison = OperatingSystem.IsWindows()
-                ? StringComparison.OrdinalIgnoreCase
-                : StringComparison.Ordinal;
-
-            if (string.Equals(candidate, root, comparison))
+            catch
             {
-                return true;
+                // A malformed profile must not make an unrelated item look local.
             }
+        }
 
-            var prefix = string.Concat(root, Path.DirectorySeparatorChar);
-            return candidate.StartsWith(prefix, comparison);
-        }
-        catch
+        return false;
+    }
+
+    private static bool IsWithinPath(string itemPath, string projectionRoot)
+    {
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectionRoot));
+        var candidate = Path.GetFullPath(itemPath);
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        if (string.Equals(candidate, root, comparison))
         {
-            return false;
+            return true;
         }
+
+        var prefix = string.Concat(root, Path.DirectorySeparatorChar);
+        return candidate.StartsWith(prefix, comparison);
+    }
+
+    public static PluginConfiguration ProfileAsLegacyConfiguration(CloudLibraryProfile profile)
+        => new()
+        {
+            CloudProjectionEnabled = profile.Enabled,
+            CloudRemoteName = profile.RemoteName,
+            CloudRemotePath = profile.RemotePath,
+            CloudProjectionPath = profile.ProjectionPath,
+            CloudCachePath = profile.CachePath,
+            CloudCacheMaxSizeGiB = profile.CacheMaxSizeGiB,
+            CloudCacheMaxAgeHours = profile.CacheMaxAgeHours,
+            CloudCacheMinFreeSpaceGiB = profile.CacheMinFreeSpaceGiB,
+            CloudLibraryName = profile.LibraryName,
+            CloudCollectionType = profile.CollectionType,
+            CloudAutoCreateLibrary = profile.AutoCreateLibrary,
+        };
+
+    private static CloudLibraryProfile NormalizeCloudLibrary(CloudLibraryProfile profile)
+    {
+        var remoteName = profile.RemoteName?.Trim() ?? string.Empty;
+        var remotePath = profile.RemotePath?.Trim() ?? string.Empty;
+        var libraryName = profile.LibraryName?.Trim() ?? string.Empty;
+        var id = profile.Id?.Trim();
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            id = string.Concat(
+                "profile-",
+                CloudIdentityDigest(
+                    remoteName,
+                    string.Concat(remotePath, "\n", libraryName)));
+        }
+
+        return new CloudLibraryProfile
+        {
+            Id = id,
+            Enabled = profile.Enabled,
+            RemoteName = remoteName,
+            RemotePath = remotePath,
+            ProjectionPath = profile.ProjectionPath?.Trim() ?? string.Empty,
+            CachePath = profile.CachePath?.Trim() ?? string.Empty,
+            CacheMaxSizeGiB = profile.CacheMaxSizeGiB,
+            CacheMaxAgeHours = profile.CacheMaxAgeHours,
+            CacheMinFreeSpaceGiB = profile.CacheMinFreeSpaceGiB,
+            LibraryName = string.IsNullOrWhiteSpace(libraryName) ? "Cloud Media" : libraryName,
+            CollectionType = string.IsNullOrWhiteSpace(profile.CollectionType)
+                ? "music"
+                : profile.CollectionType.Trim(),
+            AutoCreateLibrary = profile.AutoCreateLibrary,
+        };
     }
 
     private static string CloudIdentityDigest(string remoteName, string remotePath)
