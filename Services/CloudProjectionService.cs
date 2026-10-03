@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -54,12 +55,43 @@ public sealed class CloudProjectionService
 
     public bool MountInProgress => Volatile.Read(ref _mountInProgress) != 0;
 
+    public Task<CloudProjectionStatusResponse> GetStatusAsync(
+        CancellationToken cancellationToken = default)
+        => GetStatusAsync(null, cancellationToken);
+
     public async Task<CloudProjectionStatusResponse> GetStatusAsync(
+        string? projectionId,
         CancellationToken cancellationToken = default)
     {
-        var config = _configurationSource.GetCurrent();
+        var rootConfig = _configurationSource.GetCurrent();
         var cli = new RcloneCliHost(runner: _runner);
         var cliStatus = await cli.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+
+        if (!TrySelectProjectionConfiguration(
+                rootConfig,
+                projectionId,
+                out var config,
+                out var selectionCode))
+        {
+            return new CloudProjectionStatusResponse(
+                Configured: false,
+                Enabled: false,
+                Health: "degraded",
+                Code: selectionCode,
+                RcloneVersion: cliStatus.Version,
+                RemoteCount: cliStatus.Remotes.Count,
+                SelectedRemote: null,
+                SelectedRemoteType: null,
+                RemotePath: null,
+                ProjectionPath: null,
+                ProjectionPathManaged: true,
+                MountInProgress: MountInProgress,
+                ProjectionPathReady: false,
+                ProjectionHasFiles: false,
+                LibraryReady: false,
+                LibraryName: null,
+                CollectionType: null);
+        }
 
         if (!config.CloudProjectionEnabled)
         {
@@ -260,13 +292,32 @@ public sealed class CloudProjectionService
             : RcloneCliHost.ClassifyRemoteFailure(result) ?? "mkdir-failed";
     }
 
+    public Task<CloudProjectionReconcileResponse> ReconcileAsync(
+        CancellationToken cancellationToken = default)
+        => ReconcileAsync(null, cancellationToken);
+
+    public IReadOnlyList<string> GetProjectionIds()
+        => RuntimeSettings.GetCloudLibraries(_configurationSource.GetCurrent())
+            .Select(profile => profile.Id)
+            .ToArray();
+
     public async Task<CloudProjectionReconcileResponse> ReconcileAsync(
+        string? projectionId,
         CancellationToken cancellationToken = default)
     {
         await _reconcileGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var config = _configurationSource.GetCurrent();
+            var rootConfig = _configurationSource.GetCurrent();
+            if (!TrySelectProjectionConfiguration(
+                    rootConfig,
+                    projectionId,
+                    out var config,
+                    out var selectionCode))
+            {
+                return Reconcile("blocked", selectionCode);
+            }
+
             if (!config.CloudProjectionEnabled)
             {
                 return Reconcile("disabled", "projection-disabled");
@@ -409,6 +460,150 @@ public sealed class CloudProjectionService
         {
             _reconcileGate.Release();
         }
+    }
+
+    private static bool TrySelectProjectionConfiguration(
+        PluginConfiguration rootConfig,
+        string? projectionId,
+        out PluginConfiguration projectionConfig,
+        out string code)
+    {
+        var profiles = RuntimeSettings.GetCloudLibraries(rootConfig);
+        if (profiles.Count == 0)
+        {
+            projectionConfig = rootConfig;
+            if (projectionId is null
+                || string.Equals(projectionId, "legacy", StringComparison.OrdinalIgnoreCase))
+            {
+                code = "configured";
+                return true;
+            }
+
+            code = "projection-not-found";
+            return false;
+        }
+
+        CloudLibraryProfile? selected;
+        if (string.IsNullOrWhiteSpace(projectionId))
+        {
+            selected = profiles[0];
+        }
+        else
+        {
+            var matches = profiles
+                .Where(profile => string.Equals(
+                    profile.Id,
+                    projectionId.Trim(),
+                    StringComparison.OrdinalIgnoreCase))
+                .Take(2)
+                .ToArray();
+            if (matches.Length == 0)
+            {
+                projectionConfig = new PluginConfiguration();
+                code = "projection-not-found";
+                return false;
+            }
+
+            if (matches.Length > 1)
+            {
+                projectionConfig = new PluginConfiguration();
+                code = "projection-id-conflict";
+                return false;
+            }
+
+            selected = matches[0];
+        }
+
+        if (HasStorageConflict(rootConfig, selected, profiles))
+        {
+            projectionConfig = new PluginConfiguration();
+            code = "projection-storage-conflict";
+            return false;
+        }
+
+        projectionConfig = RuntimeSettings.ProfileAsLegacyConfiguration(selected);
+        code = "configured";
+        return true;
+    }
+
+    private static bool HasStorageConflict(
+        PluginConfiguration rootConfig,
+        CloudLibraryProfile selected,
+        IReadOnlyList<CloudLibraryProfile> profiles)
+    {
+        if (!TryResolveProfileStorage(selected, out var selectedMount, out var selectedCache))
+        {
+            return false;
+        }
+
+        foreach (var other in profiles)
+        {
+            if (ReferenceEquals(other, selected)
+                || string.Equals(other.Id, selected.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!TryResolveProfileStorage(other, out var otherMount, out var otherCache))
+            {
+                continue;
+            }
+
+            if (PathsOverlap(selectedMount, otherMount)
+                || PathsOverlap(selectedCache, otherCache)
+                || PathsOverlap(selectedMount, otherCache)
+                || PathsOverlap(selectedCache, otherMount))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryResolveProfileStorage(
+        CloudLibraryProfile profile,
+        out string mountPath,
+        out string cachePath)
+    {
+        mountPath = string.Empty;
+        cachePath = string.Empty;
+        try
+        {
+            var config = RuntimeSettings.ProfileAsLegacyConfiguration(profile);
+            mountPath = RuntimeSettings.ResolveCloudProjectionPath(
+                config,
+                profile.RemoteName,
+                profile.RemotePath);
+            cachePath = RuntimeSettings.ResolveCloudCachePath(
+                config,
+                profile.RemoteName,
+                profile.RemotePath,
+                Plugin.Instance?.HostApplicationPaths.DataPath);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool PathsOverlap(string left, string right)
+    {
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        var leftFull = Path.TrimEndingDirectorySeparator(Path.GetFullPath(left));
+        var rightFull = Path.TrimEndingDirectorySeparator(Path.GetFullPath(right));
+        if (string.Equals(leftFull, rightFull, comparison))
+        {
+            return true;
+        }
+
+        var leftPrefix = string.Concat(leftFull, Path.DirectorySeparatorChar);
+        var rightPrefix = string.Concat(rightFull, Path.DirectorySeparatorChar);
+        return leftFull.StartsWith(rightPrefix, comparison)
+            || rightFull.StartsWith(leftPrefix, comparison);
     }
 
     private static RcloneRemoteDescriptor? FindRemote(
