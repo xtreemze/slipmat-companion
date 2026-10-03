@@ -688,7 +688,21 @@
                 if (entries.length === 0) {
                     const empty = document.createElement('div');
                     empty.className = 'fieldDescription';
-                    empty.textContent = 'This folder is empty.';
+
+                    if (CloudBrowserCurrentPath.length === 0) {
+                        const remote = document.querySelector('#CloudRemoteName').value || 'REMOTE';
+                        empty.textContent =
+                            'This remote root is empty. Some rclone backends expose only the root, device, ' +
+                            'or mountpoint selected when the remote was configured. Verify the remote on the ' +
+                            'server with "rclone lsd ' + remote + ':" and, if necessary, edit that existing ' +
+                            'remote with "rclone config" to select the root that actually contains your files. ' +
+                            'If you change the backing account or root while keeping the same remote name, use ' +
+                            'a new local projection folder before syncing so previously projected media cannot ' +
+                            'be mixed with the new source.';
+                    } else {
+                        empty.textContent = 'This folder is empty.';
+                    }
+
                     container.appendChild(empty);
                     return;
                 }
