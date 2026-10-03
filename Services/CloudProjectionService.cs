@@ -62,7 +62,41 @@ public sealed class CloudProjectionService
 
         if (!config.CloudProjectionEnabled)
         {
-            return StatusForDisabled(config, cliStatus);
+            var disabledStatus = StatusForDisabled(config, cliStatus);
+            var selectedRemoteName = NormalizeOptional(config.CloudRemoteName);
+            if (cliStatus.Health != RcloneCliHealth.Ready || selectedRemoteName is null)
+            {
+                return disabledStatus;
+            }
+
+            var selectedRemote = FindRemote(cliStatus, selectedRemoteName);
+            if (selectedRemote is null)
+            {
+                return disabledStatus with
+                {
+                    Health = "degraded",
+                    Code = "selected-remote-missing",
+                };
+            }
+
+            var remoteProbe = await cli
+                .ProbeAsync(
+                    selectedRemoteName,
+                    NormalizeOptional(config.CloudRemotePath),
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            return remoteProbe.Success
+                ? disabledStatus with
+                {
+                    SelectedRemoteType = selectedRemote.Type,
+                }
+                : disabledStatus with
+                {
+                    Health = "degraded",
+                    Code = remoteProbe.ErrorCode ?? "remote-unavailable",
+                    SelectedRemoteType = selectedRemote.Type,
+                };
         }
 
         if (!TryResolveConfiguration(config, out var resolved, out var configurationCode))
