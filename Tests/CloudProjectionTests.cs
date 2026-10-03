@@ -17,6 +17,9 @@ public class CloudProjectionTests
     private const string RemotesJson =
         "[{\"name\":\"tele2:\",\"type\":\"jottacloud\",\"description\":\"Tele2 Cloud\",\"source\":\"file\"}]";
 
+    private const string ExpiredOAuthError =
+        "couldn't fetch token: invalid_grant: maybe token expired? - try refreshing with \"rclone config reconnect tele2:\"";
+
     [Fact]
     public async Task RcloneHost_StatusAndListing_UseStructuredAllowlistedCommands()
     {
@@ -85,6 +88,68 @@ public class CloudProjectionTests
     public void RcloneHost_RejectsUnsafeRemotePaths(string path)
     {
         Assert.Throws<ArgumentException>(() => RcloneCliHost.NormalizeRemotePath(path));
+    }
+
+    [Fact]
+    public async Task RcloneHost_ExpiredOAuth_ClassifiesAuthenticationRequired()
+    {
+        var runner = new FakeRunner(Result(1, stderr: ExpiredOAuthError));
+        var host = new RcloneCliHost(runner: runner);
+
+        var listing = await host.ListAsync("tele2", string.Empty);
+
+        Assert.False(listing.Success);
+        Assert.Equal("remote-authentication-required", listing.ErrorCode);
+    }
+
+    [Fact]
+    public async Task GetStatus_SelectedRemoteExpiredOAuth_IsDegradedButKeepsLocalProjectionState()
+    {
+        using var temp = new TempDirectory();
+        var projectionPath = Path.Combine(temp.Path, "projection");
+        Directory.CreateDirectory(projectionPath);
+
+        var config = EnabledConfig(projectionPath);
+        var runner = HealthyRunner(Result(1, stderr: ExpiredOAuthError));
+        var service = CreateService(config, runner, new FakeLibraryProjection());
+
+        var status = await service.GetStatusAsync();
+
+        Assert.Equal("degraded", status.Health);
+        Assert.Equal("remote-authentication-required", status.Code);
+        Assert.Equal("tele2", status.SelectedRemote);
+        Assert.Equal("jottacloud", status.SelectedRemoteType);
+        Assert.Equal(projectionPath, status.ProjectionPath);
+    }
+
+    [Fact]
+    public async Task CreateDirectory_ExpiredOAuth_ReturnsAuthenticationRequired()
+    {
+        var runner = HealthyRunner(Result(1, stderr: ExpiredOAuthError));
+        var service = CreateService(
+            new PluginConfiguration(),
+            runner,
+            new FakeLibraryProjection());
+
+        var code = await service.CreateDirectoryAsync("tele2", "Media/New");
+
+        Assert.Equal("remote-authentication-required", code);
+    }
+
+    [Fact]
+    public async Task Reconcile_ExpiredOAuth_ReturnsAuthenticationRequired()
+    {
+        using var temp = new TempDirectory();
+        var projectionPath = Path.Combine(temp.Path, "projection");
+        var config = EnabledConfig(projectionPath);
+        var runner = HealthyRunner(Result(1, stderr: ExpiredOAuthError));
+        var service = CreateService(config, runner, new FakeLibraryProjection());
+
+        var result = await service.ReconcileAsync();
+
+        Assert.Equal("failed", result.Status);
+        Assert.Equal("remote-authentication-required", result.Code);
+        Assert.False(result.CopyCompleted);
     }
 
     [Fact]
