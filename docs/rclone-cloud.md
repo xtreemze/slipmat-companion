@@ -97,7 +97,7 @@ The mount is read-only. Do not enable a workflow that expects Jellyfin to write 
 
 Automatic Companion analysis deliberately skips every cloud-mounted item, across every configured VFS profile. Otherwise a scheduled backfill or library-change callback could force remote files through FFmpeg and defeat the bounded-cache design. A Slipmat artifact/track request can still enqueue analysis for the specific item being used; that explicit read may temporarily cache the full source file.
 
-Jellyfin's own catalog/library scan is a different operation: it enumerates the mounted namespace so remote files can exist in the Jellyfin catalog and may perform lightweight media reads required by Jellyfin. Audio Gateway does not describe that as analysis or promise that a Jellyfin catalog refresh is payload-free. Before an existing VFS library is scanned, Audio Gateway forces cloud-safe Jellyfin library options: realtime monitoring, LUFS scanning, chapter-image extraction, trickplay extraction, local metadata saving, and subtitle/lyrics/trickplay writes beside media are disabled. Reconciliation fails closed if those settings cannot be applied. The Companion waveform/peak/spectral/loudness/rhythm backfill also never walks VFS media in the background.
+Jellyfin's own catalog/library scan is a different operation: it enumerates the mounted namespace so remote files can exist in the Jellyfin catalog and may perform lightweight media reads required by Jellyfin. Audio Gateway does not describe that as analysis or promise that a Jellyfin catalog refresh is payload-free. Making Jellyfin's catalog scan strictly cache-only would hide uncached cloud objects from the Jellyfin library, defeating the VFS namespace projection. Before an existing VFS library is scanned, Audio Gateway therefore forces cloud-safe Jellyfin library options: realtime monitoring, LUFS scanning, chapter-image extraction, trickplay extraction, local metadata saving, and subtitle/lyrics/trickplay writes beside media are disabled. Reconciliation fails closed if those settings cannot be applied. Companion-owned waveform/peak/spectral/loudness/rhythm scheduled work never traverses VFS media at all, so no Companion background scan can materialize an uncached cloud collection. Explicit playback or artifact requests may read an individual VFS item and populate its bounded cache entry.
 
 ## Namespace refresh
 
@@ -150,4 +150,14 @@ Migration is intentionally staged because the local source is the rollback autho
 
 ### Bulk migration
 
-Multiple libraries are migrated independently. A future bulk coordinator may run the same staged state machine for every eligible library, but it must never merge roots, silently skip verification, or turn local cleanup into a background eviction policy.
+The dashboard and migration API can prepare all eligible mapped libraries in one operation. Bulk preparation starts one independent staged migration job per eligible one-path Jellyfin library; it does not merge roots, skip exact verification, cut libraries over automatically, or delete local data.
+
+For a full local-to-cloud conversion:
+
+1. create one disabled VFS profile for each local Jellyfin library and assign an empty cloud destination;
+2. use **Prepare all eligible** to run additive copy + exact verification for every eligible library;
+3. review each job and cut it over only after it reaches **ready for cutover**;
+4. validate the VFS-backed Jellyfin library while the original local directory remains as its rollback backup;
+5. explicitly finalize each verified job to delete only that retained local rollback backup and reclaim disk space.
+
+Local cleanup is intentionally not a bulk background action. Destructive reclamation remains separately confirmed per verified library so one bad mapping cannot erase several rollback sources at once. VFS-to-local bulk preparation follows the same independent-job rule and never deletes the cloud source.

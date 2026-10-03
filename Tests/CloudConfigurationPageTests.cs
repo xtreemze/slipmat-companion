@@ -56,6 +56,8 @@ public class CloudConfigurationPageTests
         var html = reader.ReadToEnd();
 
         Assert.Contains("VFS setup and migration model", html);
+        Assert.Contains("Cached VFS media is analyzed only", html);
+        Assert.Contains("making that catalog refresh cache-only would hide", html);
         Assert.Contains("CloudLibraryProfile", html);
         Assert.Contains("Add VFS library", html);
         Assert.Contains("Remove profile", html);
