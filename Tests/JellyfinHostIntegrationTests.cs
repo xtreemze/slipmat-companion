@@ -85,6 +85,26 @@ public class JellyfinHostIntegrationTests
                 && descriptor.ImplementationType == typeof(CloudProjectionRefreshTask)
                 && descriptor.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(
+            services,
+            descriptor => descriptor.ServiceType == typeof(ICloudProjectionConfigurationStore)
+                && descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            descriptor => descriptor.ServiceType == typeof(CloudMigrationStore)
+                && descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            descriptor => descriptor.ServiceType == typeof(CloudMigrationQueue)
+                && descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            descriptor => descriptor.ServiceType == typeof(CloudMigrationCoordinator)
+                && descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            descriptor => descriptor.ServiceType == typeof(CloudMigrationWorker)
+                && descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
             typeof(ServiceRegistrator).GetInterfaces(),
             type => type == typeof(IPluginServiceRegistrator));
     }
