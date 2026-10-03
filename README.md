@@ -92,14 +92,16 @@ Configure remotes on the server with rclone first. Tele2 Cloud and other support
 
 The Jellyfin plugin settings provide:
 
+- multiple independently managed VFS library profiles;
 - a selector populated from `rclone listremotes --long --json`;
 - a structured remote file manager backed by `rclone lsjson`;
 - remote folder creation through `rclone mkdir`;
-- **Use this folder** selection for the media root;
-- a Jellyfin-managed read-only VFS mount path, with an advanced absolute-path override;
-- a separate disposable VFS cache path;
+- **Use this folder** selection for each profile's media root;
+- a Jellyfin-managed read-only VFS mount path per profile, with an advanced absolute-path override;
+- a separate disposable VFS cache path and policy per profile;
 - bounded cache policy with defaults of 16 GiB target maximum, 24-hour idle expiry, and 4 GiB minimum free space;
-- manual and six-hour scheduled mount/library reconciliation.
+- guided setup/migration explanations in the dashboard;
+- manual and six-hour scheduled per-profile mount/library reconciliation.
 
 The executable is operator-owned. Audio Gateway invokes `rclone` from Jellyfin's service `PATH`, or `SLIPMAT_RCLONE` when explicitly provided by the host. rclone's own `RCLONE_CONFIG` mechanism may point the service at the intended config file. The plugin never calls `config dump`, `config show`, or any other command that returns provider secrets. The Jellyfin service/container must also have the platform mount support required by `rclone mount` (for example FUSE on Linux); otherwise reconciliation fails closed rather than falling back to full-library copying.
 
@@ -125,7 +127,7 @@ The remote namespace is visible without pre-copying its media. A file is downloa
 
 Jellyfin catalog metadata remains in Jellyfin's own data/database storage. Slipmat waveform/spectral/analysis sidecars remain in the companion artifact store and are not deleted when a media cache entry is evicted. Artwork palette evidence remains a bounded derived cache keyed by artwork revision. The cloud media mount is read-only, so server-side metadata writers cannot mutate the remote media tree through this projection.
 
-The six-hour reconciliation task verifies/prepares the mount and queues a Jellyfin library scan; it does not copy the remote library. rclone's directory cache/polling provides nearer-term remote namespace visibility between scans.
+The six-hour reconciliation task independently verifies/prepares every enabled VFS profile and can queue Jellyfin namespace/catalog scans; it does not copy the remote libraries and does not run Companion analysis backfill. rclone's directory cache/polling provides nearer-term remote namespace visibility between scans. Scheduled waveform/peak/spectral/loudness/rhythm analysis skips every VFS mount; cloud analysis remains explicit/request-driven.
 
 Legacy materialized projections are deliberately not auto-migrated or deleted. A directory containing the former `.slipmat-rclone-cloud-projection.json` marker fails closed with `legacy-materialized-projection-present`. Verify the cloud source, remove/archive the old local copy manually or choose a new mount path, then reconcile again. This protects local bytes from destructive migration.
 
