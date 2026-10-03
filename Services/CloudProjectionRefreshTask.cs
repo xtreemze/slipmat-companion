@@ -28,7 +28,7 @@ public sealed class CloudProjectionRefreshTask : IScheduledTask, IConfigurableSc
     public string Key => "SlipmatRcloneCloudProjectionRefresh";
 
     public string Description =>
-        "Checks every configured bounded read-only rclone cloud mount and queues Jellyfin namespace scans without copying the media libraries or scheduling cloud analysis backfill.";
+        "Checks every configured bounded read-only rclone cloud mount without queuing Jellyfin catalog scans or cloud analysis backfill.";
 
     public string Category => "Slipmat";
 
@@ -58,7 +58,7 @@ public sealed class CloudProjectionRefreshTask : IScheduledTask, IConfigurableSc
             try
             {
                 var result = await _projectionService
-                    .ReconcileAsync(projectionId, cancellationToken)
+                    .ReconcileAsync(projectionId, cancellationToken, queueLibraryScan: false)
                     .ConfigureAwait(false);
 
                 _logger.LogInformation(
