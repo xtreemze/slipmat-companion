@@ -3,6 +3,7 @@ using System.IO;
 using System.Text.Json;
 using Jellyfin.Plugin.AudioGateway.Api;
 using Jellyfin.Plugin.AudioGateway.Models;
+using Jellyfin.Plugin.AudioGateway.Services;
 using Xunit;
 
 namespace Jellyfin.Plugin.AudioGateway.Tests;
@@ -151,6 +152,11 @@ public class ModelRoundTripTests
         Assert.Equal(AnalysisSubjectV1.SubjectVersion, sidecar.SubjectVersion);
         Assert.StartsWith("asv1-", sidecar.SubjectStoreKey);
         Assert.Equal(3, sidecar.WaveformRefs.Count);
+        Assert.All(
+            sidecar.WaveformRefs,
+            reference => Assert.Equal(
+                IntegratedAudioAnalyzer.AmplitudeVariant,
+                reference.Variant));
         Assert.NotNull(sidecar.Analysis);
         Assert.Equal("A Minor", sidecar.Analysis!.Harmonic.Key);
         Assert.Equal("8A", sidecar.Analysis.Harmonic.CamelotKey);
