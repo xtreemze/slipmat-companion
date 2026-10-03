@@ -334,3 +334,13 @@ This is the standalone Slipmat companion repository. Slipmat remains authoritati
 To publish a new version, update the same four-part version in `build.yaml` and `Directory.Build.props`, update the quoted `changelog` in `build.yaml`, and merge to `main`. CI and release publication then proceed automatically. Commits that keep an already-published version still run CI but do not create or replace a release. The Pages manifest preserves previously published versions for Jellyfin compatibility selection.
 
 The generated Pages artifact contains `manifest.json`. GitHub Pages is a distribution surface only; Slipmat must continue to work with stock Jellyfin when this companion is absent or unavailable.
+
+
+## Cross-repository fixture parity
+
+Slipmat owns the canonical portable analysis contracts and examples mirrored under `schema/examples/`.
+The companion keeps those checked-in copies so normal builds and tests remain deterministic and do not
+depend on network access. `schema/upstream-parity-files.txt` declares the shared mirror set, and the
+scheduled/manual `Upstream Fixture Parity` workflow checks those files byte-for-byte against
+`xtreemze/slipmat` `main`. Drift fails closed and requires a reviewed mirror update; the watchdog
+does not change product authority or make ordinary CI depend on the upstream repository.

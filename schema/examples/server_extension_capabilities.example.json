@@ -1,0 +1,20 @@
+{
+  "protocolVersion": "1.0.0",
+  "mode": "optional-acceleration",
+  "authoritative": false,
+  "serviceIdentity": "slipmat-audio-analyzer",
+  "producerVersion": "0.1.0",
+  "modules": {
+    "analysisArtifacts": true,
+    "analysisCoverage": true
+  },
+  "health": {
+    "analyzer": {
+      "status": "healthy"
+    },
+    "artifactStore": {
+      "status": "healthy"
+    }
+  },
+  "degradedReasons": []
+}
