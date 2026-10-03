@@ -3,103 +3,12 @@
 <head>
     <meta charset="utf-8">
     <title>Audio Gateway</title>
-    <style>
-        /*
-         * Jellyfin themes the surrounding dashboard. Keep this page scoped and
-         * derive control surfaces from the inherited foreground so the same
-         * rules remain legible in light, dark, and custom host themes.
-         */
-        #AudioGatewayConfigPage {
-            --slipmat-control-surface: transparent;
-            --slipmat-control-border: currentColor;
-            --slipmat-control-border-hover: currentColor;
-        }
-
-        @supports (color: color-mix(in srgb, currentColor 50%, transparent)) {
-            #AudioGatewayConfigPage {
-                --slipmat-control-surface: color-mix(in srgb, currentColor 8%, transparent);
-                --slipmat-control-border: color-mix(in srgb, currentColor 50%, transparent);
-                --slipmat-control-border-hover: color-mix(in srgb, currentColor 72%, transparent);
-            }
-        }
-
-        #AudioGatewayConfigPage :is(
-            input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]),
-            select,
-            textarea
-        ) {
-            background: var(--slipmat-control-surface) !important;
-            border-color: var(--slipmat-control-border) !important;
-            color: inherit !important;
-            caret-color: currentColor;
-        }
-
-        #AudioGatewayConfigPage :is(
-            input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]),
-            select,
-            textarea
-        ):hover {
-            border-color: var(--slipmat-control-border-hover) !important;
-        }
-
-        #AudioGatewayConfigPage :is(
-            input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]),
-            select,
-            textarea
-        ):focus-visible {
-            border-color: currentColor !important;
-            outline: 2px solid currentColor;
-            outline-offset: 2px;
-        }
-
-        #AudioGatewayConfigPage input::placeholder,
-        #AudioGatewayConfigPage textarea::placeholder {
-            color: inherit !important;
-            opacity: 0.78;
-        }
-
-        #AudioGatewayConfigPage :is(input, select, textarea):disabled {
-            opacity: 1;
-            cursor: not-allowed;
-        }
-
-        #AudioGatewayConfigPage input[type="checkbox"],
-        #AudioGatewayConfigPage input[type="radio"] {
-            color: inherit;
-            accent-color: currentColor;
-        }
-
-        #AudioGatewayConfigPage :is(
-            input[type="checkbox"],
-            input[type="radio"]
-        ):focus-visible {
-            outline: 2px solid currentColor;
-            outline-offset: 2px;
-        }
-
-        @media (forced-colors: active) {
-            #AudioGatewayConfigPage :is(input, select, textarea) {
-                background: Canvas !important;
-                border-color: ButtonText !important;
-                color: CanvasText !important;
-                forced-color-adjust: auto;
-            }
-
-            #AudioGatewayConfigPage :is(input, select, textarea):focus-visible {
-                outline-color: Highlight;
-            }
-
-            #AudioGatewayConfigPage :is(input[type="checkbox"], input[type="radio"]) {
-                accent-color: Highlight;
-            }
-        }
-    </style>
 </head>
 <body>
     <div id="AudioGatewayConfigPage"
          data-role="page"
          class="page type-interior pluginConfigurationPage"
-         data-require="emby-input,emby-button">
+         data-require="emby-input,emby-button,emby-select,emby-checkbox">
         <div data-role="content">
             <div class="content-primary">
                 <form id="AudioGatewayConfigForm">
@@ -147,20 +56,22 @@
                             Checking server-side rclone access…
                         </div>
 
-                        <div class="inputContainer">
-                            <label style="display:flex;gap:0.5em;align-items:center">
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
                                 <input id="CloudProjectionEnabled"
                                        name="CloudProjectionEnabled"
-                                       type="checkbox" />
+                                       type="checkbox"
+                                       is="emby-checkbox" />
                                 <span>Enable cloud media projection</span>
                             </label>
                         </div>
 
-                        <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="CloudRemoteName">rclone remote</label>
+                        <div class="selectContainer">
+                            <label class="selectLabel" for="CloudRemoteName">rclone remote</label>
                             <select id="CloudRemoteName"
                                     name="CloudRemoteName"
-                                    is="emby-select">
+                                    is="emby-select"
+                                    class="emby-select-withcolor emby-select">
                                 <option value="">No configured remote selected</option>
                             </select>
                             <div class="fieldDescription">
@@ -172,13 +83,13 @@
                             <button id="CloudRefreshRemotesButton"
                                     is="emby-button"
                                     type="button"
-                                    class="emby-button">
+                                    class="raised emby-button">
                                 <span>Refresh remotes</span>
                             </button>
                             <button id="CloudStatusButton"
                                     is="emby-button"
                                     type="button"
-                                    class="emby-button">
+                                    class="raised emby-button">
                                 <span>Check rclone</span>
                             </button>
                         </div>
@@ -199,19 +110,19 @@
                                 <button id="CloudBrowserGoButton"
                                         is="emby-button"
                                         type="button"
-                                        class="emby-button">
+                                        class="raised emby-button">
                                     <span>Open path</span>
                                 </button>
                                 <button id="CloudBrowserRootButton"
                                         is="emby-button"
                                         type="button"
-                                        class="emby-button">
+                                        class="raised emby-button">
                                     <span>Root</span>
                                 </button>
                                 <button id="CloudBrowserUpButton"
                                         is="emby-button"
                                         type="button"
-                                        class="emby-button">
+                                        class="raised emby-button">
                                     <span>Up</span>
                                 </button>
                                 <button id="CloudUseFolderButton"
@@ -234,7 +145,7 @@
                                     <button id="CloudCreateFolderButton"
                                             is="emby-button"
                                             type="button"
-                                            class="emby-button">
+                                            class="raised emby-button">
                                         <span>Create</span>
                                     </button>
                                 </div>
@@ -296,11 +207,12 @@
                                    placeholder="Cloud Media" />
                         </div>
 
-                        <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="CloudCollectionType">Library type</label>
+                        <div class="selectContainer">
+                            <label class="selectLabel" for="CloudCollectionType">Library type</label>
                             <select id="CloudCollectionType"
                                     name="CloudCollectionType"
-                                    is="emby-select">
+                                    is="emby-select"
+                                    class="emby-select-withcolor emby-select">
                                 <option value="music">Music</option>
                                 <option value="movies">Movies</option>
                                 <option value="tvshows">TV shows</option>
@@ -311,11 +223,12 @@
                             </select>
                         </div>
 
-                        <div class="inputContainer">
-                            <label style="display:flex;gap:0.5em;align-items:center">
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
                                 <input id="CloudAutoCreateLibrary"
                                        name="CloudAutoCreateLibrary"
-                                       type="checkbox" />
+                                       type="checkbox"
+                                       is="emby-checkbox" />
                                 <span>Create the Jellyfin library after a successful cloud copy</span>
                             </label>
                         </div>
@@ -390,20 +303,20 @@
                             <button id="IptvOrgRefreshCatalogButton"
                                     is="emby-button"
                                     type="button"
-                                    class="emby-button">
+                                    class="raised emby-button">
                                 <span>Refresh catalog</span>
                             </button>
                             <button id="IptvOrgPreviousButton"
                                     is="emby-button"
                                     type="button"
-                                    class="emby-button"
+                                    class="raised emby-button"
                                     disabled>
                                 <span>Previous</span>
                             </button>
                             <button id="IptvOrgNextButton"
                                     is="emby-button"
                                     type="button"
-                                    class="emby-button"
+                                    class="raised emby-button"
                                     disabled>
                                 <span>Next</span>
                             </button>
@@ -536,12 +449,8 @@
                     content.appendChild(details);
 
                     const selection = document.createElement('label');
-                    selection.style.display = 'flex';
-                    selection.style.alignItems = 'center';
-                    selection.style.gap = '0.5em';
-
-                    const checkbox = document.createElement('input');
-                    checkbox.type = 'checkbox';
+                    selection.innerHTML = '<input is="emby-checkbox" type="checkbox"><span>Subscribe</span>';
+                    const checkbox = selection.querySelector('input');
                     checkbox.checked = IptvOrgPublishedChannelIds.has(channel.id);
                     checkbox.setAttribute('aria-label', 'Subscribe ' + (channel.name || channel.id) + ' to Jellyfin Live TV');
                     checkbox.addEventListener('change', function() {
@@ -552,10 +461,6 @@
                         }
                     });
 
-                    const labelText = document.createElement('span');
-                    labelText.textContent = 'Subscribe';
-                    selection.appendChild(checkbox);
-                    selection.appendChild(labelText);
                     content.appendChild(selection);
 
                     row.appendChild(content);
@@ -720,7 +625,7 @@
                         const button = document.createElement('button');
                         button.type = 'button';
                         button.setAttribute('is', 'emby-button');
-                        button.className = 'emby-button';
+                        button.className = 'raised emby-button';
                         button.style.flex = '1 1 auto';
                         button.style.textAlign = 'left';
                         button.style.justifyContent = 'flex-start';
