@@ -637,7 +637,11 @@
                 const value = raw || {};
                 return {
                     Id: String(value.Id || value.id || fallbackId || newCloudProfileId()).trim(),
-                    Enabled: value.Enabled !== undefined ? value.Enabled === true : value.enabled !== false,
+                    Enabled: value.Enabled !== undefined
+                        ? value.Enabled === true
+                        : value.enabled !== undefined
+                            ? value.enabled === true
+                            : false,
                     RemoteName: String(value.RemoteName || value.remoteName || '').trim(),
                     RemotePath: String(value.RemotePath || value.remotePath || '').trim(),
                     ProjectionPath: String(value.ProjectionPath || value.projectionPath || '').trim(),
