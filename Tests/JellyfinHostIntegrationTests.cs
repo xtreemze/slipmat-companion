@@ -144,4 +144,17 @@ public class JellyfinHostIntegrationTests
         Assert.DoesNotContain("background-color: white", html, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void IntegratedAnalyzer_ProbesJellyfinFfmpegDirectlyForLoudnorm()
+    {
+        var ffmpeg = Environment.GetEnvironmentVariable("SLIPMAT_PARITY_FFMPEG");
+        Assert.False(
+            string.IsNullOrWhiteSpace(ffmpeg),
+            "SLIPMAT_PARITY_FFMPEG must point to the Jellyfin FFmpeg parity binary.");
+
+        Assert.True(
+            IntegratedAudioAnalyzer.ProbeLoudnormSupport(ffmpeg!),
+            "The Jellyfin FFmpeg parity binary must execute the loudnorm filter used by integrated analysis.");
+    }
+
 }

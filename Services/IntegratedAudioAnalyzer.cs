@@ -56,6 +56,9 @@ public sealed class IntegratedAudioAnalyzer
     private readonly SidecarLoader _sidecarLoader;
     private readonly ILogger<IntegratedAudioAnalyzer> _logger;
     private readonly SemaphoreSlim _analysisGate = new(1, 1);
+    private readonly object _availabilityGate = new();
+    private string? _probedEncoderPath;
+    private bool _probedAvailability;
 
     public IntegratedAudioAnalyzer(
         ILibraryManager library,
@@ -71,9 +74,106 @@ public sealed class IntegratedAudioAnalyzer
         _logger = logger;
     }
 
-    public bool IsAvailable =>
-        !string.IsNullOrWhiteSpace(_mediaEncoder.EncoderPath) &&
-        _mediaEncoder.SupportsFilter("loudnorm");
+    public bool IsAvailable
+    {
+        get
+        {
+            var encoderPath = _mediaEncoder.EncoderPath;
+            if (string.IsNullOrWhiteSpace(encoderPath))
+            {
+                return false;
+            }
+
+            lock (_availabilityGate)
+            {
+                if (!string.Equals(_probedEncoderPath, encoderPath, StringComparison.Ordinal))
+                {
+                    // Jellyfin's SupportsFilter surface intentionally reports only its
+                    // own transcoding allowlist, which does not include loudnorm even
+                    // when the managed FFmpeg binary supports it. Probe the binary we
+                    // will actually execute instead.
+                    _probedAvailability = ProbeLoudnormSupport(encoderPath);
+                    _probedEncoderPath = encoderPath;
+                    if (!_probedAvailability)
+                    {
+                        _logger.LogWarning(
+                            "Integrated analyzer could not execute the loudnorm filter with Jellyfin FFmpeg at {EncoderPath}",
+                            encoderPath);
+                    }
+                }
+
+                return _probedAvailability;
+            }
+        }
+    }
+
+    internal static bool ProbeLoudnormSupport(string encoderPath)
+    {
+        if (string.IsNullOrWhiteSpace(encoderPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = encoderPath,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                },
+            };
+
+            foreach (var argument in new[]
+            {
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel", "error",
+                "-f", "lavfi",
+                "-i", "anullsrc=r=48000:cl=stereo",
+                "-t", "0.02",
+                "-filter:a", "loudnorm",
+                "-f", "null",
+                "-",
+            })
+            {
+                process.StartInfo.ArgumentList.Add(argument);
+            }
+
+            if (!process.Start())
+            {
+                return false;
+            }
+
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+            if (!process.WaitForExit(5_000))
+            {
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                catch
+                {
+                    // Best effort. Availability remains false.
+                }
+
+                Task.WaitAll(new Task[] { stdoutTask, stderrTask }, 1_000);
+                return false;
+            }
+
+            Task.WaitAll(stdoutTask, stderrTask);
+            return process.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     public async Task<IntegratedAnalysisResult> AnalyzeItemAsync(
         Guid itemId,
