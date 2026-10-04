@@ -63,6 +63,8 @@ jobs:
           npm run build --prefix site
           test -f site/dist/index.html
           test -f site/dist/onboarding/index.html
+          test -f site/dist/story/index.html
+          npm run check:links --prefix site
 
       - name: Restore
         run: dotnet restore Jellyfin.Plugin.AudioGateway.slnx

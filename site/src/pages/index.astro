@@ -1,7 +1,8 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
 
-const base = import.meta.env.BASE_URL;
+const rawBase = import.meta.env.BASE_URL;
+const base = rawBase.endsWith("/") ? rawBase : rawBase + "/";
 const repositoryUrl = "https://github.com/xtreemze/slipmat-companion";
 ---
 
@@ -57,6 +58,34 @@ const repositoryUrl = "https://github.com/xtreemze/slipmat-companion";
         <p>Optional rclone VFS profiles expose remote namespaces read-only while keeping source media authoritative and local cache disposable.</p>
       </article>
     </div>
+  </section>
+
+  <section class="section" aria-labelledby="evolution-title">
+    <div class="section-intro">
+      <div>
+        <p class="eyebrow">Evolution</p>
+        <h2 id="evolution-title">Built by removing unnecessary authority.</h2>
+      </div>
+      <div>
+        <p>
+          Companion began on 1 October 2026 as a standalone Jellyfin extension for work that was useful
+          to precompute near the media server. Within days it grew from self-contained waveform analysis
+          into higher-order audio evidence, provider-neutral server bridges, artwork palettes and bounded
+          read-only cloud projection — while keeping Slipmat's playback model and Jellyfin's media catalog
+          authoritative.
+        </p>
+        <div class="actions">
+          <a class="button secondary" href={base + "story/"}>Read the project story</a>
+          <a class="button secondary" href="https://github.com/xtreemze/slipmat-companion/releases">Browse releases</a>
+        </div>
+      </div>
+    </div>
+    <ol class="milestone-preview">
+      <li><strong>01 Oct</strong><span>Standalone release, self-contained storage and integrated FFmpeg analysis.</span></li>
+      <li><strong>02 Oct</strong><span>Directory/guide bridges and a provider-neutral rclone cloud adapter.</span></li>
+      <li><strong>03 Oct</strong><span>Bounded VFS caching, artwork palettes and safer cloud diagnostics.</span></li>
+      <li><strong>Next</strong><span>More useful acceleration without turning Companion into a second media or playback authority.</span></li>
+    </ol>
   </section>
 
   <section class="section" aria-labelledby="install-title">

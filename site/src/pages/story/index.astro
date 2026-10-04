@@ -1,0 +1,154 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+
+const repositoryUrl = "https://github.com/xtreemze/slipmat-companion";
+---
+
+<BaseLayout
+  title="Slipmat Companion — project story and ambitions"
+  description="How Slipmat Companion evolved from a standalone Jellyfin accelerator into a broader optional server-side capability layer, and what it is trying to become."
+>
+  <section class="section" style="border-top:0; padding-top:clamp(3rem,8vw,6rem)">
+    <div class="story-hero">
+      <p class="eyebrow">Project story</p>
+      <h1 style="font-size:clamp(2.7rem,7vw,5.6rem)">Useful work, closer to the media.</h1>
+      <p class="lede">
+        Slipmat Companion exists to move expensive, repetitive or browser-constrained work nearer to Jellyfin
+        without moving product authority there. The project deliberately grows by adding optional capabilities
+        that can disappear without making Slipmat stop being Slipmat.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="history-title">
+    <div class="section-intro">
+      <div>
+        <p class="eyebrow">History</p>
+        <h2 id="history-title">Four days of rapid separation and hardening.</h2>
+      </div>
+      <p>
+        This repository was created on 1 October 2026, so its history is short but unusually dense.
+        The milestones below are drawn from published releases and merged repository work, not a retrospective roadmap.
+      </p>
+    </div>
+
+    <ol class="timeline">
+      <li>
+        <time datetime="2026-10-01">1 October 2026</time>
+        <h3>Standalone Companion</h3>
+        <p>
+          Audio Gateway shipped as its own Jellyfin plugin. Fresh installs became self-contained, using
+          Jellyfin-managed storage and Jellyfin's managed FFmpeg rather than requiring a separate analyzer service.
+          The same day, higher-order spectral, rhythm, harmonic-key and loudness evidence began moving server-side.
+        </p>
+        <div class="links">
+          <a href="https://github.com/xtreemze/slipmat-companion/releases/tag/v0.1.0.0">v0.1.0.0</a>
+          <a href="https://github.com/xtreemze/slipmat-companion/releases/tag/v0.2.0.0">v0.2.0.0</a>
+        </div>
+      </li>
+      <li>
+        <time datetime="2026-10-02">2 October 2026</time>
+        <h3>From analyzer to server-side capability layer</h3>
+        <p>
+          The plugin added bounded directory and XMLTV acquisition, Live TV publication and remote-media relay.
+          Provider-specific cloud work was then replaced by a generic rclone adapter, keeping credentials and remote
+          control outside the browser-facing contract.
+        </p>
+        <div class="links">
+          <a href="https://github.com/xtreemze/slipmat-companion/releases/tag/v0.3.0.0">v0.3.0.0</a>
+          <a href="https://github.com/xtreemze/slipmat-companion/releases/tag/v0.4.0.0">v0.4.0.0</a>
+        </div>
+      </li>
+      <li>
+        <time datetime="2026-10-03">3 October 2026</time>
+        <h3>Bounded cloud projection and richer metadata</h3>
+        <p>
+          Cloud media moved from additive local materialization to read-only rclone VFS projection with bounded cache.
+          Companion also began precomputing artwork palettes and strengthened provider authentication and setup diagnostics.
+          Multi-library VFS profiles and reversible migration work followed on main.
+        </p>
+        <div class="links">
+          <a href="https://github.com/xtreemze/slipmat-companion/releases/tag/v0.4.3.0">v0.4.3.0</a>
+          <a href="https://github.com/xtreemze/slipmat-companion/pull/54">multi-VFS</a>
+          <a href="https://github.com/xtreemze/slipmat-companion/pull/58">reversible migration</a>
+        </div>
+      </li>
+      <li>
+        <time datetime="2026-10-04">4 October 2026</time>
+        <h3>A public installation and explanation surface</h3>
+        <p>
+          The GitHub Pages site was rebuilt with Astro so installation, architecture boundaries and optional modules
+          have a human-facing surface alongside the machine-consumed Jellyfin repository manifest.
+        </p>
+        <div class="links">
+          <a href="https://github.com/xtreemze/slipmat-companion/pull/69">site PR #69</a>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <section class="section" aria-labelledby="north-star-title">
+    <div class="section-intro">
+      <div>
+        <p class="eyebrow">North star</p>
+        <h2 id="north-star-title">Accelerate more. Own less.</h2>
+      </div>
+      <p>
+        Companion's ambition is not to become another media server or another playback engine. It is to become a
+        dependable optional capability layer for work that benefits from server proximity: analysis, batching,
+        protected acquisition bridges, provenance-rich metadata, bounded cloud projection and diagnostics.
+      </p>
+    </div>
+    <ul class="status-list">
+      <li><strong>Keep playback authority in Slipmat.</strong> Companion can prepare evidence and sources, but it does not own the queue, transport clock, renderer or Playback Rail.</li>
+      <li><strong>Keep media authority in Jellyfin and source providers.</strong> Server-side acceleration must not create a second canonical catalog or silently take ownership of remote media.</li>
+      <li><strong>Make absence ordinary.</strong> If Companion is missing, unhealthy or lacks an optional module, Slipmat should degrade to canonical fallback paths rather than fail as a product.</li>
+      <li><strong>Prefer measured, provenance-bearing evidence.</strong> Analysis and metadata should be reproducible and attributable instead of turning server inference into hidden policy.</li>
+    </ul>
+  </section>
+
+  <section class="section" aria-labelledby="roadmap-title">
+    <div class="section-intro">
+      <div>
+        <p class="eyebrow">Open ambitions</p>
+        <h2 id="roadmap-title">Current research, not shipping claims.</h2>
+      </div>
+      <p>
+        The next useful work is tracked in GitHub rather than promised here. These items represent open engineering
+        questions or incomplete capabilities and should not be read as features already delivered.
+      </p>
+    </div>
+    <div class="grid">
+      <article class="card">
+        <span class="number">CATALOG</span>
+        <h3>Payload-free catalog refresh</h3>
+        <p>Research whether Jellyfin can preserve full remote namespace visibility while avoiding media-payload reads during routine VFS catalog refresh.</p>
+        <div class="links"><a href="https://github.com/xtreemze/slipmat-companion/issues/62">Issue #62</a></div>
+      </article>
+      <article class="card">
+        <span class="number">RETENTION</span>
+        <h3>Bound reproducible artifacts</h3>
+        <p>Add independent retention for regenerable analysis artifacts without coupling it to media-cache eviction or deleting authoritative media/catalog state.</p>
+        <div class="links"><a href="https://github.com/xtreemze/slipmat-companion/issues/49">Issue #49</a></div>
+      </article>
+      <article class="card">
+        <span class="number">MIGRATION</span>
+        <h3>Complete managed VFS migration</h3>
+        <p>Continue hardening reversible local-to-cloud migration and mount lifecycle so operational convenience does not weaken fail-closed ownership and rollback guarantees.</p>
+        <div class="links"><a href="https://github.com/xtreemze/slipmat-companion/issues/50">Issue #50</a></div>
+      </article>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-intro">
+      <h2>Follow the implementation.</h2>
+      <p>For exact current behavior, use the repository and release history as authority. This page explains the trajectory; it does not replace technical documentation or shipping evidence.</p>
+    </div>
+    <div class="actions">
+      <a class="button" href={repositoryUrl}>Open repository</a>
+      <a class="button secondary" href={repositoryUrl + "/releases"}>Release history</a>
+      <a class="button secondary" href={repositoryUrl + "/issues"}>Open issues</a>
+    </div>
+  </section>
+</BaseLayout>

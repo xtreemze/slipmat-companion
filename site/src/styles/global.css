@@ -279,3 +279,95 @@ button.copy {
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+.milestone-preview,
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.milestone-preview {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  border-radius: .85rem;
+  overflow: hidden;
+}
+.milestone-preview li {
+  min-height: 9rem;
+  padding: 1.1rem;
+  border-right: 1px solid var(--line);
+  background: var(--surface);
+}
+.milestone-preview li:last-child { border-right: 0; }
+.milestone-preview strong,
+.timeline time {
+  display: block;
+  margin-bottom: .65rem;
+  color: var(--accent-strong);
+  font: 600 .8rem/1.2 ui-monospace, "SFMono-Regular", Consolas, monospace;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.milestone-preview span { color: var(--muted); line-height: 1.55; }
+.story-hero { max-width: 58rem; }
+.timeline {
+  position: relative;
+  display: grid;
+  gap: 1rem;
+  max-width: 62rem;
+}
+.timeline::before {
+  content: "";
+  position: absolute;
+  left: .43rem;
+  top: .4rem;
+  bottom: .4rem;
+  width: 1px;
+  background: var(--line);
+}
+.timeline li {
+  position: relative;
+  padding: 0 0 1.4rem 2rem;
+}
+.timeline li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: .22rem;
+  width: .85rem;
+  aspect-ratio: 1;
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  background: var(--bg);
+}
+.timeline h3 { margin: 0 0 .5rem; font-size: 1.18rem; }
+.timeline p { margin: 0; color: var(--muted); line-height: 1.65; }
+.timeline .links { margin-top: .65rem; }
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .75rem 1rem;
+}
+.links a { color: var(--accent-strong); }
+.status-list {
+  display: grid;
+  gap: .75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.status-list li {
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: .75rem;
+  background: var(--surface);
+  color: var(--muted);
+  line-height: 1.6;
+}
+.status-list strong { color: var(--text); }
+@media (max-width: 760px) {
+  .milestone-preview { grid-template-columns: 1fr; }
+  .milestone-preview li { min-height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+  .milestone-preview li:last-child { border-bottom: 0; }
+}
