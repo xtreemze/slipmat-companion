@@ -33,8 +33,10 @@ jobs:
       - name: Install site dependencies
         run: npm install --prefix site --no-audit --no-fund
 
-      - name: Build Astro site
-        run: npm run build --prefix site
+      - name: Build and audit Astro site
+        run: |
+          npm run build --prefix site
+          npm run check:links --prefix site
 
       - name: Preserve published Jellyfin manifest
         shell: bash
