@@ -1,0 +1,108 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/xtreemze/slipmat/schema/server-extension-analysis-coverage-response-v1.schema.json",
+  "title": "AnalysisCoverageResponseV1",
+  "description": "Portable batch analysis readiness. queued/running are intentionally absent until a scheduler owns those states.",
+  "type": "object",
+  "required": [
+    "protocolVersion",
+    "items",
+    "counts"
+  ],
+  "properties": {
+    "protocolVersion": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "subject",
+          "status"
+        ],
+        "properties": {
+          "subject": {
+            "type": "object",
+            "required": [
+              "version",
+              "storeKey"
+            ],
+            "properties": {
+              "version": {
+                "const": 1
+              },
+              "storeKey": {
+                "type": "string",
+                "pattern": "^asv1-[0-9a-f]{64}$"
+              }
+            },
+            "additionalProperties": false
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "missing",
+              "stale",
+              "unsupported",
+              "failed"
+            ]
+          },
+          "observedSourceFingerprint": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "sidecarSchemaVersion": {
+            "type": "string",
+            "minLength": 1
+          },
+          "producerVersion": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "counts": {
+      "type": "object",
+      "required": [
+        "ready",
+        "missing",
+        "stale",
+        "unsupported",
+        "failed"
+      ],
+      "properties": {
+        "ready": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "missing": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stale": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unsupported": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true
+}

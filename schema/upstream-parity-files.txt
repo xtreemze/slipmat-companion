@@ -1,5 +1,11 @@
-# Canonical Slipmat fixtures mirrored into this standalone companion.
+# Canonical Slipmat contract files mirrored into this standalone companion.
 # Paths are repository-relative in both xtreemze/slipmat and xtreemze/slipmat-companion.
+schema/analysis.schema.json
+schema/server-extension-analysis-artifact-v1.schema.json
+schema/server-extension-analysis-coverage-request-v1.schema.json
+schema/server-extension-analysis-coverage-response-v1.schema.json
+schema/server-extension-capabilities-v1.schema.json
+schema/waveform.schema.json
 schema/examples/album_event.example.json
 schema/examples/analysis_sidecar_v2.example.json
 schema/examples/analysis_subject_v1_vectors.json

@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/xtreemze/slipmat/schema/server-extension-capabilities-v1.schema.json",
+  "title": "ServerExtensionCapabilitiesV1",
+  "description": "Host-neutral capability and health contract for optional Slipmat analysis/enrichment services. Host compatibility belongs to adapters, not this schema.",
+  "type": "object",
+  "required": [
+    "protocolVersion",
+    "mode",
+    "authoritative",
+    "serviceIdentity",
+    "producerVersion",
+    "modules",
+    "health",
+    "degradedReasons"
+  ],
+  "properties": {
+    "protocolVersion": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$",
+      "description": "Protocol version. Consumers must reject unsupported major versions."
+    },
+    "mode": {
+      "const": "optional-acceleration"
+    },
+    "authoritative": {
+      "const": false,
+      "description": "This extension family can never own canonical playback or product state."
+    },
+    "serviceIdentity": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable non-secret identity for the host-neutral service implementation."
+    },
+    "producerVersion": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Build or producer version used for diagnostics and compatibility."
+    },
+    "modules": {
+      "type": "object",
+      "required": ["analysisArtifacts", "analysisCoverage"],
+      "properties": {
+        "analysisArtifacts": { "type": "boolean" },
+        "analysisCoverage": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "health": {
+      "type": "object",
+      "required": ["analyzer", "artifactStore"],
+      "properties": {
+        "analyzer": { "$ref": "#/definitions/componentHealth" },
+        "artifactStore": { "$ref": "#/definitions/componentHealth" }
+      },
+      "additionalProperties": true
+    },
+    "degradedReasons": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "additionalProperties": true,
+  "definitions": {
+    "componentHealth": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["healthy", "degraded", "unavailable"]
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}
