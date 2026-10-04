@@ -42,7 +42,7 @@ public class CloudConfigurationPageTests
         Assert.Contains("local-to-vfs", html);
         Assert.Contains("vfs-to-local", html);
         Assert.Contains("copy and exact verification only", html);
-        Assert.Contains("Cloud objects are never deleted by finalize", html);
+        Assert.Contains("never deletes cloud media", html);
     }
 
     [Fact]
