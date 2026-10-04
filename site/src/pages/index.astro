@@ -1,7 +1,7 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
 
-const base = import.meta.env.BASE_URL;
+const rawBase = import.meta.env.BASE_URL;\nconst base = rawBase.endsWith("/") ? rawBase : rawBase + "/";
 const repositoryUrl = "https://github.com/xtreemze/slipmat-companion";
 ---
 
