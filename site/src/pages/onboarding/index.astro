@@ -1,0 +1,126 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+
+const manifestUrl = "https://xtreemze.github.io/slipmat-companion/manifest.json";
+---
+
+<BaseLayout
+  title="Set up Slipmat Companion"
+  description="Guided installation and verification for the Slipmat Companion Audio Gateway Jellyfin plugin."
+>
+  <section class="section" style="border-top:0; padding-top:clamp(3rem,8vw,6rem)">
+    <p class="eyebrow">Guided setup</p>
+    <h1 style="font-size:clamp(2.7rem,7vw,5.6rem)">Connect Companion.</h1>
+    <p class="lede">Complete the required Jellyfin installation first. Cloud projection and provider credentials are optional and should only be configured when you need those modules.</p>
+  </section>
+
+  <section class="section" aria-labelledby="required-title">
+    <div class="section-intro">
+      <h2 id="required-title">Required</h2>
+      <p>Your progress is stored only in this browser. These controls do not configure Jellyfin or send data anywhere.</p>
+    </div>
+
+    <div class="steps" data-checklist>
+      <label class="step">
+        <input type="checkbox" data-step="repository" />
+        <span>
+          <h2>1. Add the plugin repository</h2>
+          <p>In Jellyfin, open <strong>Dashboard → Plugins → Repositories</strong> and add:</p>
+          <div class="install-command">
+            <code>{manifestUrl}</code>
+            <button class="copy" type="button" data-copy={manifestUrl}>Copy</button>
+          </div>
+        </span>
+      </label>
+
+      <label class="step">
+        <input type="checkbox" data-step="install" />
+        <span>
+          <h2>2. Install Audio Gateway</h2>
+          <p>Open the Jellyfin plugin catalog, install <strong>Audio Gateway</strong>, then restart Jellyfin so the plugin can register its native services and dashboard page.</p>
+        </span>
+      </label>
+
+      <label class="step">
+        <input type="checkbox" data-step="verify" />
+        <span>
+          <h2>3. Verify capabilities</h2>
+          <p>Open the Audio Gateway dashboard in Jellyfin. Core batching and integrated analysis should work without an external analyzer. Missing optional modules are ordinary fallback conditions.</p>
+          <p>For protocol-level verification, the plugin exposes <code>/Plugins/AudioGateway/diagnostics/capabilities</code>.</p>
+        </span>
+      </label>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="optional-title">
+    <div class="section-intro">
+      <h2 id="optional-title">Optional modules</h2>
+      <p>Enable only the capabilities you intend to use. These remain adapters and accelerators, not new canonical state owners.</p>
+    </div>
+    <div class="grid">
+      <article class="card">
+        <span class="number">PODCASTS</span>
+        <h3>Podcast Index search</h3>
+        <p>Configure Podcast Index API credentials as Jellyfin host environment variables. Secrets stay server-side and are never emitted to browser clients.</p>
+      </article>
+      <article class="card">
+        <span class="number">CLOUD</span>
+        <h3>Read-only rclone VFS</h3>
+        <p>Install and configure rclone on the Jellyfin host, then create bounded VFS profiles in the plugin dashboard. Companion does not expose rclone RC.</p>
+      </article>
+      <article class="card">
+        <span class="number">ADVANCED</span>
+        <h3>Artifact store override</h3>
+        <p>The plugin provisions its own writable store by default. Override it only for deployments that intentionally manage a dedicated location.</p>
+      </article>
+    </div>
+    <div class="note">
+      Cloud-mounted media is excluded from automatic Companion analysis traversal. Missing cloud analysis remains request-driven so a scheduled background pass cannot materialize an entire remote library.
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-intro">
+      <h2>Continue in Slipmat.</h2>
+      <p>Once Jellyfin reports the extension as healthy, Slipmat can negotiate the optional modules it understands. No separate Companion login or second media library is required.</p>
+    </div>
+    <div class="actions">
+      <a class="button" href="https://github.com/xtreemze/slipmat-companion#active-endpoints">Read technical reference</a>
+      <a class="button secondary" href="../">Back to overview</a>
+    </div>
+  </section>
+
+  <script>
+    const storageKey = "slipmat-companion-onboarding-v1";
+    const checks = Array.from(document.querySelectorAll<HTMLInputElement>("[data-step]"));
+
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey) ?? "{}");
+      checks.forEach((check) => {
+        check.checked = Boolean(saved[check.dataset.step ?? ""]);
+      });
+    } catch {
+      localStorage.removeItem(storageKey);
+    }
+
+    checks.forEach((check) => {
+      check.addEventListener("change", () => {
+        const state = Object.fromEntries(
+          checks.map((item) => [item.dataset.step, item.checked]),
+        );
+        localStorage.setItem(storageKey, JSON.stringify(state));
+      });
+    });
+
+    document.querySelectorAll("[data-copy]").forEach((element) => {
+      const button = element as HTMLButtonElement;
+      button.addEventListener("click", async (event) => {
+        event.preventDefault();
+        const value = button.getAttribute("data-copy");
+        if (!value) return;
+        await navigator.clipboard.writeText(value);
+        button.textContent = "Copied";
+      });
+    });
+  </script>
+</BaseLayout>
