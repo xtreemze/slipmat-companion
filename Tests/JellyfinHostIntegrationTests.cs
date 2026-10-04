@@ -188,6 +188,30 @@ public class JellyfinHostIntegrationTests
     }
 
     [Fact]
+    public void Plugin_ConfigurationPage_ProvidesResponsiveAccessibleSettingsHierarchy()
+    {
+        var resourceName = "Jellyfin.Plugin.AudioGateway.Configuration.configPage.html";
+        using var stream = typeof(Plugin).Assembly.GetManifestResourceStream(resourceName);
+        Assert.NotNull(stream);
+        using var reader = new StreamReader(stream!);
+        var html = reader.ReadToEnd();
+
+        Assert.Contains("class=\"content-primary ag-settings\"", html);
+        Assert.Contains("class=\"ag-page-header\"", html);
+        Assert.Contains("Audio Gateway settings", html);
+        Assert.Contains("class=\"verticalSection ag-section\"", html);
+        Assert.Contains("class=\"ag-actions\"", html);
+        Assert.Contains("class=\"ag-details\"", html);
+        Assert.Contains("class=\"ag-status\"", html);
+        Assert.Contains("aria-live=\"polite\"", html);
+        Assert.Contains("class=\"ag-savebar\"", html);
+        Assert.Contains("Save settings", html);
+        Assert.Contains("finalize.classList.add('ag-danger');", html);
+        Assert.DoesNotContain("style=\"display:flex;gap:0.5em;flex-wrap:wrap", html);
+        Assert.DoesNotContain("row.style.borderBottom = '1px solid currentColor';", html);
+    }
+
+    [Fact]
     public void IntegratedAnalyzer_ProbesJellyfinFfmpegDirectlyForLoudnorm()
     {
         var ffmpeg = Environment.GetEnvironmentVariable("SLIPMAT_PARITY_FFMPEG");
