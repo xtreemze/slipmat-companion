@@ -545,10 +545,30 @@ public class HigherOrderAudioAnalysisTests
 
         Assert.NotNull(result.Analysis);
         Assert.Same(loudness, result.Analysis!.Loudness);
+        Assert.Null(result.Analysis.Structure);
         Assert.NotNull(result.Analysis.LoudnessMeasurement);
         Assert.Equal(-14.2d, result.Analysis.LoudnessMeasurement!.IntegratedLufs, 2);
         Assert.Equal(-0.7d, result.Analysis.LoudnessMeasurement.TruePeakDbtp!.Value, 2);
         Assert.Equal(7.5d, result.Analysis.LoudnessMeasurement.LoudnessRangeLu!.Value, 2);
+    }
+
+    [Fact]
+    public void HigherOrderAnalysis_DoesNotInventStructureWithoutCanonicalProducer()
+    {
+        const int sampleRate = 48_000;
+        var builder = new HigherOrderAudioAnalysisBuilder(sampleRate, 1);
+        for (var index = 0; index < sampleRate * 2; index++)
+        {
+            var envelope = index < sampleRate ? 0.2d : 0.8d;
+            builder.PushFrame([
+                (float)(envelope * Math.Sin(2d * Math.PI * 440d * index / sampleRate)),
+            ]);
+        }
+
+        var result = builder.Complete(new LoudnessAnalysis(-14d, -1d, 8d));
+
+        Assert.NotNull(result.Analysis);
+        Assert.Null(result.Analysis!.Structure);
     }
 
     [Fact]
