@@ -3,6 +3,197 @@
 <head>
     <meta charset="utf-8">
     <title>Audio Gateway</title>
+    <style>
+        #AudioGatewayConfigPage .ag-settings {
+            max-width: 74rem;
+            margin: 0 auto;
+            padding-bottom: 2rem;
+        }
+
+        #AudioGatewayConfigPage .ag-page-header {
+            margin: 0 0 1.5rem;
+        }
+
+        #AudioGatewayConfigPage .ag-eyebrow {
+            margin: 0 0 0.35rem;
+            font-size: 0.8rem;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            opacity: 0.72;
+        }
+
+        #AudioGatewayConfigPage .ag-page-title {
+            margin: 0 0 0.45rem;
+            font-size: clamp(1.7rem, 3vw, 2.35rem);
+            line-height: 1.12;
+        }
+
+        #AudioGatewayConfigPage .ag-lede {
+            max-width: 62rem;
+            margin: 0;
+            line-height: 1.55;
+        }
+
+        #AudioGatewayConfigPage .ag-section {
+            margin: 0 0 1.25rem;
+            padding: 1.15rem 1.25rem;
+            border: 1px solid rgba(128, 128, 128, 0.28);
+            border-radius: 0.8rem;
+            background: rgba(128, 128, 128, 0.055);
+        }
+
+        #AudioGatewayConfigPage .ag-section > .sectionTitle:first-child,
+        #AudioGatewayConfigPage .ag-subsection > .sectionTitle:first-child {
+            margin-top: 0;
+        }
+
+        #AudioGatewayConfigPage .ag-subsection {
+            margin-top: 1.35rem;
+            padding-top: 1.2rem;
+            border-top: 1px solid rgba(128, 128, 128, 0.24);
+        }
+
+        #AudioGatewayConfigPage .ag-details {
+            margin: 1rem 0;
+            padding: 0.15rem 0.85rem 0.5rem;
+            border: 1px solid rgba(128, 128, 128, 0.26);
+            border-radius: 0.65rem;
+        }
+
+        #AudioGatewayConfigPage .ag-details > summary {
+            min-height: 2.75rem;
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        #AudioGatewayConfigPage .ag-details-body {
+            margin-top: 0.5rem;
+        }
+
+        #AudioGatewayConfigPage .ag-actions {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.55rem;
+            margin: 0.5rem 0 1rem;
+        }
+
+        #AudioGatewayConfigPage .ag-actions--compact {
+            margin-bottom: 0.75rem;
+        }
+
+        #AudioGatewayConfigPage .ag-action-inline {
+            margin-top: 0.35rem;
+        }
+
+        #AudioGatewayConfigPage .ag-inline-field {
+            display: flex;
+            align-items: flex-end;
+            gap: 0.55rem;
+        }
+
+        #AudioGatewayConfigPage .ag-inline-field > [is="emby-input"] {
+            flex: 1 1 18rem;
+            min-width: 0;
+        }
+
+        #AudioGatewayConfigPage .ag-status {
+            margin: 0.75rem 0;
+            padding: 0.7rem 0.85rem;
+            border-left: 0.22rem solid rgba(128, 128, 128, 0.7);
+            border-radius: 0.35rem;
+            background: rgba(128, 128, 128, 0.07);
+            line-height: 1.45;
+        }
+
+        #AudioGatewayConfigPage .ag-list {
+            max-height: 24rem;
+            overflow: auto;
+            margin-top: 0.6rem;
+            padding: 0 0.75rem;
+            border: 1px solid rgba(128, 128, 128, 0.24);
+            border-radius: 0.55rem;
+        }
+
+        #AudioGatewayConfigPage .ag-list--stack {
+            max-height: none;
+        }
+
+        #AudioGatewayConfigPage .ag-result-row {
+            padding: 0.75rem 0;
+            border-bottom: 1px solid rgba(128, 128, 128, 0.22);
+        }
+
+        #AudioGatewayConfigPage .ag-result-row:last-child {
+            border-bottom: 0;
+        }
+
+        #AudioGatewayConfigPage .ag-row-content {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        #AudioGatewayConfigPage .ag-row-grow {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        #AudioGatewayConfigPage .ag-row-title {
+            font-weight: 600;
+        }
+
+        #AudioGatewayConfigPage .ag-media-logo {
+            max-width: 96px;
+            max-height: 54px;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+        }
+
+        #AudioGatewayConfigPage .ag-migration-confirm {
+            flex: 1 1 28rem;
+            min-width: min(100%, 16rem);
+        }
+
+        #AudioGatewayConfigPage .ag-full {
+            width: 100%;
+        }
+
+        #AudioGatewayConfigPage .ag-danger {
+            font-weight: 600;
+            box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.55);
+        }
+
+        #AudioGatewayConfigPage .ag-savebar {
+            margin-top: 1.5rem;
+            padding-top: 1rem;
+            border-top: 1px solid rgba(128, 128, 128, 0.28);
+        }
+
+        @media (max-width: 42rem) {
+            #AudioGatewayConfigPage .ag-section {
+                padding: 1rem 0.8rem;
+            }
+
+            #AudioGatewayConfigPage .ag-actions > button {
+                flex: 1 1 auto;
+            }
+
+            #AudioGatewayConfigPage .ag-inline-field,
+            #AudioGatewayConfigPage .ag-row-content {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            #AudioGatewayConfigPage .ag-media-logo {
+                align-self: flex-start;
+            }
+        }
+    </style>
 </head>
 <body>
     <div id="AudioGatewayConfigPage"
@@ -10,10 +201,18 @@
          class="page type-interior pluginConfigurationPage"
          data-require="emby-input,emby-button,emby-select,emby-checkbox">
         <div data-role="content">
-            <div class="content-primary">
+            <div class="content-primary ag-settings">
                 <form id="AudioGatewayConfigForm">
-                    <div class="verticalSection">
-                        <h3 class="sectionTitle">Installation</h3>
+                    <header class="ag-page-header">
+                        <p class="ag-eyebrow">Slipmat companion</p>
+                        <h2 class="ag-page-title">Audio Gateway settings</h2>
+                        <p class="ag-lede">
+                            Configure optional server-side analysis, cloud VFS libraries, and Live TV discovery.
+                            Slipmat playback remains functional when these accelerators are unavailable.
+                        </p>
+                    </header>
+                    <div class="verticalSection ag-section" role="region" aria-labelledby="AgInstallationTitle">
+                        <h3 id="AgInstallationTitle" class="sectionTitle">Installation</h3>
                         <div class="fieldDescription">
                             Audio analysis is built into the plugin and uses Jellyfin's managed FFmpeg.
                             No analyzer URL or second analyzer container is required. Local libraries are backfilled normally;
@@ -21,7 +220,7 @@
                         </div>
                     </div>
 
-                    <div class="inputContainer">
+                    <div class="inputContainer ag-section">
                         <label class="inputLabel inputLabelUnfocused" for="StoreRoot">Artifact store override (optional)</label>
                         <input id="StoreRoot"
                                name="StoreRoot"
@@ -36,8 +235,8 @@
                         </div>
                     </div>
 
-                    <div class="verticalSection">
-                        <h3 class="sectionTitle">Cloud media — rclone</h3>
+                    <div class="verticalSection ag-section" role="region" aria-labelledby="AgCloudTitle">
+                        <h3 id="AgCloudTitle" class="sectionTitle">Cloud media — rclone</h3>
                         <div class="fieldDescription">
                             Audio Gateway uses rclone as the generic cloud adapter. Configure and authenticate remotes with
                             rclone on the server first, then select and browse them here. Tele2 Cloud and other providers use the same configured-rclone interface. If a remote name is reconfigured to a different cloud account, use a new remote name or a new local projection path.
@@ -49,16 +248,15 @@
                         </div>
 
                         <div id="CloudSetupSummary"
-                             class="fieldDescription"
+                             class="fieldDescription ag-status"
                              role="status"
-                             aria-live="polite"
-                             style="margin-top:0.75em">
+                             aria-live="polite">
                             Checking server-side rclone access…
                         </div>
 
-                        <details open style="margin:1em 0">
+                        <details open class="ag-details">
                             <summary>VFS setup and migration model</summary>
-                            <div class="fieldDescription" style="margin-top:0.75em">
+                            <div class="fieldDescription ag-details-body">
                                 <ol>
                                     <li>Install rclone on the Jellyfin host and configure/authenticate each provider remote outside this plugin.</li>
                                     <li>Create one VFS library profile below for each Jellyfin library you want backed by cloud storage.</li>
@@ -66,10 +264,12 @@
                                     <li>The cloud object is authoritative. The local VFS cache contains only recently read media and can be evicted without deleting the cloud file.</li>
                                 </ol>
                                 <p>
-                                    Jellyfin catalog scans enumerate the mounted remote namespace and may perform the lightweight reads Jellyfin requires to identify media.
-                                    Companion scheduled waveform/peak/loudness analysis does not traverse VFS libraries at all, so it cannot download an uncached cloud collection in the background.
-                                    For VFS libraries the plugin also disables Jellyfin realtime monitoring, LUFS scans, chapter-image extraction, trickplay extraction, and media-folder derived-data writes before scanning; if that policy cannot be applied, reconciliation fails closed.
-                                    Playback, Jellyfin's ordinary catalog probing, or an explicit Slipmat artifact request may read a cloud item; those bytes then enter the bounded VFS cache and are reused until eviction.
+                                    Automatic Audio Gateway tasks are payload-safe for VFS libraries: the six-hour task verifies/mounts each profile but does not queue a Jellyfin catalog scan, and scheduled waveform/peak/loudness analysis never traverses VFS media at all.
+                                    Playback or an explicit Slipmat artifact request may read a cloud item; those bytes enter the bounded VFS cache and are reused until eviction.
+                                    For VFS libraries the plugin also disables Jellyfin realtime monitoring, LUFS scans, chapter-image extraction, trickplay extraction, and media-folder derived-data writes; if that policy cannot be applied, reconciliation fails closed.
+                                </p>
+                                <p>
+                                    A Jellyfin catalog refresh is an explicit namespace-discovery action. Jellyfin may probe uncached remote media while identifying items, because Jellyfin 12.1 does not expose a supported cache-residency filter for filesystem libraries. Use explicit refresh after initial setup, migration cutover, or when you need new remote objects added to the Jellyfin catalog; routine Audio Gateway reconciliation will not trigger it in the background.
                                 </p>
                                 <p>
                                     To migrate a conventional local Jellyfin library to VFS, copy it to an empty cloud destination, verify source versus remote, cut the same library over to its VFS profile, keep the local source as rollback, and only then explicitly finalize local cleanup.
@@ -88,7 +288,7 @@
                                 Each profile owns one remote root, one Jellyfin library projection, and one independent bounded cache policy.
                             </div>
                         </div>
-                        <div style="display:flex;gap:0.5em;flex-wrap:wrap;margin-bottom:1em">
+                        <div class="ag-actions">
                             <button id="CloudAddLibraryButton"
                                     is="emby-button"
                                     type="button"
@@ -98,7 +298,7 @@
                             <button id="CloudRemoveLibraryButton"
                                     is="emby-button"
                                     type="button"
-                                    class="raised emby-button">
+                                    class="raised emby-button ag-danger">
                                 <span>Remove profile</span>
                             </button>
                         </div>
@@ -126,7 +326,7 @@
                             </div>
                         </div>
 
-                        <div style="display:flex;gap:0.5em;flex-wrap:wrap;margin-bottom:1em">
+                        <div class="ag-actions">
                             <button id="CloudRefreshRemotesButton"
                                     is="emby-button"
                                     type="button"
@@ -141,7 +341,7 @@
                             </button>
                         </div>
 
-                        <div class="verticalSection" style="margin-top:1em">
+                        <div class="verticalSection ag-subsection">
                             <h4 class="sectionTitle">Remote file manager</h4>
 
                             <div class="inputContainer">
@@ -153,7 +353,7 @@
                                        placeholder="Media/Music" />
                             </div>
 
-                            <div style="display:flex;gap:0.5em;flex-wrap:wrap;margin-bottom:0.75em">
+                            <div class="ag-actions ag-actions--compact">
                                 <button id="CloudBrowserGoButton"
                                         is="emby-button"
                                         type="button"
@@ -182,12 +382,11 @@
 
                             <div class="inputContainer">
                                 <label class="inputLabel inputLabelUnfocused" for="CloudNewFolderName">Create folder in current path</label>
-                                <div style="display:flex;gap:0.5em;align-items:center">
+                                <div class="ag-inline-field">
                                     <input id="CloudNewFolderName"
                                            type="text"
                                            is="emby-input"
                                            autocomplete="off"
-                                           style="flex:1 1 auto"
                                            placeholder="New folder" />
                                     <button id="CloudCreateFolderButton"
                                             is="emby-button"
@@ -206,9 +405,9 @@
                             </div>
 
                             <div id="CloudBrowserEntries"
+                                 class="ag-list"
                                  role="list"
-                                 aria-label="rclone remote entries"
-                                 style="max-height:24em;overflow:auto;margin-top:0.5em"></div>
+                                 aria-label="rclone remote entries"></div>
                         </div>
 
                         <div class="inputContainer">
@@ -225,7 +424,7 @@
                             </div>
                         </div>
 
-                        <details style="margin:1em 0">
+                        <details class="ag-details">
                             <summary>Advanced local storage</summary>
                             <div class="inputContainer" style="margin-top:0.75em">
                                 <label class="inputLabel inputLabelUnfocused" for="CloudProjectionPath">Local cloud mount folder override</label>
@@ -322,7 +521,7 @@
                             </label>
                         </div>
 
-                        <div style="display:flex;gap:0.5em;flex-wrap:wrap">
+                        <div class="ag-actions">
                             <button id="CloudReconcileButton"
                                     is="emby-button"
                                     type="button"
@@ -332,20 +531,20 @@
                         </div>
 
                         <div id="CloudStatus"
-                             class="fieldDescription"
+                             class="fieldDescription ag-status"
                              role="status"
-                             aria-live="polite"
-                             style="margin-top:0.75em">
+                             aria-live="polite">
                             Save settings before the first mount.
                         </div>
 
-                        <div class="verticalSection" style="margin-top:1.5em">
+                        <div class="verticalSection ag-subsection">
                             <h4 class="sectionTitle">Library migration</h4>
                             <div class="fieldDescription">
                                 Migration is staged. Prepare performs additive copy and exact verification only.
                                 Cutover is a separate action. For local → VFS, the original local directory is retained
-                                as a rollback backup until you explicitly finalize cleanup. Cloud media is never deleted.
-                                “Prepare all eligible” processes only one-path Jellyfin libraries with exactly one matching VFS profile.
+                                as a rollback backup until you explicitly finalize cleanup. Finalize is the only step that frees that retained local-media space; it requires exact-path confirmation and never deletes cloud media.
+                                “Prepare all eligible” starts the safe copy/verify stage for every eligible one-path Jellyfin library with exactly one matching VFS profile. Review and cut over each library independently, then finalize each retained rollback backup when you no longer need local rollback.
+                                VFS → local uses the reverse staged flow: copy/verify to local storage first, then cut over without deleting the cloud source.
                             </div>
 
                             <div class="selectContainer" style="margin-top:0.75em">
@@ -358,7 +557,7 @@
                                 </select>
                             </div>
 
-                            <div style="display:flex;gap:0.5em;flex-wrap:wrap;margin-bottom:0.75em">
+                            <div class="ag-actions ag-actions--compact">
                                 <button id="CloudMigrationRefreshButton"
                                         is="emby-button"
                                         type="button"
@@ -380,18 +579,18 @@
                                 Migration status has not been loaded.
                             </div>
                             <div id="CloudMigrationCandidates"
+                                 class="ag-list ag-list--stack"
                                  role="list"
-                                 aria-label="Eligible Jellyfin library migrations"
-                                 style="margin-top:0.75em"></div>
+                                 aria-label="Eligible Jellyfin library migrations"></div>
                             <div id="CloudMigrationJobs"
+                                 class="ag-list ag-list--stack"
                                  role="list"
-                                 aria-label="Cloud migration jobs"
-                                 style="margin-top:1em"></div>
+                                 aria-label="Cloud migration jobs"></div>
                         </div>
                     </div>
 
-                    <div class="verticalSection">
-                        <h3 class="sectionTitle">iptv-org Live TV discovery</h3>
+                    <div class="verticalSection ag-section" role="region" aria-labelledby="AgLiveTvTitle">
+                        <h3 id="AgLiveTvTitle" class="sectionTitle">iptv-org Live TV discovery</h3>
                         <div class="fieldDescription">
                             Browse the public iptv-org JSON catalog and subscribe channels to this Jellyfin server.
                             Selected channels are published through Jellyfin's native Live TV service, including
@@ -432,7 +631,7 @@
                                    placeholder="news" />
                         </div>
 
-                        <div style="display:flex;gap:0.5em;flex-wrap:wrap">
+                        <div class="ag-actions">
                             <button id="IptvOrgBrowseButton"
                                     is="emby-button"
                                     type="button"
@@ -462,22 +661,22 @@
                         </div>
 
                         <div id="IptvOrgBrowseStatus"
-                             class="fieldDescription"
+                             class="fieldDescription ag-status"
                              role="status"
                              aria-live="polite"></div>
                         <div id="IptvOrgResults"
-                             class="verticalSection"
+                             class="verticalSection ag-list ag-list--stack"
                              aria-label="iptv-org channel results"></div>
                     </div>
 
-                    <div class="verticalSection">
-                        <h3 class="sectionTitle">Status</h3>
-                        <div id="AudioGatewayStatus">Checking companion health…</div>
+                    <div class="verticalSection ag-section" role="region" aria-labelledby="AgStatusTitle">
+                        <h3 id="AgStatusTitle" class="sectionTitle">Companion health</h3>
+                        <div id="AudioGatewayStatus" class="ag-status" role="status" aria-live="polite">Checking companion health…</div>
                     </div>
 
-                    <div>
+                    <div class="ag-savebar">
                         <button is="emby-button" type="submit" class="raised button-submit block emby-button">
-                            <span>Save</span>
+                            <span>Save settings</span>
                         </button>
                     </div>
                 </form>
@@ -544,14 +743,10 @@
 
                 channels.forEach(function(channel) {
                     const row = document.createElement('div');
-                    row.className = 'paperList';
-                    row.style.padding = '0.75em 0';
-                    row.style.borderBottom = '1px solid currentColor';
+                    row.className = 'paperList ag-result-row';
 
                     const content = document.createElement('div');
-                    content.style.display = 'flex';
-                    content.style.gap = '1em';
-                    content.style.alignItems = 'center';
+                    content.className = 'ag-row-content';
 
                     if (channel.logoUrl) {
                         const logo = document.createElement('img');
@@ -567,20 +762,16 @@
                             logo.height = best.height;
                             logo.style.aspectRatio = String(best.width) + ' / ' + String(best.height);
                         }
-                        logo.style.maxWidth = '96px';
-                        logo.style.maxHeight = '54px';
-                        logo.style.width = 'auto';
-                        logo.style.height = 'auto';
-                        logo.style.objectFit = 'contain';
+                        logo.className = 'ag-media-logo';
                         content.appendChild(logo);
                     }
 
                     const details = document.createElement('div');
-                    details.style.flex = '1 1 auto';
+                    details.className = 'ag-row-grow';
 
                     const name = document.createElement('div');
+                    name.className = 'ag-row-title';
                     name.textContent = channel.name || channel.id;
-                    name.style.fontWeight = '600';
                     details.appendChild(name);
 
                     const metadata = document.createElement('div');
@@ -932,20 +1123,14 @@
                 entries.forEach(function(entry) {
                     const row = document.createElement('div');
                     row.setAttribute('role', 'listitem');
-                    row.style.display = 'flex';
-                    row.style.alignItems = 'center';
-                    row.style.gap = '0.75em';
-                    row.style.padding = '0.45em 0';
-                    row.style.borderBottom = '1px solid currentColor';
+                    row.className = 'ag-result-row ag-row-content';
 
                     if (entry.isDirectory) {
                         const button = document.createElement('button');
                         button.type = 'button';
                         button.setAttribute('is', 'emby-button');
                         button.className = 'raised emby-button';
-                        button.style.flex = '1 1 auto';
-                        button.style.textAlign = 'left';
-                        button.style.justifyContent = 'flex-start';
+                        button.classList.add('ag-row-grow');
                         button.textContent = 'Folder · ' + entry.name;
                         button.addEventListener('click', function() {
                             browseCloud(
@@ -955,7 +1140,7 @@
                         row.appendChild(button);
                     } else {
                         const name = document.createElement('div');
-                        name.style.flex = '1 1 auto';
+                        name.className = 'ag-row-grow';
                         name.textContent = entry.name;
                         row.appendChild(name);
 
@@ -1235,11 +1420,10 @@
                     (Array.isArray(candidates) ? candidates : []).forEach(function(candidate) {
                         const row = document.createElement('div');
                         row.setAttribute('role', 'listitem');
-                        row.style.padding = '0.65em 0';
-                        row.style.borderBottom = '1px solid currentColor';
+                        row.className = 'ag-result-row';
 
                         const title = document.createElement('div');
-                        title.style.fontWeight = '600';
+                        title.className = 'ag-row-title';
                         title.textContent = candidate.libraryName || 'Unnamed library';
                         row.appendChild(title);
 
@@ -1256,7 +1440,7 @@
                             button.setAttribute('is', 'emby-button');
                             button.className = 'raised emby-button';
                             button.textContent = 'Prepare migration';
-                            button.style.marginTop = '0.35em';
+                            button.classList.add('ag-action-inline');
                             button.addEventListener('click', function() {
                                 startMigration(candidate);
                             });
@@ -1298,11 +1482,10 @@
                 jobs.forEach(function(job) {
                     const row = document.createElement('div');
                     row.setAttribute('role', 'listitem');
-                    row.style.padding = '0.75em 0';
-                    row.style.borderBottom = '1px solid currentColor';
+                    row.className = 'ag-result-row';
 
                     const title = document.createElement('div');
-                    title.style.fontWeight = '600';
+                    title.className = 'ag-row-title';
                     title.textContent = job.libraryName + ' · ' + job.direction;
                     row.appendChild(title);
 
@@ -1320,10 +1503,7 @@
                     }
 
                     const actions = document.createElement('div');
-                    actions.style.display = 'flex';
-                    actions.style.gap = '0.5em';
-                    actions.style.flexWrap = 'wrap';
-                    actions.style.marginTop = '0.4em';
+                    actions.className = 'ag-actions ag-actions--compact';
 
                     if (job.phase === 'ready-for-cutover') {
                         actions.appendChild(migrationActionButton('Cut over', function() {
@@ -1345,17 +1525,17 @@
                             confirmation.setAttribute(
                                 'aria-label',
                                 'Exact backup path confirmation for ' + job.libraryName);
-                            confirmation.style.flex = '1 1 28em';
+                            confirmation.className = 'ag-migration-confirm';
                             actions.appendChild(confirmation);
 
                             const finalize = migrationActionButton('Finalize and free local space', function() {
                                 finalizeMigration(job.id, confirmation.value, job.backupPath);
                             });
+                            finalize.classList.add('ag-danger');
                             actions.appendChild(finalize);
 
                             const backup = document.createElement('div');
-                            backup.className = 'fieldDescription';
-                            backup.style.width = '100%';
+                            backup.className = 'fieldDescription ag-full';
                             backup.textContent = 'Rollback backup retained at: ' + job.backupPath;
                             actions.appendChild(backup);
                         }

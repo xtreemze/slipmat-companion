@@ -12,8 +12,6 @@ internal sealed record HigherOrderAnalysisResult(
 
 internal sealed class HigherOrderAudioAnalysisBuilder
 {
-    private const int EnergyCurveMaximumPoints = 1_024;
-
     private readonly SpectralAccumulator _spectral;
     private readonly BoundaryAccumulator _boundary;
     private readonly RhythmAccumulator _rhythm;
@@ -44,11 +42,12 @@ internal sealed class HigherOrderAudioAnalysisBuilder
     {
         var boundaries = _boundary.Complete();
         var rhythm = _rhythm.Complete(boundaries);
+        var harmonic = _harmonic.Complete();
         var spectral = SpectralArtifactEncoder.EncodeTiers(
             _spectral.Complete(),
             boundaries,
-            rhythm);
-        var harmonic = _harmonic.Complete();
+            rhythm,
+            harmonic);
 
         AnalysisBlocks? blocks = null;
         if (loudness is not null)
@@ -67,10 +66,10 @@ internal sealed class HigherOrderAudioAnalysisBuilder
                         60_000d / rhythm.Bpm!.Value)
                     : null);
 
-            var structure = new StructureAnalysis(
-                EnergyCurve: BuildEnergyCurve(_rhythm.Frames),
-                Sections: null);
-
+            // Slipmat's canonical Rust path currently defines the optional
+            // structure contract but does not produce an energy curve. The
+            // companion must not create a second analyzer authority by
+            // synthesizing one from its private rhythm frames.
             blocks = new AnalysisBlocks(
                 timing,
                 new HarmonicAnalysis(
@@ -78,7 +77,7 @@ internal sealed class HigherOrderAudioAnalysisBuilder
                     harmonic.CamelotKey,
                     harmonic.Confidence),
                 loudness,
-                structure,
+                Structure: null,
                 Transitions: null,
                 LoudnessMeasurement: FfmpegLoudnessParser.ToMeasurementEvidence(loudness));
         }
@@ -101,49 +100,4 @@ internal sealed class HigherOrderAudioAnalysisBuilder
         return float.IsFinite(samples[0]) ? samples[0] : 0f;
     }
 
-    private static List<EnergyCurvePoint>? BuildEnergyCurve(
-        IReadOnlyList<RhythmEnergyFrame> frames)
-    {
-        if (frames.Count == 0)
-        {
-            return null;
-        }
-
-        var maxEnergy = 0d;
-        foreach (var frame in frames)
-        {
-            maxEnergy = Math.Max(maxEnergy, frame.Overall);
-        }
-
-        if (maxEnergy <= 1e-9)
-        {
-            return null;
-        }
-
-        var stride = Math.Max(
-            RhythmAccumulator.FramesPerSecond,
-            (int)Math.Ceiling(frames.Count / (double)EnergyCurveMaximumPoints));
-        var points = new List<EnergyCurvePoint>(
-            (frames.Count + stride - 1) / stride);
-
-        for (var start = 0; start < frames.Count; start += stride)
-        {
-            var end = Math.Min(frames.Count, start + stride);
-            var sumSquares = 0d;
-            for (var index = start; index < end; index++)
-            {
-                var value = frames[index].Overall;
-                sumSquares += value * value;
-            }
-
-            var rms = Math.Sqrt(sumSquares / Math.Max(1, end - start));
-            var normalized = Math.Clamp(rms / maxEnergy, 0d, 1d);
-            var timeMs = checked(
-                (long)Math.Round(
-                    start * 1_000d / RhythmAccumulator.FramesPerSecond));
-            points.Add(new EnergyCurvePoint(timeMs, normalized));
-        }
-
-        return points;
-    }
 }

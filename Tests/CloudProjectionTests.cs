@@ -302,6 +302,31 @@ public class CloudProjectionTests
     }
 
     [Fact]
+    public async Task Reconcile_WhenLibraryScanIsSuppressed_DoesNotQueueCatalogScan()
+    {
+        using var temp = new TempDirectory();
+        var projectionPath = Path.Combine(temp.Path, "projection");
+        var config = EnabledConfig(projectionPath);
+        var library = new FakeLibraryProjection();
+        var service = CreateService(
+            config,
+            HealthyRunner(Result(0), Result(0)),
+            library);
+
+        var result = await service.ReconcileAsync(
+            projectionId: null,
+            cancellationToken: default,
+            queueLibraryScan: false);
+
+        Assert.Equal("completed", result.Status);
+        Assert.Equal("mount-ready-library-ready-no-scan", result.Code);
+        Assert.True(result.MountReady);
+        Assert.True(result.LibraryReady);
+        Assert.False(result.LibraryScanQueued);
+        Assert.Equal(0, library.ScanCalls);
+    }
+
+    [Fact]
     public async Task Reconcile_ExistingVfsLibrary_AppliesCloudSafeScanPolicyBeforeScan()
     {
         using var temp = new TempDirectory();

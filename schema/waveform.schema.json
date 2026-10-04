@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://jellyfin-audio-stack/schema/waveform.schema.json",
+  "$comment": "Versioning: x-schemaVersion follows semver. Breaking change = major bump. Conventions: durationSamples is sample count at the encoded artifact rate (not ms); for awf_v1_riff_mono_u8_peak that rate is points per second, not source-media sample rate. All URL values are server-relative URI references.",
+  "x-schemaVersion": "1.1.1",
+  "$comment-version": "1.1.1: clarify current standalone-companion RIFF amplitude identity and host-neutral path examples; 1.1.0 added path and optional url.",
+  "title": "WaveformRef",
+  "type": "object",
+  "required": ["itemId", "variant", "pps", "etag"],
+  "properties": {
+    "itemId":          { "type": "string", "description": "Jellyfin item ID this waveform belongs to." },
+    "variant":         { "type": "string", "examples": ["awf_v1_riff_mono_u8_peak", "awf_v1_native_mono_b8"], "description": "Opaque artifact-format identity. The standalone companion emits awf_v1_riff_mono_u8_peak; awf_v1_native_mono_b8 names the historical audiowaveform DAT producer and is not byte-compatible with it." },
+    "pps":             { "type": "integer", "enum": [1, 10, 100], "description": "Points per second in the waveform data." },
+    "path":            { "type": "string", "description": "Store-relative path to the waveform .dat file, e.g. waveforms/{subjectStoreKey}/{variant}/pps_10.dat. Analyzer storage uses host-neutral subject identity; the gateway projects provider item identity only into the client-facing request URL." },
+    "url":             { "type": "string", "format": "uri-reference", "description": "Server-relative API URL. Absent in analyzer-written sidecars; populated by the gateway when serving TrackEvent responses." },
+    "etag":            { "type": "string", "description": "HTTP ETag for cache validation, including surrounding quotes." },
+    "durationSamples": { "type": "integer", "minimum": 0, "description": "Total sample count in the waveform at the encoded sample rate (not ms)." }
+  }
+}

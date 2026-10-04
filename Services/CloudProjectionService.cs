@@ -318,7 +318,8 @@ public sealed class CloudProjectionService
 
     public async Task<CloudProjectionReconcileResponse> ReconcileAsync(
         string? projectionId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool queueLibraryScan = true)
     {
         await _reconcileGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -471,6 +472,15 @@ public sealed class CloudProjectionService
                 return Reconcile(
                     "completed",
                     "mount-ready-library-scan-active",
+                    mountReady: mountReady,
+                    libraryReady: true);
+            }
+
+            if (!queueLibraryScan)
+            {
+                return Reconcile(
+                    "completed",
+                    "mount-ready-library-ready-no-scan",
                     mountReady: mountReady,
                     libraryReady: true);
             }

@@ -2,6 +2,7 @@ using System;
 using System.Buffers.Binary;
 using System.Linq;
 using Jellyfin.Plugin.AudioGateway.Services;
+using Jellyfin.Plugin.AudioGateway.Services.Analysis;
 using Xunit;
 
 namespace Jellyfin.Plugin.AudioGateway.Tests;
@@ -67,6 +68,30 @@ public class AmplitudeEnvelopeBuilderTests
         Assert.Equal(byte.MaxValue, tiers[1][0]);
         Assert.Equal(byte.MaxValue, tiers[10][^1]);
         Assert.Equal(byte.MaxValue, tiers[100][^1]);
+    }
+
+    [Fact]
+    public void PartialTrailingSecond_MatchesCanonicalSlwsProjectionVector()
+    {
+        var builder = new AmplitudeEnvelopeBuilder(100);
+        for (var index = 0; index <= 100; index++)
+        {
+            builder.Push(index / 255f);
+        }
+
+        var tiers = builder.Complete();
+
+        Assert.Equal(new byte[] { 99, 100 }, tiers[1]);
+        Assert.Equal(
+            new byte[] { 9, 19, 29, 39, 49, 59, 69, 79, 89, 99, 100 },
+            tiers[10]);
+        Assert.Equal(
+            Enumerable.Range(0, 101).Select(index => (byte)index).ToArray(),
+            tiers[100]);
+
+        var riff = AmplitudeEnvelopeBuilder.EncodeRiff(10, tiers[10]);
+        Assert.Equal(72, riff.Length);
+        Assert.Equal(0x6134_D217u, SpectralArtifactEncoder.Crc32(riff));
     }
 
     [Fact]

@@ -1,0 +1,14 @@
+{
+  "name": "@slipmat/companion-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check:links": "node scripts/check-links.mjs"
+  },
+  "dependencies": {
+    "astro": "7.3.5"
+  }
+}

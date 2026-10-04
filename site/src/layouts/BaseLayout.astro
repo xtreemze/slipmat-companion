@@ -1,0 +1,49 @@
+---
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+  description: string;
+}
+
+const { title, description } = Astro.props;
+const rawBase = import.meta.env.BASE_URL;
+const base = rawBase.endsWith("/") ? rawBase : rawBase + "/";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#12100d" />
+    <meta name="color-scheme" content="dark light" />
+    <title>{title}</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#content">Skip to content</a>
+    <header class="site-header">
+      <a class="brand" href={base} aria-label="Slipmat Companion home">
+        <span class="brand-mark" aria-hidden="true">S</span>
+        <span>
+          <strong>Slipmat</strong>
+          <small>Companion</small>
+        </span>
+      </a>
+      <nav aria-label="Primary">
+        <a href={base + "story/"}>Story</a>
+        <a href={base + "onboarding/"}>Set up</a>
+        <a href={base + "manifest.json"}>Manifest</a>
+        <a href="https://github.com/xtreemze/slipmat-companion">GitHub</a>
+      </nav>
+    </header>
+    <main id="content">
+      <slot />
+    </main>
+    <footer class="site-footer">
+      <p>Optional acceleration for Slipmat. Jellyfin and Slipmat remain authoritative for their own domains.</p>
+      <a href="https://github.com/xtreemze/slipmat-companion/blob/main/LICENSE">License</a>
+    </footer>
+  </body>
+</html>

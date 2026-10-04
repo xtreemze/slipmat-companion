@@ -1,0 +1,97 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/xtreemze/slipmat/schema/server-extension-analysis-artifact-v1.schema.json",
+  "title": "AnalysisArtifactDescriptorV1",
+  "description": "Portable host-neutral descriptor for ready analysis artifacts. Contains no provider-local IDs, filesystem paths, credentials, or retrieval URLs.",
+  "type": "object",
+  "required": [
+    "protocolVersion",
+    "subject",
+    "sourceFingerprint",
+    "sidecarSchemaVersion",
+    "producerVersion",
+    "durationMs",
+    "artifacts"
+  ],
+  "properties": {
+    "protocolVersion": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$"
+    },
+    "subject": {
+      "type": "object",
+      "required": [
+        "version",
+        "storeKey"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "storeKey": {
+          "type": "string",
+          "pattern": "^asv1-[0-9a-f]{64}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sourceFingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "sidecarSchemaVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "producerVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "durationMs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "kind",
+          "variant",
+          "ratePerSecond",
+          "etag"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "waveform",
+              "spectral-waveform"
+            ]
+          },
+          "variant": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Opaque artifact-format/algorithm variant identity."
+          },
+          "ratePerSecond": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "etag": {
+            "type": "string",
+            "minLength": 1
+          },
+          "analysisVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional producer algorithm/generation version when the artifact family defines one."
+          }
+        },
+        "additionalProperties": true
+      },
+      "minItems": 1
+    }
+  },
+  "additionalProperties": true
+}

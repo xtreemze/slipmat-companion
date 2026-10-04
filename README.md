@@ -16,7 +16,7 @@ No separate artifact-store mount or analyzer service is required for the plugin'
 
 The dashboard's **Artifact store override** is advanced configuration only. Existing deployments with a real `/store` mount remain compatible, and `SLIPMAT_ARTIFACT_STORE_ROOT` can override the managed path.
 
-Audio analysis is integrated into the plugin and uses the FFmpeg binary already managed by Jellyfin. The companion amplitude fallback is explicitly identified as `awf_v1_riff_mono_u8_peak`; it is a mono RIFF/WAVE u8 max-peak envelope and is not byte-compatible with Slipmat's retired `audiowaveform` `awf_v1_native_mono_b8` DAT format. No second analyzer service, URL, or analyzer container is required. Missing artifacts are queued asynchronously from normal companion requests. Local Jellyfin audio additions/updates are also analyzed through the bounded worker and the daily **Slipmat audio analysis** task; cloud-mounted media is intentionally excluded from automatic worker/backfill traversal so the analyzer cannot materialize an entire remote library merely by scanning it. Missing cloud analysis remains request-driven. The integrated analyzer preserves the source-declared sample rate and the first one or two source channels, matching Slipmat's canonical Rust accumulator topology. It writes amplitude envelopes, SLWS v2 five-band spectral tiers with Rust-matching proportional max-pooling for coarse tiers, canonical v6 `SBND` source-boundary evidence, conservative `SRHY` rhythm evidence with Rust-equivalent candidate/phase tie-breaking and f32 BPM quantization, and `AnalysisBlocks` containing timing, harmonic, legacy-compatible loudness fields, provider-neutral measured EBU loudness evidence (LUFS/dBTP/LRA with analyzer provenance), and an energy curve. Multichannel sources select their first two lanes rather than downmixing. Missing source stream metadata or weak evidence fails closed while Slipmat retains its local fallback.
+Audio analysis is integrated into the plugin and uses the FFmpeg binary already managed by Jellyfin. The companion amplitude fallback is explicitly identified as `awf_v1_riff_mono_u8_peak`; it is a mono RIFF/WAVE u8 max-peak envelope and is not byte-compatible with Slipmat's retired `audiowaveform` `awf_v1_native_mono_b8` DAT format. No second analyzer service, URL, or analyzer container is required. Missing artifacts are queued asynchronously from normal companion requests. Local Jellyfin audio additions/updates are also analyzed through the bounded worker and the daily **Slipmat audio analysis** task; cloud-mounted media is intentionally excluded from automatic worker/backfill traversal so the analyzer cannot materialize an entire remote library merely by scanning it. Missing cloud analysis remains request-driven. The integrated analyzer preserves the source-declared sample rate and the first one or two source channels, matching Slipmat's canonical Rust accumulator topology. It writes amplitude envelopes, SLWS v2 five-band spectral tiers with Rust-matching proportional max-pooling for coarse tiers, canonical v6 `SBND` source-boundary evidence, conservative `SRHY` rhythm evidence with Rust-equivalent candidate/phase tie-breaking and f32 BPM quantization, optional checksummed `SHRM` v1 harmonic-key evidence with typed pitch/mode/confidence, and `AnalysisBlocks` containing timing, harmonic, legacy-compatible loudness fields, provider-neutral measured EBU loudness evidence (LUFS/dBTP/LRA with analyzer provenance), and an energy curve. Multichannel sources select their first two lanes rather than downmixing. Missing source stream metadata or weak evidence fails closed while Slipmat retains its local fallback.
 
 ## Compatibility policy
 
@@ -108,7 +108,8 @@ The Jellyfin plugin settings provide:
 - a separate disposable VFS cache path and policy per profile;
 - bounded cache policy with defaults of 16 GiB target maximum, 24-hour idle expiry, and 4 GiB minimum free space;
 - guided setup/migration explanations in the dashboard;
-- manual and six-hour scheduled per-profile mount/library reconciliation.
+- manual per-profile mount/library reconciliation, including explicit Jellyfin catalog refresh when requested;
+- six-hour scheduled mount reconciliation that never queues a Jellyfin catalog scan.
 
 The executable is operator-owned. Audio Gateway invokes `rclone` from Jellyfin's service `PATH`, or `SLIPMAT_RCLONE` when explicitly provided by the host. rclone's own `RCLONE_CONFIG` mechanism may point the service at the intended config file. The plugin never calls `config dump`, `config show`, or any other command that returns provider secrets. The Jellyfin service/container must also have the platform mount support required by `rclone mount` (for example FUSE on Linux); otherwise reconciliation fails closed rather than falling back to full-library copying.
 
@@ -134,7 +135,24 @@ The remote namespace is visible without pre-copying its media. A file is downloa
 
 Jellyfin catalog metadata remains in Jellyfin's own data/database storage. Slipmat waveform/spectral/analysis sidecars remain in the companion artifact store and are not deleted when a media cache entry is evicted. Artwork palette evidence remains a bounded derived cache keyed by artwork revision. The cloud media mount is read-only, so server-side metadata writers cannot mutate the remote media tree through this projection.
 
-The six-hour reconciliation task independently verifies/prepares every enabled VFS profile and can queue Jellyfin namespace/catalog scans; it does not copy the remote libraries and does not run Companion analysis backfill. rclone's directory cache/polling provides nearer-term remote namespace visibility between scans. Scheduled waveform/peak/spectral/loudness/rhythm analysis skips every VFS mount; cloud analysis remains explicit/request-driven.
+The six-hour reconciliation task independently verifies/prepares every enabled VFS profile without queuing a Jellyfin namespace/catalog scan. It does not copy remote libraries and does not run Companion analysis backfill. Scheduled waveform/peak/spectral/loudness/rhythm analysis skips every VFS mount; cloud analysis remains explicit/request-driven. This makes Companion-owned automatic tasks payload-safe for VFS media.
+
+Jellyfin catalog refresh remains an explicit namespace-discovery action used for initial setup, migration cutover, or intentional catalog refresh. Jellyfin 12.1 may probe uncached filesystem media while identifying catalog items and does not expose a supported VFS-cache-residency filter, so the plugin does not claim that an explicit Jellyfin catalog scan is payload-free. rclone's directory cache/polling can make namespace changes visible at the mounted filesystem layer between explicit catalog refreshes.
+
+### VFS library migration lifecycle
+
+Each VFS profile represents one independently managed Jellyfin library projection. Create as many profiles as needed, with separate remote roots, mount paths, cache paths, and cache budgets.
+
+For local Jellyfin library → cloud VFS migration:
+
+1. Create or select the matching VFS profile and empty remote destination.
+2. **Prepare** performs additive `rclone copy` followed by exact `rclone check`; local media remains authoritative.
+3. **Cut over** performs a final incremental copy/check, retains the original local directory as a rollback backup, mounts the cloud VFS at the preserved Jellyfin library path, and explicitly refreshes Jellyfin so the existing library continues to resolve.
+4. **Finalize** deletes only the retained local rollback backup after exact-path confirmation. This is the step that reclaims local media space. Cloud objects are never deleted by finalize.
+
+**Prepare all eligible** starts the additive copy/verify stage for every eligible one-path Jellyfin library that has exactly one matching VFS profile. Cutover and finalization remain per-library so one failure or destructive cleanup decision cannot affect unrelated libraries.
+
+For cloud VFS → local migration, the plugin copies and verifies into local staging first, then cuts the Jellyfin library back to local storage. The cloud source is retained; rollback and deletion semantics remain explicit.
 
 Legacy materialized projections are deliberately not auto-migrated or deleted. A directory containing the former `.slipmat-rclone-cloud-projection.json` marker fails closed with `legacy-materialized-projection-present`. Verify the cloud source, remove/archive the old local copy manually or choose a new mount path, then reconcile again. This protects local bytes from destructive migration.
 
@@ -334,3 +352,41 @@ This is the standalone Slipmat companion repository. Slipmat remains authoritati
 To publish a new version, update the same four-part version in `build.yaml` and `Directory.Build.props`, update the quoted `changelog` in `build.yaml`, and merge to `main`. CI and release publication then proceed automatically. Commits that keep an already-published version still run CI but do not create or replace a release. The Pages manifest preserves previously published versions for Jellyfin compatibility selection.
 
 The generated Pages artifact contains `manifest.json`. GitHub Pages is a distribution surface only; Slipmat must continue to work with stock Jellyfin when this companion is absent or unavailable.
+
+
+## Cross-repository contract parity
+
+Slipmat owns the canonical portable analysis contracts. The companion mirrors the relevant JSON schemas
+and their example payloads so normal builds and tests remain deterministic without depending on
+cross-repository credentials or network availability. `schema/upstream-parity-files.txt` declares
+the reviewed mirror set, intentionally excluding unrelated Slipmat schemas such as credits/viewmodels.
+`schema/upstream-parity-provenance.json` records the exact reviewed Slipmat commit plus each canonical
+file's Git blob identity. Companion CI and the focused `Canonical Contract Provenance` workflow
+recompute those blob identities locally and fail closed on unreviewed schema or fixture drift.
+
+Updating the snapshot is an explicit cross-repository contract action: inspect the new Slipmat
+canonical commit, update the mirrored files and provenance together, then review the resulting
+companion PR. This records exact authority without giving the companion workflow credentials to the
+Slipmat repository.
+
+
+## Companion website
+
+The public landing and onboarding site is an Astro static app under `site/`. Astro uses Vite for development and production builds.
+
+Local development:
+
+```bash
+npm install --prefix site --no-audit --no-fund
+npm run dev --prefix site
+```
+
+Production verification:
+
+```bash
+npm run build --prefix site
+test -f site/dist/index.html
+test -f site/dist/onboarding/index.html
+```
+
+GitHub Pages deploys the built site at `https://xtreemze.github.io/slipmat-companion/`. The Jellyfin repository manifest remains at `/manifest.json`: ordinary site deployments preserve the currently published manifest, while release publication rebuilds the Astro site and writes the newly generated manifest into the same Pages artifact.

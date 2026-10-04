@@ -49,6 +49,23 @@ jobs:
           python3 scripts/verify_distribution_policy.py
           python3 scripts/verify_release_metadata.py --expected-version "$VERSION"
 
+      - name: Verify canonical fixture provenance
+        run: python3 scripts/verify_upstream_fixture_parity.py
+
+      - name: Set up Node for companion site
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+
+      - name: Build companion site
+        run: |
+          npm install --prefix site --no-audit --no-fund
+          npm run build --prefix site
+          test -f site/dist/index.html
+          test -f site/dist/onboarding/index.html
+          test -f site/dist/story/index.html
+          npm run check:links --prefix site
+
       - name: Restore
         run: dotnet restore Jellyfin.Plugin.AudioGateway.slnx
 

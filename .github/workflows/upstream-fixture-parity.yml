@@ -1,0 +1,38 @@
+name: Canonical Contract Provenance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - "schema/*.schema.json"
+      - "schema/examples/**"
+      - "schema/upstream-parity-files.txt"
+      - "schema/upstream-parity-provenance.json"
+      - "scripts/verify_upstream_fixture_parity.py"
+      - ".github/workflows/upstream-fixture-parity.yml"
+  push:
+    branches: [main]
+    paths:
+      - "schema/*.schema.json"
+      - "schema/examples/**"
+      - "schema/upstream-parity-files.txt"
+      - "schema/upstream-parity-provenance.json"
+      - "scripts/verify_upstream_fixture_parity.py"
+      - ".github/workflows/upstream-fixture-parity.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  contract-provenance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout companion
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Verify reviewed canonical contract snapshot
+        run: python3 scripts/verify_upstream_fixture_parity.py

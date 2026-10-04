@@ -1,0 +1,27 @@
+{
+  "upstreamRepository": "xtreemze/slipmat",
+  "upstreamCommit": "46be1f8496d6c3d9ee04ac4dfa39af1758c25919",
+  "files": {
+    "schema/analysis.schema.json": "17b617c848e30b4a3d231d7227793f8a375329d3",
+    "schema/server-extension-analysis-artifact-v1.schema.json": "d89ef09e3c3c994dbc9b722069994f9e6fa36d45",
+    "schema/server-extension-analysis-coverage-request-v1.schema.json": "ad5a6a75cf792a25d39940c6cecb3b2ac9527fe9",
+    "schema/server-extension-analysis-coverage-response-v1.schema.json": "afa72e01df99c22fc1a7517a051bc0c7a45660f7",
+    "schema/server-extension-capabilities-v1.schema.json": "d9d201ae1679472033248ea8438ae3acb459a3eb",
+    "schema/waveform.schema.json": "ba88965c1358a35b55c933231472b5c3c186f3e3",
+    "schema/examples/album_event.example.json": "809a57111051c5c5c9c193a72b612c20b82ce951",
+    "schema/examples/analysis_sidecar_v2.example.json": "07f39e99b20328a20ccba802b32caee71a705236",
+    "schema/examples/analysis_subject_v1_vectors.json": "7398e611a4a1bcdeca301f0446f95db810cac0e8",
+    "schema/examples/artist_event.example.json": "6644f3b57e847b4c40bad4f8ed8d6f4448c0f298",
+    "schema/examples/capabilities.degraded.example.json": "0c8665bb0b276c14c296153c81b4ce4b7ffea2dd",
+    "schema/examples/capabilities.example.json": "1d1e96674620a4c162859c391e96269cdb7589c8",
+    "schema/examples/server_extension_analysis_artifact.example.json": "279974444ece3cdf4e6530ee2691d85eec428005",
+    "schema/examples/server_extension_analysis_coverage_request.example.json": "a590696de5a0d22324231b7be3377f75d3ab61ca",
+    "schema/examples/server_extension_analysis_coverage_response.example.json": "156919fb8364dd56be4053455eac20745c8e132a",
+    "schema/examples/server_extension_capabilities.degraded.example.json": "99c49d64698dabffab374ecb9b3a66a3735e269f",
+    "schema/examples/server_extension_capabilities.example.json": "bc8b238145c754f668a53433dda654f14b71859b",
+    "schema/examples/server_extension_track_playback_event.example.json": "f72c71840a277fd5a1371017bfa8c27ff2f8a425",
+    "schema/examples/server_extension_track_playback_batch.example.json": "d2e153be2892371d5e0b2b963bf9c41fba62a5be",
+    "schema/examples/track_event.example.json": "95657dc3b4b36b8e7ebe8d952214d8d577160d19",
+    "schema/examples/track_event.minimal.example.json": "54c63a5da5423ee04102760fa50682ba779942e8"
+  }
+}

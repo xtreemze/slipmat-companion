@@ -15,4 +15,4 @@ category: "General"
 owner: "xtreemze"
 artifacts:
 - "Jellyfin.Plugin.AudioGateway.dll"
-changelog: "Add multi-library bounded rclone VFS onboarding and cloud-safe Jellyfin scan policy, plus staged reversible local-to-cloud and cloud-to-local migration with exact verification, rollback retention, bulk preparation, and explicit local-space reclamation."
+changelog: "Add multi-library bounded rclone VFS onboarding and reversible migration, make automatic VFS reconciliation payload-safe, and polish the responsive Jellyfin settings dashboard while preserving explicit catalog-refresh and cleanup boundaries."

@@ -1,0 +1,285 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://jellyfin-audio-stack/schema/analysis.schema.json",
+  "$comment": "Versioning: bump x-schemaVersion patch for additive changes, minor for new optional fields, major for breaking changes (removal, rename, type change). Time type policy: structural timestamps (timeMs, startMs, endMs, inWindowMs, outWindowMs, downbeats) are INTEGER milliseconds. BPM-derived values (beatGrid.startOffsetMs, beatGrid.intervalMs) are NUMBER (float) because intervalMs = 60000/bpm is generally non-integer, and rounding accumulates audible drift over 100+ beats.",
+  "x-schemaVersion": "1.1.0",
+  "title": "AnalysisBlocks",
+  "type": "object",
+  "required": [
+    "timing",
+    "harmonic",
+    "loudness"
+  ],
+  "properties": {
+    "timing": {
+      "type": "object",
+      "required": [
+        "bpm",
+        "bpmConfidence"
+      ],
+      "properties": {
+        "bpm": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Beats per minute."
+        },
+        "bpmConfidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Confidence in the BPM estimate [0,1]."
+        },
+        "downbeats": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Downbeat position in whole milliseconds from track start."
+          },
+          "default": [],
+          "description": "Measure downbeat positions in integer ms. Sub-ms precision is not required at this granularity."
+        },
+        "beatGrid": {
+          "type": "object",
+          "description": "Regular beat grid. startOffsetMs and intervalMs are NUMBER (float) because intervalMs = 60000/bpm is generally non-integer; rounding to integer ms would accumulate ≈50ms drift over 100 beats.",
+          "properties": {
+            "startOffsetMs": {
+              "type": "number",
+              "description": "Offset of first beat in ms (float for sub-ms precision)."
+            },
+            "intervalMs": {
+              "type": "number",
+              "description": "Inter-beat interval in ms = 60000/bpm (float)."
+            }
+          }
+        }
+      }
+    },
+    "harmonic": {
+      "type": "object",
+      "required": [
+        "key",
+        "camelotKey",
+        "keyConfidence"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "examples": [
+            "C Major",
+            "A Minor"
+          ]
+        },
+        "camelotKey": {
+          "type": "string",
+          "examples": [
+            "8B",
+            "8A"
+          ],
+          "description": "Camelot wheel notation; examples correspond to C Major = 8B and A Minor = 8A."
+        },
+        "keyConfidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "structure": {
+      "type": "object",
+      "description": "Optional structural analysis; omitted when not computed.",
+      "properties": {
+        "energyCurve": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "timeMs",
+              "energy"
+            ],
+            "properties": {
+              "timeMs": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Sample position in whole milliseconds from track start."
+              },
+              "energy": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          }
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "startMs",
+              "endMs",
+              "label"
+            ],
+            "properties": {
+              "startMs": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Section start in whole milliseconds."
+              },
+              "endMs": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Section end in whole milliseconds."
+              },
+              "label": {
+                "type": "string",
+                "enum": [
+                  "intro",
+                  "verse",
+                  "chorus",
+                  "bridge",
+                  "outro",
+                  "instrumental",
+                  "break",
+                  "unknown"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "transitions": {
+      "type": "array",
+      "description": "Candidate transition windows, ordered by score descending.",
+      "items": {
+        "type": "object",
+        "required": [
+          "inWindowMs",
+          "outWindowMs",
+          "score"
+        ],
+        "properties": {
+          "inWindowMs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Start of incoming transition window in whole milliseconds."
+          },
+          "outWindowMs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Start of outgoing transition window in whole milliseconds."
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "reasonCodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          }
+        }
+      }
+    },
+    "loudness": {
+      "type": "object",
+      "required": [
+        "integratedLufs",
+        "truePeak",
+        "dynamicRange"
+      ],
+      "properties": {
+        "integratedLufs": {
+          "type": "number",
+          "description": "EBU R128 integrated loudness in LUFS."
+        },
+        "truePeak": {
+          "type": "number",
+          "description": "True peak level in dBTP."
+        },
+        "dynamicRange": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Compatibility field carrying EBU R128 loudness range (LRA) in LU for companion analysis. It is not the legacy RMS/envelope dynamic-range descriptor."
+        }
+      }
+    },
+    "loudnessMeasurement": {
+      "type": "object",
+      "description": "Optional provider-neutral measured loudness evidence. Carries measurement facts and provenance only; it does not select a normalization target or derive gain.",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "scope",
+        "authority",
+        "semantics",
+        "analyzer",
+        "integratedLufs"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "track",
+            "album"
+          ]
+        },
+        "authority": {
+          "type": "string",
+          "enum": [
+            "client-analysis",
+            "server-analysis",
+            "provider"
+          ]
+        },
+        "semantics": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._:-]{0,63}$",
+          "description": "Exact measurement recipe semantics; must not be relabeled as ReplayGain/R128 gain semantics."
+        },
+        "analyzer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "version"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "version": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "configurationDigest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          }
+        },
+        "integratedLufs": {
+          "type": "number",
+          "description": "Measured full-program integrated loudness in LUFS under the declared analyzer recipe."
+        },
+        "truePeakDbtp": {
+          "type": "number",
+          "description": "Optional measured true-peak level in dBTP under the declared analyzer recipe."
+        },
+        "loudnessRangeLu": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Optional measured loudness range (LRA) in LU. This is not the legacy RMS/envelope dynamic-range descriptor."
+        }
+      }
+    }
+  }
+}

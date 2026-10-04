@@ -3,6 +3,7 @@ using System.IO;
 using System.Text.Json;
 using Jellyfin.Plugin.AudioGateway.Api;
 using Jellyfin.Plugin.AudioGateway.Models;
+using Jellyfin.Plugin.AudioGateway.Services;
 using Xunit;
 
 namespace Jellyfin.Plugin.AudioGateway.Tests;
@@ -70,6 +71,50 @@ public class ModelRoundTripTests
         Assert.Null(evt.Analysis);
         Assert.Null(evt.CreditsPreview);
         Assert.False(evt.AnalysisAvailable);
+    }
+
+    [Fact]
+    public void TrackPlaybackEvent_CanonicalCompactExample_Deserializes()
+    {
+        var path = ExamplePath("server_extension_track_playback_event.example.json");
+        var evt = Deserialize<TrackPlaybackEvent>(path);
+
+        Assert.Equal("11111111-1111-1111-1111-111111111111", evt.Track.ItemId);
+        Assert.Equal("So What", evt.Track.Title);
+        Assert.NotNull(evt.Waveform);
+        Assert.Equal("awf_v1_riff_mono_u8_peak", evt.Waveform!.Variant);
+        Assert.NotNull(evt.Waveform.Path);
+        Assert.NotNull(evt.Waveform.Url);
+        Assert.Null(evt.Waveform.DurationSamples);
+        Assert.NotNull(evt.Sidecar);
+        Assert.NotNull(evt.Analysis);
+        Assert.NotNull(evt.Analysis!.LoudnessMeasurement);
+        Assert.Equal(
+            "ffmpeg-loudnorm-input",
+            evt.Analysis.LoudnessMeasurement!.Semantics);
+        Assert.True(evt.Availability.HasArtworkPalette);
+        Assert.NotNull(evt.ArtworkPalette);
+        Assert.Equal("album-primary", evt.ArtworkPalette!.SourceKind);
+        Assert.Equal(2, evt.ArtworkPalette.Swatches.Count);
+    }
+
+    [Fact]
+    public void TrackPlaybackEventBatch_CanonicalExample_Deserializes()
+    {
+        var path = ExamplePath("server_extension_track_playback_batch.example.json");
+        var response = Deserialize<BatchTrackPlaybackEventResponse>(path);
+
+        Assert.Single(response.Items);
+        var evt = response.Items[0];
+        Assert.Equal("11111111-1111-1111-1111-111111111111", evt.Track.ItemId);
+        Assert.NotNull(evt.Waveform);
+        Assert.Null(evt.Waveform!.DurationSamples);
+        Assert.NotNull(evt.Analysis?.LoudnessMeasurement);
+        Assert.Equal(
+            "server-analysis",
+            evt.Analysis!.LoudnessMeasurement!.Authority);
+        Assert.True(evt.Availability.HasArtworkPalette);
+        Assert.NotNull(evt.ArtworkPalette);
     }
 
     [Fact]
@@ -151,6 +196,11 @@ public class ModelRoundTripTests
         Assert.Equal(AnalysisSubjectV1.SubjectVersion, sidecar.SubjectVersion);
         Assert.StartsWith("asv1-", sidecar.SubjectStoreKey);
         Assert.Equal(3, sidecar.WaveformRefs.Count);
+        Assert.All(
+            sidecar.WaveformRefs,
+            reference => Assert.Equal(
+                IntegratedAudioAnalyzer.AmplitudeVariant,
+                reference.Variant));
         Assert.NotNull(sidecar.Analysis);
         Assert.Equal("A Minor", sidecar.Analysis!.Harmonic.Key);
         Assert.Equal("8A", sidecar.Analysis.Harmonic.CamelotKey);
