@@ -42,7 +42,7 @@ public class CloudConfigurationPageTests
         Assert.Contains("local-to-vfs", html);
         Assert.Contains("vfs-to-local", html);
         Assert.Contains("copy and exact verification only", html);
-        Assert.Contains("Cloud media is never deleted", html);
+        Assert.Contains("never deletes cloud media", html);
     }
 
     [Fact]
@@ -56,15 +56,18 @@ public class CloudConfigurationPageTests
         var html = reader.ReadToEnd();
 
         Assert.Contains("VFS setup and migration model", html);
-        Assert.Contains("Cached VFS media is analyzed only", html);
-        Assert.Contains("making that catalog refresh cache-only would hide", html);
+        Assert.Contains("Automatic Audio Gateway tasks are payload-safe", html);
+        Assert.Contains("does not queue a Jellyfin catalog scan", html);
+        Assert.Contains("does not expose a supported cache-residency filter", html);
         Assert.Contains("CloudLibraryProfile", html);
         Assert.Contains("Add VFS library", html);
         Assert.Contains("Remove profile", html);
         Assert.Contains("CloudLibraries", html);
         Assert.Contains("projectionId", html);
-        Assert.Contains("Companion scheduled waveform/peak/loudness analysis does not traverse VFS libraries", html);
+        Assert.Contains("scheduled waveform/peak/loudness analysis never traverses VFS media", html);
         Assert.Contains("copy it to an empty cloud destination", html);
+        Assert.Contains("Finalize is the only step that frees that retained local-media space", html);
+        Assert.Contains("Review and cut over each library independently", html);
         Assert.Contains("explicitly finalize local cleanup", html);
         Assert.Contains("migrate back", html);
         Assert.Contains("never uses rclone sync/move/purge", html);
