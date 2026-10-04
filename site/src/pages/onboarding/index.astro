@@ -21,34 +21,34 @@ const manifestUrl = "https://xtreemze.github.io/slipmat-companion/manifest.json"
     </div>
 
     <div class="steps" data-checklist>
-      <label class="step">
-        <input type="checkbox" data-step="repository" />
-        <span>
-          <h2>1. Add the plugin repository</h2>
+      <div class="step">
+        <input id="step-repository" type="checkbox" data-step="repository" />
+        <div>
+          <label for="step-repository"><h2>1. Add the plugin repository</h2></label>
           <p>In Jellyfin, open <strong>Dashboard → Plugins → Repositories</strong> and add:</p>
           <div class="install-command">
             <code>{manifestUrl}</code>
             <button class="copy" type="button" data-copy={manifestUrl}>Copy</button>
           </div>
-        </span>
-      </label>
+        </div>
+      </div>
 
-      <label class="step">
-        <input type="checkbox" data-step="install" />
-        <span>
-          <h2>2. Install Audio Gateway</h2>
+      <div class="step">
+        <input id="step-install" type="checkbox" data-step="install" />
+        <div>
+          <label for="step-install"><h2>2. Install Audio Gateway</h2></label>
           <p>Open the Jellyfin plugin catalog, install <strong>Audio Gateway</strong>, then restart Jellyfin so the plugin can register its native services and dashboard page.</p>
-        </span>
-      </label>
+        </div>
+      </div>
 
-      <label class="step">
-        <input type="checkbox" data-step="verify" />
-        <span>
-          <h2>3. Verify capabilities</h2>
+      <div class="step">
+        <input id="step-verify" type="checkbox" data-step="verify" />
+        <div>
+          <label for="step-verify"><h2>3. Verify capabilities</h2></label>
           <p>Open the Audio Gateway dashboard in Jellyfin. Core batching and integrated analysis should work without an external analyzer. Missing optional modules are ordinary fallback conditions.</p>
           <p>For protocol-level verification, the plugin exposes <code>/Plugins/AudioGateway/diagnostics/capabilities</code>.</p>
-        </span>
-      </label>
+        </div>
+      </div>
     </div>
   </section>
 
