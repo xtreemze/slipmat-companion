@@ -336,15 +336,15 @@ To publish a new version, update the same four-part version in `build.yaml` and 
 The generated Pages artifact contains `manifest.json`. GitHub Pages is a distribution surface only; Slipmat must continue to work with stock Jellyfin when this companion is absent or unavailable.
 
 
-## Cross-repository fixture parity
+## Cross-repository contract parity
 
-Slipmat owns the canonical portable analysis contracts and examples mirrored under `schema/examples/`.
-The companion keeps reviewed copies so normal builds and tests remain deterministic and do not depend
-on cross-repository credentials or network availability. `schema/upstream-parity-files.txt` declares
-the shared mirror set. `schema/upstream-parity-provenance.json` records the exact reviewed Slipmat
-commit plus each canonical file's Git blob identity. Companion CI and the focused
-`Canonical Fixture Provenance` workflow recompute those blob identities locally and fail closed on
-unreviewed mirror drift.
+Slipmat owns the canonical portable analysis contracts. The companion mirrors the relevant JSON schemas
+and their example payloads so normal builds and tests remain deterministic without depending on
+cross-repository credentials or network availability. `schema/upstream-parity-files.txt` declares
+the reviewed mirror set, intentionally excluding unrelated Slipmat schemas such as credits/viewmodels.
+`schema/upstream-parity-provenance.json` records the exact reviewed Slipmat commit plus each canonical
+file's Git blob identity. Companion CI and the focused `Canonical Contract Provenance` workflow
+recompute those blob identities locally and fail closed on unreviewed schema or fixture drift.
 
 Updating the snapshot is an explicit cross-repository contract action: inspect the new Slipmat
 canonical commit, update the mirrored files and provenance together, then review the resulting

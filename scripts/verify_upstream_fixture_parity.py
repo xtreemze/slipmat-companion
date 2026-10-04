@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify mirrored Slipmat fixtures against a reviewed upstream Git snapshot."""
+"""Verify mirrored Slipmat contract files against a reviewed upstream Git snapshot."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def load_declared_paths(path: Path) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Verify checked-in companion fixtures match the reviewed Slipmat "
+            "Verify checked-in companion contract files match the reviewed Slipmat "
             "Git blob identities recorded in the provenance snapshot."
         )
     )
@@ -90,19 +90,19 @@ def main() -> int:
 
         local_path = root / relative
         if not local_path.is_file():
-            failures.append(f"missing mirrored fixture: {relative}")
+            failures.append(f"missing mirrored contract file: {relative}")
             continue
 
         actual_sha = git_blob_sha1(local_path.read_bytes())
         if actual_sha != expected_sha:
             failures.append(
-                f"fixture provenance mismatch: {relative} "
+                f"contract provenance mismatch: {relative} "
                 f"(expected {expected_sha}, got {actual_sha})"
             )
 
     if failures:
         print(
-            "Canonical fixture provenance verification failed. "
+            "Canonical contract provenance verification failed. "
             f"Reviewed upstream snapshot: xtreemze/slipmat@{commit}"
         )
         for failure in failures:
@@ -110,7 +110,7 @@ def main() -> int:
         return 1
 
     print(
-        "Canonical fixture provenance verified against "
+        "Canonical contract provenance verified against "
         f"xtreemze/slipmat@{commit}."
     )
     return 0
