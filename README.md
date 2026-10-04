@@ -350,3 +350,25 @@ Updating the snapshot is an explicit cross-repository contract action: inspect t
 canonical commit, update the mirrored files and provenance together, then review the resulting
 companion PR. This records exact authority without giving the companion workflow credentials to the
 Slipmat repository.
+
+
+## Companion website
+
+The public landing and onboarding site is an Astro static app under `site/`. Astro uses Vite for development and production builds.
+
+Local development:
+
+```bash
+npm install --prefix site --no-audit --no-fund
+npm run dev --prefix site
+```
+
+Production verification:
+
+```bash
+npm run build --prefix site
+test -f site/dist/index.html
+test -f site/dist/onboarding/index.html
+```
+
+GitHub Pages deploys the built site at `https://xtreemze.github.io/slipmat-companion/`. The Jellyfin repository manifest remains at `/manifest.json`: ordinary site deployments preserve the currently published manifest, while release publication rebuilds the Astro site and writes the newly generated manifest into the same Pages artifact.

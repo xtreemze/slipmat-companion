@@ -77,6 +77,20 @@ jobs:
           repository: ${{ github.repository }}
           github-token: ${{ github.token }}
 
+      - name: Set up Node for companion site
+        if: steps.state.outputs.publish == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+
+      - name: Build companion site
+        if: steps.state.outputs.publish == 'true'
+        run: |
+          npm install --prefix site --no-audit --no-fund
+          npm run build --prefix site
+          test -f site/dist/index.html
+          test -f site/dist/onboarding/index.html
+
       - name: Prepare Pages manifest
         if: steps.state.outputs.publish == 'true'
         env:
@@ -90,16 +104,15 @@ jobs:
           test -f "$ZIP"
           test -s "$CHANGELOG"
 
-          mkdir -p site
-          cp pages/index.html site/index.html
+          test -d site/dist
 
           PREVIOUS_ARGS=()
           if [ "$(gh release list --limit 1 --json tagName --jq 'length')" -gt 0 ]; then
             REPOSITORY_NAME="${GITHUB_REPOSITORY#*/}"
             PAGES_MANIFEST="https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPOSITORY_NAME}/manifest.json"
             curl --fail --silent --show-error --location "$PAGES_MANIFEST" \
-              --output site/previous-manifest.json
-            PREVIOUS_ARGS=(--previous-manifest site/previous-manifest.json)
+              --output site/dist/previous-manifest.json
+            PREVIOUS_ARGS=(--previous-manifest site/dist/previous-manifest.json)
           fi
 
           TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -110,15 +123,15 @@ jobs:
             --source-url "$SOURCE_URL" \
             --timestamp "$TIMESTAMP" \
             --changelog-file "$CHANGELOG" \
-            --output site/manifest.json \
+            --output site/dist/manifest.json \
             "${PREVIOUS_ARGS[@]}"
-          python3 -m json.tool site/manifest.json >/dev/null
+          python3 -m json.tool site/dist/manifest.json >/dev/null
 
       - name: Upload Pages artifact
         if: steps.state.outputs.publish == 'true'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
-          path: site
+          path: site/dist
 
       - name: Create GitHub Release
         if: steps.state.outputs.publish == 'true'
