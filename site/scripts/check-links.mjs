@@ -32,7 +32,8 @@ function localFileFor(pathname) {
 function hasId(file, id) {
   if (!id || !existsSync(file) || !file.endsWith(".html")) return true;
   const html = readFileSync(file, "utf8");
-  return html.includes('id="' + id.replaceAll('"', "&quot;") + '"') || html.includes("id=\'" + id.replaceAll("\'", "&#39;") + "\'");
+  return html.includes('id="' + id.replaceAll('"', "&quot;") + '"')
+    || html.includes("id='" + id.replaceAll("'", "&#39;") + "'");
 }
 
 if (!existsSync(root)) throw new Error("site/dist does not exist; build the site first");
@@ -42,11 +43,11 @@ for (const file of htmlFiles) {
   const html = readFileSync(file, "utf8");
   const from = pagePath(file);
 
-  for (const match of html.matchAll(/\\bhref=(["\'])(.*?)\\1/g)) {
+  for (const match of html.matchAll(/\bhref=(["'])(.*?)\1/g)) {
     const href = match[2];
     if (!href || href.startsWith("mailto:") || href.startsWith("tel:")) continue;
 
-    if (/^https?:\\/\\//.test(href)) {
+    if (/^https?:\/\//.test(href)) {
       try { external.add(new URL(href).href); }
       catch { failures.push(from + ": invalid external URL " + href); }
       continue;
@@ -68,7 +69,7 @@ for (const file of htmlFiles) {
 }
 
 if (failures.length) {
-  console.error("Broken generated links:\\n" + failures.map((item) => " - " + item).join("\\n"));
+  console.error("Broken generated links:\n" + failures.map((item) => " - " + item).join("\n"));
   process.exit(1);
 }
 
