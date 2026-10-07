@@ -35,7 +35,7 @@ public class CloudMigrationStoreTests
             "Media/Music",
             string.Empty,
             false,
-            "rclone-check-exact-hash-when-supported-size-fallback",
+            "rclone-check-download-content",
             now,
             now);
 
@@ -45,7 +45,7 @@ public class CloudMigrationStoreTests
         Assert.NotNull(loaded);
         Assert.Equal(job.Id, loaded!.Id);
         Assert.Equal(CloudMigrationPhases.ReadyForCutover, loaded.Phase);
-        Assert.Equal(job.Verification, loaded.Verification);
+        Assert.Equal(job.Verification, loaded.Verification);\n        Assert.Equal(job.ManifestDigestSha256, loaded.ManifestDigestSha256);\n        Assert.Equal(job.ManifestFileCount, loaded.ManifestFileCount);
     }
 
     [Fact]
@@ -74,9 +74,12 @@ public class CloudMigrationStoreTests
             "Media/Music",
             string.Empty,
             false,
-            "rclone-check-exact-hash-when-supported-size-fallback",
+            "rclone-check-download-content",
             now,
-            now);
+            now,
+            VfsCertificationState: "passed",
+            VfsCertificationCode: "test-certified",
+            VfsCertifiedAt: now);
         await store.SaveAsync(job, CancellationToken.None);
 
         var coordinator = new CloudMigrationCoordinator(
@@ -100,6 +103,34 @@ public class CloudMigrationStoreTests
             CancellationToken.None);
         Assert.Equal(CloudMigrationPhases.Finalizing, queued.Phase);
         Assert.Equal("finalize-queued", queued.Code);
+    }
+
+    [Fact]
+    public async Task Finalize_LocalToVfs_RequiresCertification()
+    {
+        using var temp = new TemporaryDirectory();
+        var source = new FakeConfigurationSource(new PluginConfiguration { StoreRoot = temp.Path });
+        var store = new CloudMigrationStore(source);
+        var backup = Path.Combine(temp.Path, "Music.slipmat-rollback");
+        var now = DateTimeOffset.UtcNow;
+        var job = new CloudMigrationJob(
+            Guid.NewGuid().ToString("N"), "music", "Music",
+            CloudMigrationDirections.LocalToVfs, CloudMigrationPhases.ReadyToFinalize,
+            "vfs-active-local-backup-retained-uncertified",
+            Path.Combine(temp.Path, "Music"), null, backup, "tele2", "Media/Music",
+            string.Empty, false, "rclone-check-download-content", now, now,
+            VfsCertificationState: "observing",
+            VfsCertificationCode: "mount-and-library-ready");
+        await store.SaveAsync(job, CancellationToken.None);
+
+        var coordinator = new CloudMigrationCoordinator(
+            store, new CloudMigrationQueue(), source, null!, null!, null!);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => coordinator.RequestFinalizeAsync(
+                job.Id, new CloudMigrationFinalizeRequest(backup), CancellationToken.None));
+
+        Assert.Equal("vfs-certification-required", error.Message);
     }
 
     private sealed class FakeConfigurationSource : ICloudProjectionConfigurationSource
