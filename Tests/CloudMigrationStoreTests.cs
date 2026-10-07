@@ -45,7 +45,9 @@ public class CloudMigrationStoreTests
         Assert.NotNull(loaded);
         Assert.Equal(job.Id, loaded!.Id);
         Assert.Equal(CloudMigrationPhases.ReadyForCutover, loaded.Phase);
-        Assert.Equal(job.Verification, loaded.Verification);\n        Assert.Equal(job.ManifestDigestSha256, loaded.ManifestDigestSha256);\n        Assert.Equal(job.ManifestFileCount, loaded.ManifestFileCount);
+        Assert.Equal(job.Verification, loaded.Verification);
+        Assert.Equal(job.ManifestDigestSha256, loaded.ManifestDigestSha256);
+        Assert.Equal(job.ManifestFileCount, loaded.ManifestFileCount);
     }
 
     [Fact]
