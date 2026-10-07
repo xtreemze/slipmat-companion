@@ -305,6 +305,12 @@ public sealed class CloudMigrationCoordinator
             throw new InvalidOperationException("finalize-confirmation-mismatch");
         }
 
+        if (job.Direction == CloudMigrationDirections.LocalToVfs
+            && !string.Equals(job.VfsCertificationState, "passed", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("vfs-certification-required");
+        }
+
         var queued = job with
         {
             Phase = CloudMigrationPhases.Finalizing,
