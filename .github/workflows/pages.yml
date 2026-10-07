@@ -6,6 +6,11 @@ on:
     paths:
       - "site/**"
       - ".github/workflows/pages.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:
@@ -59,11 +64,13 @@ jobs:
           python3 -m json.tool site/dist/manifest.json >/dev/null
 
       - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v5
         with:
           path: site/dist
 
   deploy:
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     environment:
