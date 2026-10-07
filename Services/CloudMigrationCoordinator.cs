@@ -175,6 +175,14 @@ public sealed class CloudMigrationCoordinator
                     .FirstOrDefault();
             }
 
+            CloudMigrationManifest? manifest = null;
+            if (request.Direction == CloudMigrationDirections.LocalToVfs)
+            {
+                manifest = await CloudMigrationManifestBuilder
+                    .CaptureAsync(localPath, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
             var id = Guid.NewGuid().ToString("N");
             var now = DateTimeOffset.UtcNow;
             var stagingPath = request.Direction == CloudMigrationDirections.VfsToLocal
