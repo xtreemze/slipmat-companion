@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">Slipmat Companion platter mark</title>
+  <rect width="64" height="64" rx="14" fill="#12100d"/>
+  <circle cx="31" cy="32" r="18" fill="none" stroke="#e5ddcf" stroke-width="4"/>
+  <circle cx="31" cy="32" r="6" fill="#c9a66b"/>
+  <path d="M46 17v17l-8 7" fill="none" stroke="#e5ddcf" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
