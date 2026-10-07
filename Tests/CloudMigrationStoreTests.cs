@@ -35,7 +35,7 @@ public class CloudMigrationStoreTests
             "Media/Music",
             string.Empty,
             false,
-            "rclone-check-exact-hash-when-supported-size-fallback",
+            "rclone-check-download-content",
             now,
             now);
 
@@ -45,7 +45,7 @@ public class CloudMigrationStoreTests
         Assert.NotNull(loaded);
         Assert.Equal(job.Id, loaded!.Id);
         Assert.Equal(CloudMigrationPhases.ReadyForCutover, loaded.Phase);
-        Assert.Equal(job.Verification, loaded.Verification);
+        Assert.Equal(job.Verification, loaded.Verification);\n        Assert.Equal(job.ManifestDigestSha256, loaded.ManifestDigestSha256);\n        Assert.Equal(job.ManifestFileCount, loaded.ManifestFileCount);
     }
 
     [Fact]
@@ -74,7 +74,7 @@ public class CloudMigrationStoreTests
             "Media/Music",
             string.Empty,
             false,
-            "rclone-check-exact-hash-when-supported-size-fallback",
+            "rclone-check-download-content",
             now,
             now);
         await store.SaveAsync(job, CancellationToken.None);
