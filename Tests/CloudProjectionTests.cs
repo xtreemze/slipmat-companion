@@ -139,9 +139,11 @@ public class CloudProjectionTests
 
         Assert.Equal("copy", runner.Invocations[0].Arguments[0]);
         Assert.Equal(Path.GetFullPath(localPath), runner.Invocations[0].Arguments[1]);
-        Assert.Equal("tele2:Media/Music", runner.Invocations[0].Arguments[2]);\n        Assert.Contains("--immutable", runner.Invocations[0].Arguments);
+        Assert.Equal("tele2:Media/Music", runner.Invocations[0].Arguments[2]);
+        Assert.Contains("--immutable", runner.Invocations[0].Arguments);
 
-        Assert.Equal("check", runner.Invocations[1].Arguments[0]);\n        Assert.Contains("--download", runner.Invocations[1].Arguments);
+        Assert.Equal("check", runner.Invocations[1].Arguments[0]);
+        Assert.Contains("--download", runner.Invocations[1].Arguments);
         Assert.Equal(Path.GetFullPath(localPath), runner.Invocations[1].Arguments[1]);
         Assert.Equal("tele2:Media/Music", runner.Invocations[1].Arguments[2]);
         Assert.DoesNotContain("--one-way", runner.Invocations[1].Arguments);
