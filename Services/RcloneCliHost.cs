@@ -424,6 +424,7 @@ public sealed partial class RcloneCliHost
                     Path.GetFullPath(localPath),
                     BuildRemoteSpec(remoteName, remotePath),
                     "--create-empty-src-dirs",
+                    "--immutable",
                     "--stats=0",
                     "--log-level=ERROR",
                 ],
