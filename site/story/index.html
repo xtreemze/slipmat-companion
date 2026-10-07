@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en" data-site-generator="vite">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="How Slipmat Companion evolved from a standalone Jellyfin accelerator into a broader optional server-side capability layer." />
+    <meta name="theme-color" content="#12100d" />
+    <meta name="color-scheme" content="dark light" />
+    <link rel="stylesheet" href="/src/styles/global.css" />
+    <title>Slipmat Companion — project story and ambitions</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#content">Skip to content</a>
+    <header class="site-header">
+      <a class="brand" href="%BASE_URL%" aria-label="Slipmat Companion home">
+        <span class="brand-mark" aria-hidden="true">S</span>
+        <span><strong>Slipmat</strong><small>Companion</small></span>
+      </a>
+      <nav aria-label="Primary">
+        <a href="%BASE_URL%story/">Story</a>
+        <a href="%BASE_URL%onboarding/">Set up</a>
+        <a href="%BASE_URL%manifest.json">Manifest</a>
+        <a href="https://github.com/xtreemze/slipmat-companion">GitHub</a>
+      </nav>
+    </header>
+    <main id="content">
+      <section class="section section-first">
+        <div class="story-hero">
+          <p class="eyebrow">Project story</p>
+          <h1 class="page-title">Useful work, closer to the media.</h1>
+          <p class="lede">Slipmat Companion exists to move expensive, repetitive or browser-constrained work nearer to Jellyfin without moving product authority there. The project grows by adding optional capabilities that can disappear without making Slipmat stop being Slipmat.</p>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="history-title">
+        <div class="section-intro">
+          <div><p class="eyebrow">History</p><h2 id="history-title">Rapid separation and hardening.</h2></div>
+          <p>The milestones below are drawn from published releases and merged repository work, not a retrospective roadmap.</p>
+        </div>
+        <ol class="timeline">
+          <li><time datetime="2026-10-01">1 October 2026</time><h3>Standalone Companion</h3><p>Audio Gateway shipped as its own Jellyfin plugin with self-contained storage and integrated FFmpeg analysis rather than a separate analyzer service.</p><div class="links"><a href="https://github.com/xtreemze/slipmat-companion/releases/tag/v0.1.0.0">v0.1.0.0</a><a href="https://github.com/xtreemze/slipmat-companion/releases/tag/v0.2.0.0">v0.2.0.0</a></div></li>
+          <li><time datetime="2026-10-02">2 October 2026</time><h3>Server-side capability layer</h3><p>The plugin added bounded directory and XMLTV acquisition, Live TV publication, remote-media relay, and a provider-neutral rclone adapter.</p><div class="links"><a href="https://github.com/xtreemze/slipmat-companion/releases/tag/v0.3.0.0">v0.3.0.0</a><a href="https://github.com/xtreemze/slipmat-companion/releases/tag/v0.4.0.0">v0.4.0.0</a></div></li>
+          <li><time datetime="2026-10-03">3 October 2026</time><h3>Bounded cloud projection and richer metadata</h3><p>Cloud media moved to read-only rclone VFS projection with bounded cache while Companion added artwork palettes and stronger provider diagnostics.</p><div class="links"><a href="https://github.com/xtreemze/slipmat-companion/releases/tag/v0.4.3.0">v0.4.3.0</a><a href="https://github.com/xtreemze/slipmat-companion/pull/54">multi-VFS</a><a href="https://github.com/xtreemze/slipmat-companion/pull/58">reversible migration</a></div></li>
+          <li><time datetime="2026-10-04">4 October 2026</time><h3>A public explanation surface</h3><p>The repository gained a human-facing GitHub Pages site alongside the machine-consumed Jellyfin repository manifest.</p><div class="links"><a href="https://github.com/xtreemze/slipmat-companion/pull/69">site PR #69</a></div></li>
+          <li><time datetime="2026-10-06">6 October 2026</time><h3>One simpler presentation toolchain</h3><p>The presentation site moved to Vite 8 with semantic multi-page HTML, native browser behavior, and progressive View Transitions, removing Astro from the build path.</p></li>
+        </ol>
+      </section>
+
+      <section class="section" aria-labelledby="north-star-title">
+        <div class="section-intro">
+          <div><p class="eyebrow">North star</p><h2 id="north-star-title">Accelerate more. Own less.</h2></div>
+          <p>Companion is not another media server or playback engine. It is an optional capability layer for work that benefits from server proximity: analysis, batching, protected acquisition bridges, provenance-rich metadata, bounded cloud projection and diagnostics.</p>
+        </div>
+        <ul class="status-list">
+          <li><strong>Keep playback authority in Slipmat.</strong> Companion can prepare evidence and sources, but it does not own the queue, transport clock, renderer or Playback Rail.</li>
+          <li><strong>Keep media authority in Jellyfin and source providers.</strong> Server-side acceleration must not create a second canonical catalog or silently take ownership of remote media.</li>
+          <li><strong>Make absence ordinary.</strong> If Companion is missing, unhealthy or lacks an optional module, Slipmat should degrade to canonical fallback paths rather than fail as a product.</li>
+          <li><strong>Prefer measured, provenance-bearing evidence.</strong> Analysis and metadata should be reproducible and attributable instead of turning server inference into hidden policy.</li>
+        </ul>
+      </section>
+
+      <section class="section" aria-labelledby="roadmap-title">
+        <div class="section-intro">
+          <div><p class="eyebrow">Open ambitions</p><h2 id="roadmap-title">Current research, not shipping claims.</h2></div>
+          <p>The next useful work is tracked in GitHub rather than promised here.</p>
+        </div>
+        <div class="grid">
+          <article class="card"><span class="number">CATALOG</span><h3>Payload-free catalog refresh</h3><p>Research whether Jellyfin can preserve full remote namespace visibility while avoiding media-payload reads during routine VFS catalog refresh.</p><div class="links"><a href="https://github.com/xtreemze/slipmat-companion/issues/62">Issue #62</a></div></article>
+          <article class="card"><span class="number">RETENTION</span><h3>Bound reproducible artifacts</h3><p>Add independent retention for regenerable analysis artifacts without coupling it to media-cache eviction or deleting authoritative media/catalog state.</p><div class="links"><a href="https://github.com/xtreemze/slipmat-companion/issues/49">Issue #49</a></div></article>
+          <article class="card"><span class="number">MIGRATION</span><h3>Complete managed VFS migration</h3><p>Continue hardening reversible local-to-cloud migration and mount lifecycle without weakening fail-closed ownership and rollback guarantees.</p><div class="links"><a href="https://github.com/xtreemze/slipmat-companion/issues/50">Issue #50</a></div></article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-intro"><h2>Follow the implementation.</h2><p>For exact current behavior, use the repository and release history as authority. This page explains the trajectory; it does not replace technical documentation or shipping evidence.</p></div>
+        <div class="actions">
+          <a class="button" href="https://github.com/xtreemze/slipmat-companion">Open repository</a>
+          <a class="button secondary" href="https://github.com/xtreemze/slipmat-companion/releases">Release history</a>
+          <a class="button secondary" href="https://github.com/xtreemze/slipmat-companion/issues">Open issues</a>
+        </div>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <p>Optional acceleration for Slipmat. Jellyfin and Slipmat remain authoritative for their own domains.</p>
+      <a href="https://github.com/xtreemze/slipmat-companion/blob/main/LICENSE">License</a>
+    </footer>
+    <script type="module" src="/src/site.js"></script>
+  </body>
+</html>

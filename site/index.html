@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en" data-site-generator="vite">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Install and configure Slipmat Companion, the optional Audio Gateway extension for Jellyfin." />
+    <meta name="theme-color" content="#12100d" />
+    <meta name="color-scheme" content="dark light" />
+    <link rel="stylesheet" href="/src/styles/global.css" />
+    <title>Slipmat Companion — optional Jellyfin acceleration</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#content">Skip to content</a>
+    <header class="site-header">
+      <a class="brand" href="%BASE_URL%" aria-label="Slipmat Companion home">
+        <span class="brand-mark" aria-hidden="true">S</span>
+        <span><strong>Slipmat</strong><small>Companion</small></span>
+      </a>
+      <nav aria-label="Primary">
+        <a href="%BASE_URL%story/">Story</a>
+        <a href="%BASE_URL%onboarding/">Set up</a>
+        <a href="%BASE_URL%manifest.json">Manifest</a>
+        <a href="https://github.com/xtreemze/slipmat-companion">GitHub</a>
+      </nav>
+    </header>
+    <main id="content">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Jellyfin Audio Gateway</p>
+          <h1>More signal. Less server friction.</h1>
+          <p class="lede">Slipmat Companion precomputes analysis, batches metadata, bridges browser-constrained resources, and can project cloud libraries through bounded read-only VFS — without becoming a second playback or product authority.</p>
+          <div class="actions">
+            <a class="button" href="%BASE_URL%onboarding/">Set up Companion</a>
+            <a class="button secondary" href="https://github.com/xtreemze/slipmat-companion">View source</a>
+          </div>
+          <div class="status-strip" aria-label="Compatibility">
+            <div><strong>Mode</strong><span>Optional acceleration</span></div>
+            <div><strong>Server target</strong><span>Jellyfin 12.1.0</span></div>
+            <div><strong>Client fallback</strong><span>Slipmat remains functional without it</span></div>
+          </div>
+        </div>
+        <div class="gateway-visual" aria-hidden="true"></div>
+      </section>
+
+      <section class="section" aria-labelledby="purpose-title">
+        <div class="section-intro">
+          <h2 id="purpose-title">A companion, not a dependency.</h2>
+          <p>The plugin accelerates work that Slipmat can still perform through canonical client and Rust paths. If the extension is absent, unhealthy, or partially configured, the client falls back instead of treating Companion as product authority.</p>
+        </div>
+        <div class="grid">
+          <article class="card"><span class="number">01 / ANALYZE</span><h3>Precompute audio evidence</h3><p>Waveform, spectral, loudness, rhythm, source-boundary, harmonic-key and energy evidence can be prepared ahead of playback.</p></article>
+          <article class="card"><span class="number">02 / BRIDGE</span><h3>Reduce browser constraints</h3><p>Authenticated podcast, guide, directory and bounded media-relay endpoints provide server-side acquisition where browser CORS prevents direct access.</p></article>
+          <article class="card"><span class="number">03 / PROJECT</span><h3>Keep cloud storage bounded</h3><p>Optional rclone VFS profiles expose remote namespaces read-only while keeping source media authoritative and local cache disposable.</p></article>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="evolution-title">
+        <div class="section-intro">
+          <div><p class="eyebrow">Evolution</p><h2 id="evolution-title">Built by removing unnecessary authority.</h2></div>
+          <div>
+            <p>Companion began on 1 October 2026 as a standalone Jellyfin extension for work useful to precompute near the media server. It expanded into higher-order audio evidence, provider-neutral server bridges, artwork palettes and bounded read-only cloud projection while keeping Slipmat playback and Jellyfin catalog authority intact.</p>
+            <div class="actions">
+              <a class="button secondary" href="%BASE_URL%story/">Read the project story</a>
+              <a class="button secondary" href="https://github.com/xtreemze/slipmat-companion/releases">Browse releases</a>
+            </div>
+          </div>
+        </div>
+        <ol class="milestone-preview">
+          <li><strong>01 Oct</strong><span>Standalone release, self-contained storage and integrated FFmpeg analysis.</span></li>
+          <li><strong>02 Oct</strong><span>Directory/guide bridges and a provider-neutral rclone cloud adapter.</span></li>
+          <li><strong>03 Oct</strong><span>Bounded VFS caching, artwork palettes and safer cloud diagnostics.</span></li>
+          <li><strong>06 Oct</strong><span>Presentation site simplified to Vite 8 and native browser primitives.</span></li>
+        </ol>
+      </section>
+
+      <section class="section" aria-labelledby="install-title">
+        <div class="section-intro">
+          <h2 id="install-title">Install from Jellyfin.</h2>
+          <div>
+            <p>Add the public repository URL, install Audio Gateway, then restart Jellyfin. Core use does not require a separate analyzer service or artifact-store mount.</p>
+            <div class="install-command">
+              <code>https://xtreemze.github.io/slipmat-companion/manifest.json</code>
+              <button class="copy" type="button" data-copy="https://xtreemze.github.io/slipmat-companion/manifest.json">Copy</button>
+            </div>
+          </div>
+        </div>
+        <div class="actions">
+          <a class="button" href="%BASE_URL%onboarding/">Open guided setup</a>
+          <a class="button secondary" href="%BASE_URL%manifest.json">Inspect manifest</a>
+        </div>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <p>Optional acceleration for Slipmat. Jellyfin and Slipmat remain authoritative for their own domains.</p>
+      <a href="https://github.com/xtreemze/slipmat-companion/blob/main/LICENSE">License</a>
+    </footer>
+    <script type="module" src="/src/site.js"></script>
+  </body>
+</html>
