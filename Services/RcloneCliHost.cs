@@ -424,6 +424,7 @@ public sealed partial class RcloneCliHost
                     Path.GetFullPath(localPath),
                     BuildRemoteSpec(remoteName, remotePath),
                     "--create-empty-src-dirs",
+                    "--immutable",
                     "--stats=0",
                     "--log-level=ERROR",
                 ],
@@ -476,6 +477,32 @@ public sealed partial class RcloneCliHost
                     "check",
                     Path.GetFullPath(localPath),
                     BuildRemoteSpec(remoteName, remotePath),
+                    "--stats=0",
+                    "--log-level=ERROR",
+                ],
+                MigrationCommandTimeout,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<RcloneCommandResult> CheckLocalAndRemoteByDownloadAsync(
+        string localPath,
+        string remoteName,
+        string remotePath,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(localPath);
+        if (!Path.IsPathFullyQualified(localPath))
+        {
+            throw new ArgumentException("Verification path must be absolute.", nameof(localPath));
+        }
+
+        return await RunAsync(
+                [
+                    "check",
+                    Path.GetFullPath(localPath),
+                    BuildRemoteSpec(remoteName, remotePath),
+                    "--download",
                     "--stats=0",
                     "--log-level=ERROR",
                 ],

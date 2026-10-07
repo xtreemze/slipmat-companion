@@ -19,7 +19,7 @@ namespace Jellyfin.Plugin.AudioGateway.Services;
 public sealed class CloudMigrationWorker : BackgroundService
 {
     private const string VerificationContract =
-        "rclone-check-exact-hash-when-supported-size-fallback";
+        "rclone-check-download-content";
 
     private readonly CloudMigrationStore _store;
     private readonly CloudMigrationQueue _queue;
@@ -215,7 +215,7 @@ public sealed class CloudMigrationWorker : BackgroundService
                 Code = "verifying",
             },
             cancellationToken).ConfigureAwait(false);
-        var check = await cli.CheckLocalAndRemoteAsync(
+        var check = await cli.CheckLocalAndRemoteByDownloadAsync(
                 verifyPath,
                 job.RemoteName,
                 job.RemotePath,
@@ -302,7 +302,7 @@ public sealed class CloudMigrationWorker : BackgroundService
                 Code = "final-verification",
             },
             cancellationToken).ConfigureAwait(false);
-        var check = await cli.CheckLocalAndRemoteAsync(
+        var check = await cli.CheckLocalAndRemoteByDownloadAsync(
                 verifyPath,
                 job.RemoteName,
                 job.RemotePath,
