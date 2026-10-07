@@ -34,6 +34,7 @@ test("all pages are semantic Vite entries with native navigation transitions", a
     assert.match(html, /data-site-generator="vite"/);
     assert.match(html, /<main id="content">/);
     assert.match(html, /<script type="module" src="\/src\/site\.js"><\/script>/);
+    assert.match(html, /rel="icon" href="%BASE_URL%favicon\.svg"/);
   }
   assert.match(css, /@view-transition/);
   assert.match(css, /navigation:\s*auto/);
