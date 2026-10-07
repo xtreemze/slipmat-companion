@@ -134,14 +134,14 @@ public class CloudProjectionTests
         var host = new RcloneCliHost(runner: runner);
 
         await host.CopyLocalToRemoteAsync(localPath, "tele2", "Media/Music");
-        await host.CheckLocalAndRemoteAsync(localPath, "tele2", "Media/Music");
+        await host.CheckLocalAndRemoteByDownloadAsync(localPath, "tele2", "Media/Music");
         await host.CopyRemoteToLocalAsync("tele2", "Media/Music", Path.Combine(temp.Path, "restore"));
 
         Assert.Equal("copy", runner.Invocations[0].Arguments[0]);
         Assert.Equal(Path.GetFullPath(localPath), runner.Invocations[0].Arguments[1]);
-        Assert.Equal("tele2:Media/Music", runner.Invocations[0].Arguments[2]);
+        Assert.Equal("tele2:Media/Music", runner.Invocations[0].Arguments[2]);\n        Assert.Contains("--immutable", runner.Invocations[0].Arguments);
 
-        Assert.Equal("check", runner.Invocations[1].Arguments[0]);
+        Assert.Equal("check", runner.Invocations[1].Arguments[0]);\n        Assert.Contains("--download", runner.Invocations[1].Arguments);
         Assert.Equal(Path.GetFullPath(localPath), runner.Invocations[1].Arguments[1]);
         Assert.Equal("tele2:Media/Music", runner.Invocations[1].Arguments[2]);
         Assert.DoesNotContain("--one-way", runner.Invocations[1].Arguments);
