@@ -65,7 +65,10 @@ public sealed record CloudMigrationJob(
     [property: JsonPropertyName("verification")] string? Verification,
     [property: JsonPropertyName("createdAt")] DateTimeOffset CreatedAt,
     [property: JsonPropertyName("updatedAt")] DateTimeOffset UpdatedAt,
-    [property: JsonPropertyName("previousLibraryScanPolicy")] CloudLibraryScanPolicy? PreviousLibraryScanPolicy = null,\n    [property: JsonPropertyName("manifestVersion")] int? ManifestVersion = null,\n    [property: JsonPropertyName("manifestDigestSha256")] string? ManifestDigestSha256 = null,\n    [property: JsonPropertyName("manifestFileCount")] long? ManifestFileCount = null,\n    [property: JsonPropertyName("manifestTotalBytes")] long? ManifestTotalBytes = null,\n    [property: JsonPropertyName("manifestCapturedAt")] DateTimeOffset? ManifestCapturedAt = null);
+    [property: JsonPropertyName("previousLibraryScanPolicy")] CloudLibraryScanPolicy? PreviousLibraryScanPolicy = null,\n    [property: JsonPropertyName("manifestVersion")] int? ManifestVersion = null,\n    [property: JsonPropertyName("manifestDigestSha256")] string? ManifestDigestSha256 = null,\n    [property: JsonPropertyName("manifestFileCount")] long? ManifestFileCount = null,\n    [property: JsonPropertyName("manifestTotalBytes")] long? ManifestTotalBytes = null,\n    [property: JsonPropertyName("manifestCapturedAt")] DateTimeOffset? ManifestCapturedAt = null,
+    [property: JsonPropertyName("vfsCertificationState")] string VfsCertificationState = "uncertified",
+    [property: JsonPropertyName("vfsCertificationCode")] string? VfsCertificationCode = null,
+    [property: JsonPropertyName("vfsCertifiedAt")] DateTimeOffset? VfsCertifiedAt = null);
 
 public sealed record CloudMigrationListResponse(
     [property: JsonPropertyName("jobs")] IReadOnlyList<CloudMigrationJob> Jobs);
