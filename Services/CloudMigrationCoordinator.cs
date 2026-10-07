@@ -197,7 +197,12 @@ public sealed class CloudMigrationCoordinator
                 Verification: null,
                 CreatedAt: now,
                 UpdatedAt: now,
-                PreviousLibraryScanPolicy: previousScanPolicy);
+                PreviousLibraryScanPolicy: previousScanPolicy,
+                ManifestVersion: manifest?.Version,
+                ManifestDigestSha256: manifest?.DigestSha256,
+                ManifestFileCount: manifest?.FileCount,
+                ManifestTotalBytes: manifest?.TotalBytes,
+                ManifestCapturedAt: manifest?.CapturedAt);
 
             await _store.SaveAsync(job, cancellationToken).ConfigureAwait(false);
             if (!_queue.TryEnqueue(job.Id))
