@@ -321,6 +321,25 @@ public sealed class CloudMigrationWorker : BackgroundService
             return;
         }
 
+        if (job.Direction == CloudMigrationDirections.LocalToVfs)
+        {
+            var currentManifest = await CloudMigrationManifestBuilder
+                .CaptureAsync(job.LocalPath, cancellationToken)
+                .ConfigureAwait(false);
+            if (!ManifestMatches(job, currentManifest))
+            {
+                await SaveAsync(
+                    finalVerifying with
+                    {
+                        Phase = CloudMigrationPhases.ReadyForCutover,
+                        Code = "source-changed-after-inventory",
+                        Verification = null,
+                    },
+                    cancellationToken).ConfigureAwait(false);
+                return;
+            }
+        }
+
         if (_library.IsScanRunning)
         {
             await SaveAsync(
@@ -401,7 +420,10 @@ public sealed class CloudMigrationWorker : BackgroundService
                 cutting with
                 {
                     Phase = CloudMigrationPhases.ReadyToFinalize,
-                    Code = "vfs-active-local-backup-retained",
+                    Code = "vfs-active-local-backup-retained-uncertified",
+                    VfsCertificationState = "observing",
+                    VfsCertificationCode = "mount-and-library-ready",
+                    VfsCertifiedAt = null,
                 },
                 cancellationToken).ConfigureAwait(false);
         }
@@ -901,6 +923,18 @@ public sealed class CloudMigrationWorker : BackgroundService
                 Code = code,
             },
             cancellationToken).ConfigureAwait(false);
+
+    private static bool ManifestMatches(
+        CloudMigrationJob job,
+        CloudMigrationManifest manifest)
+        => job.ManifestVersion == manifest.Version
+            && job.ManifestFileCount == manifest.FileCount
+            && job.ManifestTotalBytes == manifest.TotalBytes
+            && !string.IsNullOrWhiteSpace(job.ManifestDigestSha256)
+            && string.Equals(
+                job.ManifestDigestSha256,
+                manifest.DigestSha256,
+                StringComparison.OrdinalIgnoreCase);
 
     private static string? TransferFailure(
         RcloneCommandResult result,
