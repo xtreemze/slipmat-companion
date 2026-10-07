@@ -420,7 +420,10 @@ public sealed class CloudMigrationWorker : BackgroundService
                 cutting with
                 {
                     Phase = CloudMigrationPhases.ReadyToFinalize,
-                    Code = "vfs-active-local-backup-retained",
+                    Code = "vfs-active-local-backup-retained-uncertified",
+                    VfsCertificationState = "observing",
+                    VfsCertificationCode = "mount-and-library-ready",
+                    VfsCertifiedAt = null,
                 },
                 cancellationToken).ConfigureAwait(false);
         }
