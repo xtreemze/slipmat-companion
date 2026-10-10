@@ -27,6 +27,9 @@ public interface ICloudHostProbe
     bool ExistsOnPath(string executable);
 
     long? AvailableFreeBytes(string path);
+
+    /// <summary>Filesystem type backing <paramref name="path"/> (Linux /proc/mounts), if known.</summary>
+    string? FileSystemType(string path);
 }
 
 public sealed class CloudHostProbe : ICloudHostProbe
@@ -61,6 +64,45 @@ public sealed class CloudHostProbe : ICloudHostProbe
             return null;
         }
     }
+
+    public string? FileSystemType(string path)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return null;
+        }
+
+        try
+        {
+            var full = Path.GetFullPath(path);
+            string? best = null;
+            string? bestType = null;
+            foreach (var line in File.ReadLines("/proc/mounts"))
+            {
+                var parts = line.Split(' ');
+                if (parts.Length < 3)
+                {
+                    continue;
+                }
+
+                var mountPoint = parts[1].Replace("\\040", " ", StringComparison.Ordinal);
+                var matches = mountPoint == "/"
+                    || full == mountPoint
+                    || full.StartsWith(mountPoint + "/", StringComparison.Ordinal);
+                if (matches && (best is null || mountPoint.Length >= best.Length))
+                {
+                    best = mountPoint;
+                    bestType = parts[2];
+                }
+            }
+
+            return bestType;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
 }
 
 /// <summary>
@@ -70,6 +112,11 @@ public sealed class CloudHostProbe : ICloudHostProbe
 public sealed class CloudPreflightService
 {
     private const long GiB = 1024L * 1024 * 1024;
+
+    private static readonly HashSet<string> NetworkLikeFileSystems = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "fuse.sshfs", "sshfs", "nfs", "nfs4", "cifs", "smb3", "9p", "virtiofs", "fuse.rclone",
+    };
 
     private readonly ICloudProjectionConfigurationSource _configurationSource;
     private readonly IRcloneProcessRunner _runner;
@@ -179,6 +226,15 @@ public sealed class CloudPreflightService
                 $"cache:{profile.Id}",
                 "Cache path could not be resolved.",
                 "Choose an absolute cache path or leave it empty for the managed default.");
+        }
+
+        var fsType = _probe.FileSystemType(cachePath);
+        if (fsType is not null && NetworkLikeFileSystems.Contains(fsType))
+        {
+            return Warn(
+                $"cache:{profile.Id}",
+                $"Cache path {cachePath} is on a {fsType} filesystem; free-space readings and sparse-file cache behaviour are unreliable and warm reads are slow.",
+                "Put the cache on a local volume (for Docker Desktop use a named volume, not a bind mount).");
         }
 
         var free = _probe.AvailableFreeBytes(cachePath);
