@@ -158,6 +158,39 @@ Legacy materialized projections are deliberately not auto-migrated or deleted. A
 
 This projection is optional server acceleration. It does not own Slipmat media identity, source selection, playback, queue, Rail, podcast identity, or offline-retention policy.
 
+## Album packaging captures
+
+`AlbumPackagingImageProvider` ("Slipmat Packaging") is a Jellyfin remote image
+provider for music albums. It offers scans of the physical package in the
+image slots Slipmat's Package Inspector reads:
+
+| Jellyfin image | Package Inspector part | Sources (in preference order) |
+| --- | --- | --- |
+| `Primary` | Front cover | Cover Art Archive `Front`, TheAudioDB `strAlbumThumbHQ`/`strAlbumThumb`, Discogs primary |
+| `BoxRear` | Back cover / tray card | Cover Art Archive `Back`, TheAudioDB `strAlbumBack`, Discogs first secondary |
+| `Disc` | Disc face | Cover Art Archive `Medium`, TheAudioDB `strAlbumCDart` |
+| `Box` | Inner insert (booklet) | Cover Art Archive `Booklet`, Discogs secondary |
+| `Menu` | Inner insert (tray) | Cover Art Archive `Tray`, Discogs secondary |
+| `Art` | Inner insert (liner/spine) | Cover Art Archive `Liner`/`Spine`/`Obi`, TheAudioDB `strAlbumSpine`, Discogs secondary |
+
+- **Cover Art Archive** needs the album's MusicBrainz *release* id. Only a
+  release carries back, disc and booklet scans; the release-group endpoint
+  answers with the front alone.
+- **TheAudioDB** uses its public free key by default. Set
+  `SLIPMAT_AUDIODB_API_KEY` in the server environment for a supporter key.
+- **Discogs** is used only when `SLIPMAT_DISCOGS_TOKEN` (a personal access
+  token) is set in the server environment. Its images are unlabelled beyond
+  primary/secondary, so they rank below the labelled sources.
+- Keys are environment settings, never plugin configuration (the
+  configuration carries no credentials). `PackagingImagesEnabled` switches the
+  provider off.
+
+A library whose metadata settings list explicit image fetchers for *Albums*
+must have **Slipmat Packaging** ticked there (Dashboard → Libraries → the
+music library → Image fetchers). Then "Refresh metadata → Search for missing
+images" fills the new slots; one image per type is kept, preferring labelled
+scans.
+
 ## Capability contract
 
 `GET /Plugins/AudioGateway/diagnostics/capabilities` returns:

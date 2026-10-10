@@ -60,6 +60,16 @@ public class PluginConfiguration : BasePluginConfiguration
     public CloudLibraryProfile[] CloudLibraries { get; set; } = Array.Empty<CloudLibraryProfile>();
 
     /// <summary>
+    /// Gets or sets a value indicating whether albums are offered captures of
+    /// their physical packaging (back cover, disc, booklet, tray) for the
+    /// Package Inspector. Cover Art Archive and TheAudioDB need no account;
+    /// keys for TheAudioDB and Discogs are operator environment settings
+    /// (see <see cref="Services.Packaging.PackagingSourceKeys"/>), never
+    /// persisted plugin configuration.
+    /// </summary>
+    public bool PackagingImagesEnabled { get; set; } = true;
+
+    /// <summary>
     /// Legacy single-projection compatibility field. New writes also populate
     /// <see cref="CloudLibraries"/>; remove only after deployed configs migrate.
     /// </summary>
