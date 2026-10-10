@@ -191,6 +191,24 @@ music library → Image fetchers). Then "Refresh metadata → Search for missing
 images" fills the new slots; one image per type is kept, preferring labelled
 scans.
 
+## Package Inspector material cache
+
+Module `physicalMediaMaterials` (available when the store is writable) caches
+the Package Inspector's surface maps (normal, roughness and, for foil,
+anisotropy) that clients generate on their GPU. The first client to build a
+map set uploads it; later opens on any device load the finished maps and skip
+the generator passes and their shader compiles.
+
+- `GET  /Plugins/AudioGateway/physical-media/materials/{key}` lists cached assets.
+- `GET  /Plugins/AudioGateway/physical-media/materials/{key}/{asset}` serves one PNG (immutable).
+- `PUT  /Plugins/AudioGateway/physical-media/materials/{key}/{asset}` stores one PNG; first write wins.
+
+Keys are opaque client fingerprints (`pmv1-` + SHA-256 hex of identity,
+condition recipe and quality tier); the companion owns no wear semantics.
+Asset names are a closed vocabulary (`normal|roughness|anisotropy-<surface>-<variant>.png`),
+uploads are PNG-only and at most 16 MiB, and the cache keeps 1 GiB, dropping
+the least recently used keys first. Authenticated users only.
+
 ## Capability contract
 
 `GET /Plugins/AudioGateway/diagnostics/capabilities` returns:

@@ -78,7 +78,8 @@ public class CapabilitiesController : ControllerBase
                 PodcastFeedRefresh: true,
                 PodcastSnapshotCache: false,
                 RemoteMediaRelay: true,
-                ArtworkPalette: true),
+                ArtworkPalette: true,
+                PhysicalMediaMaterials: storeWritable),
             AnalyzerHealthy: analyzerHealthy,
             StoreWritable: storeWritable,
             DegradedReasons: degradedReasons);
