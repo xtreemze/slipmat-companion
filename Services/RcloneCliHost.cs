@@ -294,7 +294,15 @@ public sealed partial class RcloneCliHost
 
         if (remotesResult.ExitCode != 0)
         {
-            return Status(RcloneCliHealth.Degraded, version, "remotes-unavailable");
+            // rclone < the release that added `listremotes --json` rejects the flag; report
+            // the actual cause instead of an opaque remote failure.
+            var unsupported = remotesResult.StandardError.Contains(
+                "unknown flag",
+                StringComparison.OrdinalIgnoreCase);
+            return Status(
+                RcloneCliHealth.Degraded,
+                version,
+                unsupported ? "rclone-version-unsupported" : "remotes-unavailable");
         }
 
         if (!TryParseRemotes(remotesResult.StandardOutput, out var remotes))
