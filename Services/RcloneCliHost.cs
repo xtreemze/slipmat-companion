@@ -618,8 +618,13 @@ public sealed partial class RcloneCliHost
                     "--vfs-cache-poll-interval=1m",
                     "--dir-cache-time=5m",
                     "--poll-interval=1m",
-                    "--buffer-size=16M",
-                    "--vfs-read-ahead=64M",
+                    // Bound per-open egress: in full mode any read-ahead makes the
+                    // downloader pull the whole object, so a library scan's tag/duration
+                    // probes would transfer the entire collection.
+                    "--buffer-size=0",
+                    "--vfs-read-ahead=0",
+                    "--vfs-read-chunk-size=4M",
+                    "--vfs-read-chunk-size-limit=4M",
                     "--stats=0",
                     "--log-level=ERROR",
                 ],

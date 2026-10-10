@@ -58,7 +58,8 @@ public sealed record CloudLibraryScanPolicy(
     [property: JsonPropertyName("saveLocalMetadata")] bool SaveLocalMetadata,
     [property: JsonPropertyName("saveSubtitlesWithMedia")] bool SaveSubtitlesWithMedia,
     [property: JsonPropertyName("saveLyricsWithMedia")] bool SaveLyricsWithMedia,
-    [property: JsonPropertyName("saveTrickplayWithMedia")] bool SaveTrickplayWithMedia);
+    [property: JsonPropertyName("saveTrickplayWithMedia")] bool SaveTrickplayWithMedia,
+    [property: JsonPropertyName("audioImageFetchers")] string[]? AudioImageFetchers = null);
 
 public sealed record CloudProjectionReconcileResponse(
     [property: JsonPropertyName("status")] string Status,
