@@ -19,7 +19,8 @@ public record ExtensionModules(
     [property: JsonPropertyName("podcastFeedRefresh")] bool PodcastFeedRefresh,
     [property: JsonPropertyName("podcastSnapshotCache")] bool PodcastSnapshotCache,
     [property: JsonPropertyName("remoteMediaRelay")] bool RemoteMediaRelay,
-    [property: JsonPropertyName("artworkPalette")] bool ArtworkPalette = false
+    [property: JsonPropertyName("artworkPalette")] bool ArtworkPalette = false,
+    [property: JsonPropertyName("physicalMediaMaterials")] bool PhysicalMediaMaterials = false
 );
 
 /// <summary>
