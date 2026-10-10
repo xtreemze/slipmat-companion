@@ -131,6 +131,7 @@ public sealed class JellyfinCloudLibraryProjection : ICloudLibraryProjection
             SaveTrickplayWithMedia = false,
             PathInfos = [new MediaPathInfo(normalizedPath)],
         };
+        DisableEmbeddedAudioImageExtraction(options);
 
         await _libraryManager
             .AddVirtualFolder(libraryName, collectionType, options, refreshLibrary: false)
@@ -172,6 +173,7 @@ public sealed class JellyfinCloudLibraryProjection : ICloudLibraryProjection
         options.SaveSubtitlesWithMedia = false;
         options.SaveLyricsWithMedia = false;
         options.SaveTrickplayWithMedia = false;
+        DisableEmbeddedAudioImageExtraction(options);
 
         return SaveOptions(folder, options);
     }
@@ -200,6 +202,7 @@ public sealed class JellyfinCloudLibraryProjection : ICloudLibraryProjection
         options.SaveSubtitlesWithMedia = policy.SaveSubtitlesWithMedia;
         options.SaveLyricsWithMedia = policy.SaveLyricsWithMedia;
         options.SaveTrickplayWithMedia = policy.SaveTrickplayWithMedia;
+        RestoreAudioImageFetchers(options, policy.AudioImageFetchers);
 
         return SaveOptions(folder, options);
     }
@@ -250,7 +253,58 @@ public sealed class JellyfinCloudLibraryProjection : ICloudLibraryProjection
             options.SaveLocalMetadata,
             options.SaveSubtitlesWithMedia,
             options.SaveLyricsWithMedia,
-            options.SaveTrickplayWithMedia);
+            options.SaveTrickplayWithMedia,
+            FindAudioTypeOptions(options)?.ImageFetchers);
+
+    private const string AudioTypeName = "Audio";
+
+    internal static TypeOptions? FindAudioTypeOptions(LibraryOptions options)
+        => options.TypeOptions?.FirstOrDefault(typeOptions =>
+            string.Equals(typeOptions.Type, AudioTypeName, StringComparison.OrdinalIgnoreCase));
+
+    // Jellyfin's Audio "Image Extractor" runs `ffmpeg -i <track> -map 0:<picture>`, which
+    // demuxes the whole file even for one frame. Over a VFS mount that downloads every
+    // track during a library scan (measured ~83 MB/track vs ~2.5 MB/track without it).
+    // An empty fetcher list disables it; folder artwork still comes from local providers.
+    internal static void DisableEmbeddedAudioImageExtraction(LibraryOptions options)
+    {
+        var audio = FindAudioTypeOptions(options);
+        if (audio is null)
+        {
+            options.TypeOptions =
+            [
+                .. options.TypeOptions ?? [],
+                new TypeOptions { Type = AudioTypeName, ImageFetchers = [] },
+            ];
+            return;
+        }
+
+        audio.ImageFetchers = [];
+    }
+
+    internal static void RestoreAudioImageFetchers(LibraryOptions options, string[]? fetchers)
+    {
+        if (fetchers is null)
+        {
+            options.TypeOptions = options.TypeOptions?
+                .Where(typeOptions => !string.Equals(
+                    typeOptions.Type,
+                    AudioTypeName,
+                    StringComparison.OrdinalIgnoreCase))
+                .ToArray()
+                ?? [];
+            return;
+        }
+
+        var audio = FindAudioTypeOptions(options);
+        if (audio is null)
+        {
+            DisableEmbeddedAudioImageExtraction(options);
+            audio = FindAudioTypeOptions(options);
+        }
+
+        audio!.ImageFetchers = fetchers;
+    }
 
     private static bool PathsEqual(string left, string right)
     {

@@ -272,6 +272,12 @@ public class CloudProjectionTests
         Assert.Contains("--vfs-cache-max-size=16G", mount);
         Assert.Contains("--vfs-cache-max-age=24h", mount);
         Assert.Contains("--vfs-cache-min-free-space=4G", mount);
+        // Full-mode read-ahead/buffering makes every probe download the whole
+        // object; scan egress must stay bounded per open.
+        Assert.Contains("--vfs-read-ahead=0", mount);
+        Assert.Contains("--buffer-size=0", mount);
+        Assert.Contains("--vfs-read-chunk-size=4M", mount);
+        Assert.Contains("--vfs-read-chunk-size-limit=4M", mount);
         Assert.DoesNotContain(
             runner.Invocations.SelectMany(invocation => invocation.Arguments),
             argument => argument is "copy" or "sync" or "move" or "delete" or "purge" or "rc" or "rcd");
