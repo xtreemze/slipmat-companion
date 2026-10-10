@@ -1,0 +1,29 @@
+# Jellyfin + Audio Gateway rclone VFS projection.
+#   docker compose -f docs/docker/docker-compose.yml up -d --build
+# Prerequisites (operator-owned, done once on the host):
+#   rclone config            # authenticate the remote; the Companion never sees credentials
+# Then install Audio Gateway from the plugin catalog and use the dashboard (or
+# GET /Plugins/AudioGateway/cloud/rclone/preflight) to confirm readiness.
+services:
+  jellyfin:
+    build: .
+    container_name: jellyfin-vfs
+    ports:
+      - "8096:8096"
+    # FUSE requirements for `rclone mount` inside the container.
+    cap_add: [SYS_ADMIN]
+    devices: ["/dev/fuse:/dev/fuse"]
+    security_opt: ["apparmor:unconfined"]
+    volumes:
+      # Mount the rclone config DIRECTORY (not a copy): rclone rewrites refreshed tokens
+      # in place, and Jottacloud invalidates a token family if two copies diverge.
+      - ${RCLONE_CONFIG_DIR:-${HOME}/.config/rclone}:/rclone
+      # Keep Jellyfin config + the VFS cache (under /config/data) on a real local volume.
+      # On Docker Desktop (macOS) bind mounts are sshfs-backed: slow warm reads and
+      # misreported free space, so prefer named volumes for the cache.
+      - jellyfin-config:/config
+      - jellyfin-cache:/cache
+    restart: unless-stopped
+volumes:
+  jellyfin-config:
+  jellyfin-cache:

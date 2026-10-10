@@ -22,6 +22,15 @@ Fresh profiles default to:
 
 These values are configurable in the Jellyfin plugin page. The cache is disposable: eviction removes only local cached bytes. The cloud object remains authoritative. Open/in-use files can temporarily prevent rclone from immediately reaching the configured cache target.
 
+## Docker recipe
+
+`docs/docker/` holds a verified `Dockerfile` and `docker-compose.yml`: Jellyfin 12.1 plus rclone 1.75.2 and FUSE, run with `SYS_ADMIN`, `/dev/fuse` and an unconfined AppArmor profile. This is the supported route on macOS (Homebrew rclone refuses `rclone mount`, and there is no native Jellyfin server). Notes learned in the macOS PoC (#82):
+
+- Mount the rclone config **directory**, not a copy, so one token state exists.
+- On Docker Desktop only paths under `$HOME` are shared, and bind mounts are sshfs-backed (slow cache reads, misreported free space); keep the VFS cache on a named volume.
+- Distro rclone packages are too old (`rclone-version-unsupported`); the image copies the official binary.
+- After install, check `GET /Plugins/AudioGateway/cloud/rclone/preflight`.
+
 ## OAuth refresh failures
 
 A remote may still appear in `rclone listremotes` even when its provider OAuth token can no longer be refreshed. Audio Gateway classifies known rclone OAuth refresh failures as:
