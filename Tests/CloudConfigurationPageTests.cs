@@ -72,4 +72,34 @@ public class CloudConfigurationPageTests
         Assert.Contains("migrate back", html);
         Assert.Contains("never uses rclone sync/move/purge", html);
     }
+
+    [Fact]
+    public void CloudConfigurationPage_ShowsSetupReadinessAndScanGuidance()
+    {
+        const string resourceName =
+            "Jellyfin.Plugin.AudioGateway.Configuration.configPage.html";
+        using var stream = typeof(Plugin).Assembly.GetManifestResourceStream(resourceName);
+        Assert.NotNull(stream);
+        using var reader = new StreamReader(stream!);
+        var html = reader.ReadToEnd();
+
+        Assert.Contains("Setup readiness", html);
+        Assert.Contains("cloud/rclone/preflight", html);
+        Assert.Contains("CloudPreflightList", html);
+        Assert.Contains("Re-check readiness", html);
+        Assert.Contains("the library is usable now", html);
+        Assert.Contains("The scan cannot be paused", html);
+        Assert.Contains("Embedded cover-art extraction", html);
+
+        // Jellyfin injects only the page body; a <style> in <head> is dropped, leaving the
+        // whole dashboard unstyled.
+        var page = html.IndexOf("id=\"AudioGatewayConfigPage\"", System.StringComparison.Ordinal);
+        var style = html.IndexOf("<style>", System.StringComparison.Ordinal);
+        Assert.True(page >= 0 && style > page, "page <style> must live inside the page container");
+
+        var start = html.IndexOf("function renderCloudPreflight", System.StringComparison.Ordinal);
+        var end = html.IndexOf("async function loadCloudPreflight", System.StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start);
+        Assert.DoesNotContain("innerHTML", html.Substring(start, end - start));
+    }
 }
