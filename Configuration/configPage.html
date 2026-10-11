@@ -3,6 +3,12 @@
 <head>
     <meta charset="utf-8">
     <title>Audio Gateway</title>
+</head>
+<body>
+    <div id="AudioGatewayConfigPage"
+         data-role="page"
+         class="page type-interior pluginConfigurationPage"
+         data-require="emby-input,emby-button,emby-select,emby-checkbox">
     <style>
         #AudioGatewayConfigPage .ag-settings {
             max-width: 74rem;
@@ -109,6 +115,36 @@
             line-height: 1.45;
         }
 
+        #AudioGatewayConfigPage .ag-check {
+            display: flex;
+            gap: 0.6rem;
+            padding: 0.45rem 0;
+            border-bottom: 1px solid rgba(128, 128, 128, 0.18);
+        }
+
+        #AudioGatewayConfigPage .ag-check:last-child {
+            border-bottom: 0;
+        }
+
+        #AudioGatewayConfigPage .ag-check > div {
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+
+        #AudioGatewayConfigPage .ag-check-badge {
+            flex: 0 0 4.2rem;
+            font-weight: 600;
+        }
+
+        #AudioGatewayConfigPage .ag-check--pass .ag-check-badge { color: #4caf50; }
+        #AudioGatewayConfigPage .ag-check--warn .ag-check-badge { color: #f0a020; }
+        #AudioGatewayConfigPage .ag-check--fail .ag-check-badge { color: #e05050; }
+
+        #AudioGatewayConfigPage .ag-check-fix {
+            opacity: 0.8;
+            margin-top: 0.15rem;
+        }
+
         #AudioGatewayConfigPage .ag-list {
             max-height: 24rem;
             overflow: auto;
@@ -194,12 +230,7 @@
             }
         }
     </style>
-</head>
-<body>
-    <div id="AudioGatewayConfigPage"
-         data-role="page"
-         class="page type-interior pluginConfigurationPage"
-         data-require="emby-input,emby-button,emby-select,emby-checkbox">
+
         <div data-role="content">
             <div class="content-primary ag-settings">
                 <form id="AudioGatewayConfigForm">
@@ -254,6 +285,29 @@
                             Checking server-side rclone access…
                         </div>
 
+                        <div class="verticalSection ag-subsection" role="region" aria-labelledby="CloudPreflightTitle">
+                            <h4 id="CloudPreflightTitle" class="sectionTitle">Setup readiness</h4>
+                            <div class="fieldDescription">
+                                Read-only checks of this server: rclone version, configured remotes, FUSE mount support,
+                                and free space for each enabled profile's cache. Nothing is mounted or changed.
+                            </div>
+                            <div id="CloudPreflightStatus"
+                                 class="fieldDescription ag-status"
+                                 role="status"
+                                 aria-live="polite">
+                                Running readiness checks…
+                            </div>
+                            <div id="CloudPreflightList" class="ag-list ag-list--stack" role="list"></div>
+                            <div class="ag-actions ag-actions--compact">
+                                <button id="CloudPreflightButton"
+                                        is="emby-button"
+                                        type="button"
+                                        class="raised emby-button">
+                                    <span>Re-check readiness</span>
+                                </button>
+                            </div>
+                        </div>
+
                         <details open class="ag-details">
                             <summary>VFS setup and migration model</summary>
                             <div class="fieldDescription ag-details-body">
@@ -266,10 +320,10 @@
                                 <p>
                                     Automatic Audio Gateway tasks are payload-safe for VFS libraries: the six-hour task verifies/mounts each profile but does not queue a Jellyfin catalog scan, and scheduled waveform/peak/loudness analysis never traverses VFS media at all.
                                     Playback or an explicit Slipmat artifact request may read a cloud item; those bytes enter the bounded VFS cache and are reused until eviction.
-                                    For VFS libraries the plugin also disables Jellyfin realtime monitoring, LUFS scans, chapter-image extraction, trickplay extraction, and media-folder derived-data writes; if that policy cannot be applied, reconciliation fails closed.
+                                    For VFS libraries the plugin also disables Jellyfin realtime monitoring, LUFS scans, chapter-image extraction, trickplay extraction, and media-folder derived-data writes; if that policy cannot be applied, reconciliation fails closed. Embedded cover-art extraction for tracks is also disabled for VFS libraries, because Jellyfin reads the entire audio file to extract it; folder art such as cover.jpg is still used.
                                 </p>
                                 <p>
-                                    A Jellyfin catalog refresh is an explicit namespace-discovery action. Jellyfin may probe uncached remote media while identifying items, because Jellyfin 12.1 does not expose a supported cache-residency filter for filesystem libraries. Use explicit refresh after initial setup, migration cutover, or when you need new remote objects added to the Jellyfin catalog; routine Audio Gateway reconciliation will not trigger it in the background.
+                                    A Jellyfin catalog refresh is an explicit namespace-discovery action. The mount bounds each probe to a few MB per track (about 2.5 MB/track measured; a 4,500-track library transferred roughly 10 GB over about 90 minutes) and the library is usable while the scan runs. The scan cannot be paused or resumed. Jellyfin may probe uncached remote media while identifying items, because Jellyfin 12.1 does not expose a supported cache-residency filter for filesystem libraries. Use explicit refresh after initial setup, migration cutover, or when you need new remote objects added to the Jellyfin catalog; routine Audio Gateway reconciliation will not trigger it in the background.
                                 </p>
                                 <p>
                                     To migrate a conventional local Jellyfin library to VFS, copy it to an empty cloud destination, verify source versus remote, cut the same library over to its VFS profile, keep the local source as rollback, and only then explicitly finalize local cleanup.
@@ -1265,6 +1319,75 @@
                 summary.textContent = 'rclone cloud access is not ready · ' + response.code + '.';
             }
 
+            function describeReconcile(response) {
+                switch (response.code) {
+                    case 'mount-ready-scan-queued':
+                        return 'Mounted. A Jellyfin library scan was queued: the library is usable now and fills in as the scan proceeds (large libraries take an hour or more). The scan cannot be paused.';
+                    case 'mount-ready-library-scan-active':
+                        return 'Mounted. A Jellyfin library scan is already running.';
+                    case 'mount-ready-library-ready-no-scan':
+                        return 'Mounted. The library is ready; no scan was queued.';
+                    default:
+                        return response.status + ' · ' + response.code;
+                }
+            }
+
+            function renderCloudPreflight(response) {
+                const list = document.querySelector('#CloudPreflightList');
+                const status = document.querySelector('#CloudPreflightStatus');
+                list.replaceChildren();
+                if (!response || !Array.isArray(response.checks)) {
+                    status.textContent = 'Unable to run readiness checks.';
+                    return;
+                }
+
+                const labels = { pass: 'Ready', warn: 'Warning', fail: 'Fix needed' };
+                response.checks.forEach(function(check) {
+                    const row = document.createElement('div');
+                    row.className = 'ag-check ag-check--' + check.status;
+                    row.setAttribute('role', 'listitem');
+
+                    const badge = document.createElement('span');
+                    badge.className = 'ag-check-badge';
+                    badge.textContent = labels[check.status] || check.status;
+
+                    const body = document.createElement('div');
+                    const detail = document.createElement('div');
+                    detail.textContent = check.detail;
+                    body.appendChild(detail);
+                    if (check.fix) {
+                        const fix = document.createElement('div');
+                        fix.className = 'fieldDescription ag-check-fix';
+                        fix.textContent = 'Fix: ' + check.fix;
+                        body.appendChild(fix);
+                    }
+
+                    row.appendChild(badge);
+                    row.appendChild(body);
+                    list.appendChild(row);
+                });
+
+                status.textContent = response.status === 'pass'
+                    ? 'All readiness checks passed.'
+                    : (response.status === 'warn'
+                        ? 'Ready with warnings — review them before mounting.'
+                        : 'Setup is not ready — fix the items marked "Fix needed".');
+            }
+
+            async function loadCloudPreflight() {
+                document.querySelector('#CloudPreflightStatus').textContent = 'Running readiness checks…';
+                try {
+                    const response = await ApiClient.getJSON(
+                        ApiClient.getUrl('Plugins/AudioGateway/cloud/rclone/preflight')
+                    );
+                    renderCloudPreflight(response);
+                    return response;
+                } catch {
+                    renderCloudPreflight(null);
+                    return null;
+                }
+            }
+
             async function loadCloudStatus() {
                 const status = document.querySelector('#CloudStatus');
                 const resolvedPath = document.querySelector('#CloudResolvedProjectionPath');
@@ -1397,8 +1520,9 @@
                             projectionId: CloudActiveProfileId || undefined
                         })
                     });
-                    status.textContent = response.status + ' · ' + response.code;
+                    status.textContent = describeReconcile(response);
                     await loadCloudStatus();
+                    await loadCloudPreflight();
                 } catch {
                     status.textContent = 'Unable to prepare or refresh the cloud mount.';
                 }
@@ -1750,6 +1874,12 @@
             document.querySelector('#CloudStatusButton')
                 .addEventListener('click', function() {
                     loadCloudStatus();
+                    loadCloudPreflight();
+                });
+
+            document.querySelector('#CloudPreflightButton')
+                .addEventListener('click', function() {
+                    loadCloudPreflight();
                 });
 
             document.querySelector('#CloudRemoteName')
@@ -1883,6 +2013,7 @@
                                 activeProfile ? activeProfile.RemotePath : '');
                             return Promise.all([
                                 loadAudioGatewayStatus(),
+                                loadCloudPreflight(),
                                 loadCloudRemotes(activeProfile ? activeProfile.RemoteName : '').then(function() {
                                     CloudBrowserCurrentRemote = document.querySelector('#CloudRemoteName').value;
                                     if (!activeProfile || !CloudPersistedProfileIds.has(activeProfile.Id)) {
