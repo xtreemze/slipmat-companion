@@ -225,7 +225,8 @@ public sealed class CloudProjectionService
             ProjectionHasFiles: root.HasFiles,
             LibraryReady: library.Ready,
             LibraryName: resolved.LibraryName,
-            CollectionType: resolved.CollectionType.ToString());
+            CollectionType: resolved.CollectionType.ToString(),
+            JellyfinScanActive: _libraryProjection.IsScanRunning);
     }
 
     public async Task<CloudRemoteListResponse> ListRemotesAsync(
