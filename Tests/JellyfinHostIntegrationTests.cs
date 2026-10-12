@@ -86,6 +86,15 @@ public class JellyfinHostIntegrationTests
                 && descriptor.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(
             services,
+            descriptor => descriptor.ServiceType == typeof(CloudProjectionStartupReconciler)
+                && descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            descriptor => descriptor.ServiceType == typeof(IHostedService)
+                && descriptor.ImplementationFactory is not null
+                && descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
             descriptor => descriptor.ServiceType == typeof(IScheduledTask)
                 && descriptor.ImplementationType == typeof(CloudProjectionRefreshTask)
                 && descriptor.Lifetime == ServiceLifetime.Singleton);

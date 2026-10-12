@@ -109,7 +109,7 @@ The Jellyfin plugin settings provide:
 - bounded cache policy with defaults of 16 GiB target maximum, 24-hour idle expiry, and 4 GiB minimum free space;
 - guided setup/migration explanations in the dashboard;
 - manual per-profile mount/library reconciliation, including explicit Jellyfin catalog refresh when requested;
-- six-hour scheduled mount reconciliation that never queues a Jellyfin catalog scan.
+- one-shot mount reconciliation when Jellyfin starts, plus six-hour scheduled reconciliation; neither queues a Jellyfin catalog scan.
 
 The executable is operator-owned. Audio Gateway invokes `rclone` from Jellyfin's service `PATH`, or `SLIPMAT_RCLONE` when explicitly provided by the host. rclone's own `RCLONE_CONFIG` mechanism may point the service at the intended config file. The plugin never calls `config dump`, `config show`, or any other command that returns provider secrets. The Jellyfin service/container must also have the platform mount support required by `rclone mount` (for example FUSE on Linux); otherwise reconciliation fails closed rather than falling back to full-library copying.
 
