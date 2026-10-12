@@ -1405,9 +1405,10 @@
                         : (response.projectionPathReady ? 'mount point ready' : 'mount not ready yet');
                     const library = response.libraryReady ? 'library ready' : 'library not ready';
                     const mount = response.mountInProgress ? 'mount starting' : 'idle';
+                    const scan = response.jellyfinScanActive ? 'Jellyfin scan active' : 'no Jellyfin scan active';
 
                     status.textContent = response.health + ' · ' + response.code + ' · ' +
-                        mount + ' · ' + projection + ' · ' + library;
+                        mount + ' · ' + projection + ' · ' + library + ' · ' + scan;
 
                     resolvedPath.textContent = response.projectionPath
                         ? (response.projectionPathManaged ? 'Managed path: ' : 'Resolved override: ') + response.projectionPath

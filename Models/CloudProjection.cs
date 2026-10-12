@@ -46,7 +46,8 @@ public sealed record CloudProjectionStatusResponse(
     [property: JsonPropertyName("projectionHasFiles")] bool ProjectionHasFiles,
     [property: JsonPropertyName("libraryReady")] bool LibraryReady,
     [property: JsonPropertyName("libraryName")] string? LibraryName,
-    [property: JsonPropertyName("collectionType")] string? CollectionType);
+    [property: JsonPropertyName("collectionType")] string? CollectionType,
+    [property: JsonPropertyName("jellyfinScanActive")] bool JellyfinScanActive = false);
 
 public sealed record CloudLibraryScanPolicy(
     [property: JsonPropertyName("enableRealtimeMonitor")] bool EnableRealtimeMonitor,
