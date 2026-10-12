@@ -110,7 +110,7 @@ Jellyfin's own catalog/library scan is a different operation: it enumerates the 
 
 ## Namespace refresh
 
-rclone maintains directory metadata for the mounted namespace and polls supported remotes. Audio Gateway reconciles every enabled VFS profile every six hours. Each profile is handled independently, so an unavailable provider does not block unrelated mounts. The task can queue Jellyfin namespace/catalog refresh after a mount is ready; it never performs Companion analysis backfill or copies the media collection.
+rclone maintains directory metadata for the mounted namespace and polls supported remotes. Audio Gateway reconciles every enabled VFS profile once when Jellyfin starts and every six hours thereafter. Each profile is handled independently, so an unavailable provider does not block unrelated mounts. The task can queue Jellyfin namespace/catalog refresh after a mount is ready; it never performs Companion analysis backfill or copies the media collection.
 
 ## Migration from the former copy projection
 
