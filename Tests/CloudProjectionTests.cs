@@ -539,6 +539,23 @@ public class CloudProjectionTests
         Assert.Equal("movies", status.CollectionType);
     }
 
+
+    [Fact]
+    public async Task GetStatus_ReportsJellyfinScanActivity()
+    {
+        using var temp = new TempDirectory();
+        var projectionPath = Path.Combine(temp.Path, "projection");
+        var library = new FakeLibraryProjection { IsScanRunning = true };
+        var service = CreateService(
+            EnabledConfig(projectionPath),
+            HealthyRunner(Result(0)),
+            library);
+
+        var status = await service.GetStatusAsync();
+
+        Assert.True(status.JellyfinScanActive);
+    }
+
     [Fact]
     public async Task Reconcile_OverlappingProfileStorage_FailsClosed()
     {
