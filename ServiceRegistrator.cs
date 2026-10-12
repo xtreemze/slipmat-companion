@@ -40,6 +40,9 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<ICloudLibraryProjection, JellyfinCloudLibraryProjection>();
         serviceCollection.AddSingleton<CloudProjectionService>();
         serviceCollection.AddSingleton<CloudPreflightService>();
+        serviceCollection.AddSingleton<CloudProjectionStartupReconciler>();
+        serviceCollection.AddSingleton<IHostedService>(
+            services => services.GetRequiredService<CloudProjectionStartupReconciler>());
         serviceCollection.AddSingleton<IScheduledTask, CloudProjectionRefreshTask>();
 
         serviceCollection.AddSingleton<CloudMigrationStore>();
