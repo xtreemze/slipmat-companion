@@ -11,7 +11,8 @@ namespace Jellyfin.Plugin.AudioGateway.Tests;
 public sealed class PhysicalMediaMaterialStoreTests : IDisposable
 {
     private static readonly string Key = "pmv1-" + new string('a', 64);
-    private static readonly byte[] Png = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3, 4 };
+    // Real 2x2 non-interlaced RGBA PNG, with valid IHDR/IDAT/IEND CRCs.
+    private static readonly byte[] Png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGP4z8DwH4QZYAwAR8oH+WdZbrcAAAAASUVORK5CYII=");
     private readonly string _root = Path.Combine(Path.GetTempPath(), "pm-store-" + Guid.NewGuid().ToString("N"));
 
     public void Dispose()
@@ -70,6 +71,41 @@ public sealed class PhysicalMediaMaterialStoreTests : IDisposable
             await store.PutAsync(Key, "normal-paper-0.png", new MemoryStream(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9 }), CancellationToken.None));
         Assert.Empty(store.List(Key));
         Assert.Empty(Directory.EnumerateFiles(_root, "*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task Rejects_corrupt_chunks_truncated_png_and_trailing_bytes()
+    {
+        var store = Store();
+        var badCrc = (byte[])Png.Clone();
+        badCrc[45] ^= 1; // IDAT payload mutation without a matching CRC.
+        var truncated = Png[..^1];
+        var trailing = Png.Concat(new byte[] { 0 }).ToArray();
+        var fakeSignature = Png[..8].Concat(new byte[] { 1, 2, 3, 4 }).ToArray();
+
+        foreach (var payload in new[] { badCrc, truncated, trailing, fakeSignature })
+        {
+            Assert.Equal(
+                PhysicalMediaMaterialStore.PutResult.Rejected,
+                await store.PutAsync(Key, "normal-paper-0.png", new MemoryStream(payload), CancellationToken.None));
+            Assert.Empty(store.List(Key));
+        }
+
+        Assert.Empty(Directory.EnumerateFiles(_root, "*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task Rejects_oversized_decoded_png_even_when_chunk_crcs_are_valid()
+    {
+        // Valid PNG structure with a 4097-pixel-wide IHDR and matching CRC.
+        // The store must not publish a map beyond its decoder-memory budget.
+        var oversized = Convert.FromBase64String(
+            "iVBORw0KGgoAAAANSUhEUgAAEAEAAAABCAYAAACx4wBCAAAAH0lEQVR4nO3BAQ0AAADCoPdPbQ43oAAAAAAAAACAewMgAQABPhr3KAAAAABJRU5ErkJggg==");
+        var store = Store();
+        Assert.Equal(
+            PhysicalMediaMaterialStore.PutResult.Rejected,
+            await store.PutAsync(Key, "normal-paper-0.png", new MemoryStream(oversized), CancellationToken.None));
+        Assert.Empty(store.List(Key));
     }
 
     [Fact]
