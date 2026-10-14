@@ -330,6 +330,12 @@
                                     To migrate back, copy and verify the cloud library into a local destination before switching Jellyfin back to that local path.
                                     Audio Gateway never treats cache eviction as migration and never uses rclone sync/move/purge for these workflows.
                                 </p>
+                                <p>
+                                    Migration verification is intentionally content-based and can be expensive. Prepare performs an additive copy followed by <code>rclone check --download</code>; cutover repeats a final incremental copy and a second content-download verification before storage authority changes. For local → VFS migration, plan for the source upload plus approximately one full remote-library read for each verification pass. The original local media stays on disk as rollback until Finalize; VFS cache space is additional. For VFS → local migration, the local staging copy needs approximately the full library size before cutover.
+                                </p>
+                                <p>
+                                    Cloud analysis is request-driven. Automatic Companion analysis skips VFS libraries so it cannot materialize the remote collection. Playing a track or explicitly requesting Slipmat analysis artifacts may read that item into the bounded VFS cache and generate reproducible Companion artifacts.
+                                </p>
                             </div>
                         </details>
 
@@ -1670,6 +1676,31 @@
                         verification.className = 'fieldDescription';
                         verification.textContent = 'Verification: ' + job.verification;
                         row.appendChild(verification);
+                    }
+
+                    const manifestBytes = Number(job.manifestTotalBytes);
+                    const manifestFiles = Number(job.manifestFileCount);
+                    if (Number.isFinite(manifestBytes) && manifestBytes >= 0) {
+                        const inventory = document.createElement('div');
+                        inventory.className = 'fieldDescription';
+                        const fileSummary = Number.isFinite(manifestFiles) && manifestFiles >= 0
+                            ? String(manifestFiles) + ' files · '
+                            : '';
+                        inventory.textContent =
+                            'Captured source inventory: ' + fileSummary + formatCloudSize(manifestBytes) + '.';
+                        row.appendChild(inventory);
+
+                        if (job.direction === 'local-to-vfs') {
+                            const cost = document.createElement('div');
+                            cost.className = 'fieldDescription';
+                            cost.textContent =
+                                'Verification cost: prepare and cutover each run a content-download check. ' +
+                                'Budget about ' + formatCloudSize(manifestBytes) +
+                                ' of remote reads per verification pass, plus upload of changed source bytes. ' +
+                                'The retained local source uses about ' + formatCloudSize(manifestBytes) +
+                                ' until Finalize; VFS cache space is additional.';
+                            row.appendChild(cost);
+                        }
                     }
 
                     const actions = document.createElement('div');
