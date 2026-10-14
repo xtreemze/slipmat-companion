@@ -1,7 +1,7 @@
 ---
 name: "Audio Gateway"
 guid: "d3a2b1c0-e4f5-6789-abcd-ef0123456789"
-version: "0.5.1.0"
+version: "0.5.2.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 overview: "Optional Jellyfin companion that accelerates and enriches Slipmat."
@@ -15,4 +15,4 @@ category: "General"
 owner: "xtreemze"
 artifacts:
 - "Jellyfin.Plugin.AudioGateway.dll"
-changelog: "Add a read-only rclone VFS setup preflight with a version-unsupported status and a warning when the VFS cache sits on a network-like filesystem, bound VFS scan egress (no read-ahead, no embedded-art extraction), gate VFS retirement on custody certification and harden rclone migration verification, add album packaging image captures from Cover Art Archive, TheAudioDB and Discogs together with the Package Inspector physicalMediaMaterials cache, and add a dashboard setup-readiness panel with scan guidance."
+changelog: "Expose Jellyfin-selected album back covers in Companion track events; add optional fanart.tv release-group front art without misclassifying back covers or discs; validate packaging image origins; improve cloud rclone readiness and physical-media material cache handling; add inactive JPEG XL corpus verification tooling."
