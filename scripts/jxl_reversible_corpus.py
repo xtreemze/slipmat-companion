@@ -181,9 +181,9 @@ def main() -> int:
         sort_keys=True,
     ))
     # Other formats and incompressible JPEGs are expected data points.
-    # A reconstructed mismatch is a hard integrity failure; no successful
-    # JPEG source must ever silently become a different JPEG file.
-    return 1 if any(row["status"] == "mismatch" for row in results) else 0
+    # A mismatch or zero verifiable conversions is a failed verification run.
+    # Non-beneficial images remain explicit sample results, never a success claim.
+    return 1 if not verified or any(row["status"] == "mismatch" for row in results) else 0
 
 
 if __name__ == "__main__":
