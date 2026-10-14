@@ -166,23 +166,29 @@ image slots Slipmat's Package Inspector reads:
 
 | Jellyfin image | Package Inspector part | Sources (in preference order) |
 | --- | --- | --- |
-| `Primary` | Front cover | Cover Art Archive `Front`, TheAudioDB `strAlbumThumbHQ`/`strAlbumThumb`, Discogs primary |
-| `BoxRear` | Back cover / tray card | Cover Art Archive `Back`, TheAudioDB `strAlbumBack`, Discogs first secondary |
+| `Primary` | Front cover | Cover Art Archive `Front`, TheAudioDB `strAlbumThumbHQ`/`strAlbumThumb`, optional fanart.tv `albumcover` (release-group fallback), Discogs primary |
+| `BoxRear` | Back cover / tray card | Exact-release Cover Art Archive `Back`, TheAudioDB `strAlbumBack` |
 | `Disc` | Disc face | Cover Art Archive `Medium`, TheAudioDB `strAlbumCDart` |
-| `Box` | Inner insert (booklet) | Cover Art Archive `Booklet`, Discogs secondary |
+| `Box` | Inner insert (booklet) | Exact-release Cover Art Archive `Booklet`, unclassified Discogs secondary |
 | `Menu` | Inner insert (tray) | Cover Art Archive `Tray`, Discogs secondary |
 | `Art` | Inner insert (liner/spine) | Cover Art Archive `Liner`/`Spine`/`Obi`, TheAudioDB `strAlbumSpine`, Discogs secondary |
 
 - **Cover Art Archive** needs the album's MusicBrainz *release* id. Only a
-  release carries back, disc and booklet scans; the release-group endpoint
-  answers with the front alone.
+  release carries confirmed back, disc and booklet scans; a release-group
+  fallback is restricted to the front and never implies the same physical edition.
 - **TheAudioDB** uses its public free key by default. Set
   `SLIPMAT_AUDIODB_API_KEY` in the server environment for a supporter key.
+- **fanart.tv** is optional and uses the MusicBrainz *release-group* ID. Set
+  `SLIPMAT_FANART_TV_API_KEY` in the Jellyfin server environment. Only `albumcover`
+  is used as a generic front fallback. Its `cdart` is not evidence of a printed
+  disc for a specific edition, and its music API exposes no named back cover.
 - **Discogs** is used only when `SLIPMAT_DISCOGS_TOKEN` (a personal access
   token) is set in the server environment. Its images are unlabelled beyond
-  primary/secondary, so they rank below the labelled sources.
+  primary/secondary, so secondary images are unclassified inserts, **not**
+  asserted back-cover scans.
 - Keys are environment settings, never plugin configuration (the
-  configuration carries no credentials). `PackagingImagesEnabled` switches the
+  configuration carries no credentials). Fanart credentials stay in the request
+  header; image URLs never contain them. `PackagingImagesEnabled` switches the
   provider off.
 
 A library whose metadata settings list explicit image fetchers for *Albums*
