@@ -29,6 +29,7 @@ public static class PackagingImageSources
 {
     public const string CoverArtArchive = "Cover Art Archive";
     public const string AudioDb = "TheAudioDB";
+    public const string FanartTv = "fanart.tv";
     public const string Discogs = "Discogs";
 
     // Real scans first: the Cover Art Archive labels every image by what it
@@ -36,6 +37,7 @@ public static class PackagingImageSources
     private const double CoverArtArchiveRank = 9;
     private const double AudioDbRank = 8;
     private const double DiscogsRank = 7;
+    private const double FanartTvRank = 7.5;
 
     /// <summary>Cover Art Archive types → the slot each fills; first type wins.</summary>
     private static readonly (string CaaType, ImageType Slot)[] CaaSlots =
@@ -150,6 +152,56 @@ public static class PackagingImageSources
         return candidates;
     }
 
+
+    /// <summary>
+    /// fanart.tv music album assets are scoped to a MusicBrainz release group,
+    /// not an exact physical edition. Only its albumcover is eligible as a
+    /// generic front-cover fallback. cdart is deliberately not projected into
+    /// a historical disc scan and the API has no named rear-cover image field.
+    /// </summary>
+    public static IReadOnlyList<PackagingImageCandidate> ParseFanartTvAlbum(string json, string releaseGroupId)
+    {
+        var candidates = new List<PackagingImageCandidate>();
+        using var document = JsonDocument.Parse(json);
+        if (!document.RootElement.TryGetProperty("albums", out var albums)
+            || albums.ValueKind != JsonValueKind.Array)
+        {
+            return candidates;
+        }
+
+        foreach (var album in albums.EnumerateArray())
+        {
+            if (album.ValueKind != JsonValueKind.Object
+                || !string.Equals(ReadString(album, "release_group_id"), releaseGroupId, StringComparison.OrdinalIgnoreCase)
+                || !album.TryGetProperty("albumcover", out var covers)
+                || covers.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var cover in covers.EnumerateArray())
+            {
+                if (cover.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                var url = ReadString(cover, "url");
+                if (!Uri.TryCreate(url, UriKind.Absolute, out var parsed)
+                    || parsed.Scheme != Uri.UriSchemeHttps
+                    || !string.Equals(parsed.Host, "assets.fanart.tv", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                candidates.Add(new PackagingImageCandidate(
+                    ImageType.Primary, parsed.AbsoluteUri, null, null, null, FanartTv, FanartTvRank));
+            }
+        }
+
+        return candidates;
+    }
+
     /// <summary>Reads the first release id from a Discogs database search.</summary>
     public static long? ParseDiscogsSearchReleaseId(string json)
     {
@@ -174,8 +226,8 @@ public static class PackagingImageSources
     /// <summary>
     /// Parses a Discogs release. Discogs does not label its images beyond
     /// primary/secondary, so they are offered below the labelled sources: the
-    /// primary as the front, and the secondaries in their conventional upload
-    /// order (back cover first, then inner material).
+    /// primary as the front. Secondary images have no reliable back-cover
+    /// designation and may only be offered as unclassified inner inserts.
     /// </summary>
     public static IReadOnlyList<PackagingImageCandidate> ParseDiscogsRelease(string json)
     {
@@ -187,7 +239,7 @@ public static class PackagingImageSources
             return candidates;
         }
 
-        var secondarySlots = new[] { ImageType.BoxRear, ImageType.Box, ImageType.Menu, ImageType.Art };
+        var secondarySlots = new[] { ImageType.Box, ImageType.Menu, ImageType.Art };
         var secondary = 0;
         foreach (var image in images.EnumerateArray())
         {
