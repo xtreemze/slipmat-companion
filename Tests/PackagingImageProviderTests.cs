@@ -59,6 +59,73 @@ public sealed class PackagingImageProviderTests
         ]}
         """;
 
+    [Theory]
+    [InlineData("http://127.0.0.1/private", PackagingImageSources.CoverArtArchive)]
+    [InlineData("http://169.254.169.254/latest/meta-data", PackagingImageSources.CoverArtArchive)]
+    [InlineData("https://assets.fanart.tv.evil.example/art.jpg", PackagingImageSources.FanartTv)]
+    [InlineData("https://user:password@assets.fanart.tv/art.jpg", PackagingImageSources.FanartTv)]
+    [InlineData("https://assets.fanart.tv:444/art.jpg", PackagingImageSources.FanartTv)]
+    [InlineData("http://assets.fanart.tv/art.jpg", PackagingImageSources.FanartTv)]
+    [InlineData("file:///etc/passwd", PackagingImageSources.Discogs)]
+    [InlineData("https://i.discogs.com/art.jpg#secret", PackagingImageSources.Discogs)]
+    [InlineData("https://r2.theaudiodb.com@localhost/back.jpg", PackagingImageSources.AudioDb)]
+    [InlineData("https://evil.example/back.jpg", PackagingImageSources.AudioDb)]
+    public void Image_candidates_reject_untrusted_origins_and_schemes(string url, string source)
+    {
+        Assert.Null(PackagingImageSources.NormalizeRemoteImageUrl(url, source));
+    }
+
+    [Theory]
+    [InlineData("http://coverartarchive.org/release/r/2.jpg", PackagingImageSources.CoverArtArchive,
+        "https://coverartarchive.org/release/r/2.jpg")]
+    [InlineData("https://r2.theaudiodb.com/images/back.jpg", PackagingImageSources.AudioDb,
+        "https://r2.theaudiodb.com/images/back.jpg")]
+    [InlineData("https://assets.fanart.tv/fanart/music/a/albumcover/front.jpg", PackagingImageSources.FanartTv,
+        "https://assets.fanart.tv/fanart/music/a/albumcover/front.jpg")]
+    [InlineData("https://i.discogs.com/front.jpg", PackagingImageSources.Discogs,
+        "https://i.discogs.com/front.jpg")]
+    public void Trusted_provider_image_origins_remain_usable(string url, string source, string expected)
+    {
+        Assert.Equal(expected, PackagingImageSources.NormalizeRemoteImageUrl(url, source));
+    }
+
+    [Fact]
+    public void Provider_parsers_discard_untrusted_artwork_before_offering_it_to_Jellyfin()
+    {
+        Assert.Empty(PackagingImageSources.ParseCoverArtArchive(
+            CaaRelease.Replace("coverartarchive.org", "127.0.0.1", StringComparison.Ordinal)));
+        Assert.Empty(PackagingImageSources.ParseAudioDb(
+            AudioDbAlbum.Replace("r2.theaudiodb.com", "localhost", StringComparison.Ordinal)));
+        Assert.Empty(PackagingImageSources.ParseDiscogsRelease(
+            DiscogsRelease.Replace("i.discogs.com", "localhost", StringComparison.Ordinal)));
+    }
+
+    [Theory]
+    [InlineData("http://127.0.0.1/secret")]
+    [InlineData("https://i.discogs.com.evil.example/secret")]
+    [InlineData("file:///etc/passwd")]
+    public async Task Download_boundary_rejects_untrusted_urls_without_network_request(string url)
+    {
+        var handler = new RecordingHandler(_ => (HttpStatusCode.OK, string.Empty));
+        var provider = Create(handler, new PluginConfiguration());
+
+        await Assert.ThrowsAsync<ArgumentException>(() => provider.GetImageResponse(url, CancellationToken.None));
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task Download_boundary_accepts_known_provider_image_hosts()
+    {
+        var handler = new RecordingHandler(_ => (HttpStatusCode.OK, string.Empty));
+        var provider = Create(handler, new PluginConfiguration());
+
+        using var response = await provider.GetImageResponse(
+            "https://coverartarchive.org/release/r/2.jpg", CancellationToken.None);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(new[] { "https://coverartarchive.org/release/r/2.jpg" }, handler.Requests);
+    }
+
     [Fact]
     public void Cover_Art_Archive_types_map_to_the_slots_the_inspector_reads()
     {
