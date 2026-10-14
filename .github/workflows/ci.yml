@@ -52,6 +52,9 @@ jobs:
       - name: Verify canonical fixture provenance
         run: python3 scripts/verify_upstream_fixture_parity.py
 
+      - name: Test bounded JPEG XL corpus probe (no codec dependency)
+        run: python3 -m unittest discover -s scripts/tests -p 'test_jxl_*.py' -v
+
       - name: Set up Node for companion site
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
