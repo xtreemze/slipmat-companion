@@ -183,7 +183,7 @@ public sealed class ReversibleJpegXlEncoder
     private static bool IsJxl(ReadOnlySpan<byte> bytes) =>
         (bytes.Length >= 2 && bytes[0] == 0xff && bytes[1] == 0x0a)
         || (bytes.Length >= 12 && bytes[..12].SequenceEqual(
-            [0, 0, 0, 12, 0x4a, 0x58, 0x4c, 0x20, 0x0d, 0x0a, 0x87, 0x0a]));
+            new byte[] { 0, 0, 0, 12, 0x4a, 0x58, 0x4c, 0x20, 0x0d, 0x0a, 0x87, 0x0a }));
 
     private static bool IsFileWithinBudget(string path, long maximumBytes) =>
         maximumBytes > 0
