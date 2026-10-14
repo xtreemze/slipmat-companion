@@ -19,7 +19,9 @@ namespace Jellyfin.Plugin.AudioGateway.Services.Packaging;
 /// <summary>
 /// Offers captures of an album's physical packaging (back cover, disc face,
 /// booklet, tray and liner scans) from the Cover Art Archive, TheAudioDB and,
-/// with a personal token, Discogs, in the image slots Slipmat's Package
+/// with a personal token, Discogs. Optional fanart.tv front-cover fallbacks
+/// are release-group scoped and never represented as historical rear scans.
+/// Images use the slots Slipmat's Package
 /// Inspector reads. Jellyfin's own AudioDB provider supplies only the front.
 /// Each source is independent: one failing or missing never hides the others.
 /// </summary>
@@ -99,6 +101,10 @@ public sealed class AlbumPackagingImageProvider : IRemoteImageProvider, IHasOrde
         {
             sources.Add(Guard("Discogs", () => FromDiscogs(album, _keys.DiscogsToken, cancellationToken)));
         }
+        if (_keys.FanartTvApiKey is not null)
+        {
+            sources.Add(Guard("fanart.tv", () => FromFanartTv(album, _keys.FanartTvApiKey, cancellationToken)));
+        }
 
         var results = await Task.WhenAll(sources).ConfigureAwait(false);
         return results
@@ -173,6 +179,12 @@ public sealed class AlbumPackagingImageProvider : IRemoteImageProvider, IHasOrde
             }
 
             var candidates = PackagingImageSources.ParseCoverArtArchive(json);
+            // Release-group images can come from a different physical edition.
+            // Only a true release-specific response may provide back/disc/inserts.
+            if (path.StartsWith("release-group/", StringComparison.Ordinal))
+            {
+                candidates = candidates.Where(candidate => candidate.Type == ImageType.Primary).ToArray();
+            }
             if (candidates.Count > 0)
             {
                 return candidates;
@@ -208,6 +220,30 @@ public sealed class AlbumPackagingImageProvider : IRemoteImageProvider, IHasOrde
         return json is null ? Array.Empty<PackagingImageCandidate>() : PackagingImageSources.ParseAudioDb(json);
     }
 
+
+    private async Task<IReadOnlyList<PackagingImageCandidate>> FromFanartTv(
+        MusicAlbum album,
+        string apiKey,
+        CancellationToken cancellationToken)
+    {
+        var rawGroupId = album.GetProviderId(MetadataProvider.MusicBrainzReleaseGroup);
+        if (!Guid.TryParse(rawGroupId, out var groupId))
+        {
+            return Array.Empty<PackagingImageCandidate>();
+        }
+
+        var id = groupId.ToString("D");
+        // Never encode credentials into a URL, image URL, cache key or response.
+        var json = await GetJson(
+            $"https://webservice.fanart.tv/v3.2/music/albums/{id}",
+            null,
+            cancellationToken,
+            apiKey).ConfigureAwait(false);
+        return json is null
+            ? Array.Empty<PackagingImageCandidate>()
+            : PackagingImageSources.ParseFanartTvAlbum(json, id);
+    }
+
     private async Task<IReadOnlyList<PackagingImageCandidate>> FromDiscogs(
         MusicAlbum album,
         string token,
@@ -240,7 +276,8 @@ public sealed class AlbumPackagingImageProvider : IRemoteImageProvider, IHasOrde
     private async Task<string?> GetJson(
         string url,
         AuthenticationHeaderValue? authorization,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? fanartApiKey = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.UserAgent.ParseAdd(UserAgent);
@@ -248,6 +285,10 @@ public sealed class AlbumPackagingImageProvider : IRemoteImageProvider, IHasOrde
         if (authorization is not null)
         {
             request.Headers.Authorization = authorization;
+        }
+        if (fanartApiKey is not null)
+        {
+            request.Headers.TryAddWithoutValidation("api-key", fanartApiKey);
         }
 
         using var response = await Client().SendAsync(request, cancellationToken).ConfigureAwait(false);
