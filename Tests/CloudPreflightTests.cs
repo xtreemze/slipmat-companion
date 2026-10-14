@@ -67,6 +67,52 @@ public sealed class CloudPreflightTests
         Assert.Equal("pass", roomy.Checks.Single(c => c.Id == "remote").Status);
     }
 
+    [Fact]
+    public async Task Preflight_RecommendsConservativeCacheSize_FromTrustworthyFreeSpace()
+    {
+        var profile = new CloudLibraryProfile
+        {
+            Id = "p",
+            Enabled = false,
+            RemoteName = "tele2",
+            RemotePath = "Music",
+            CacheMinFreeSpaceGiB = 4,
+        };
+
+        var result = await Service(
+                Ready(),
+                new FakeProbe { Free = 100L * 1024 * 1024 * 1024, FsType = "ext4" },
+                profile)
+            .RunAsync(CancellationToken.None);
+
+        var recommendation = Assert.Single(result.CacheRecommendations);
+        Assert.Equal("p", recommendation.ProjectionId);
+        Assert.Equal(24, recommendation.SuggestedMaxSizeGiB);
+        Assert.Equal(100, recommendation.AvailableFreeGiB);
+        Assert.Equal(4, recommendation.MinFreeSpaceGiB);
+        Assert.Contains("25%", recommendation.Basis);
+    }
+
+    [Fact]
+    public async Task Preflight_DoesNotRecommendCacheSize_ForNetworkLikeFilesystem()
+    {
+        var profile = new CloudLibraryProfile
+        {
+            Id = "p",
+            Enabled = false,
+            RemoteName = "tele2",
+            RemotePath = "Music",
+        };
+
+        var result = await Service(
+                Ready(),
+                new FakeProbe { Free = 100L * 1024 * 1024 * 1024, FsType = "fuse.sshfs" },
+                profile)
+            .RunAsync(CancellationToken.None);
+
+        Assert.Empty(result.CacheRecommendations);
+    }
+
     [Theory]
     [InlineData("fuse.sshfs", "warn")]
     [InlineData("virtiofs", "warn")]
