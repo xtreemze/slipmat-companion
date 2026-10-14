@@ -15,9 +15,17 @@ public sealed record CloudPreflightCheck(
     [property: JsonPropertyName("detail")] string Detail,
     [property: JsonPropertyName("fix")] string? Fix);
 
+public sealed record CloudCacheRecommendation(
+    [property: JsonPropertyName("projectionId")] string ProjectionId,
+    [property: JsonPropertyName("suggestedMaxSizeGiB")] int SuggestedMaxSizeGiB,
+    [property: JsonPropertyName("availableFreeGiB")] long AvailableFreeGiB,
+    [property: JsonPropertyName("minFreeSpaceGiB")] int MinFreeSpaceGiB,
+    [property: JsonPropertyName("basis")] string Basis);
+
 public sealed record CloudPreflightResponse(
     [property: JsonPropertyName("status")] string Status,
-    [property: JsonPropertyName("checks")] IReadOnlyList<CloudPreflightCheck> Checks);
+    [property: JsonPropertyName("checks")] IReadOnlyList<CloudPreflightCheck> Checks,
+    [property: JsonPropertyName("cacheRecommendations")] IReadOnlyList<CloudCacheRecommendation> CacheRecommendations);
 
 /// <summary>Host facts the preflight needs; replaceable in tests.</summary>
 public interface ICloudHostProbe
@@ -162,10 +170,14 @@ public sealed class CloudPreflightService
 
         checks.Add(MountCapability());
 
-        var profiles = RuntimeSettings.GetCloudLibraries(_configurationSource.GetCurrent())
-            .Where(profile => profile.Enabled)
+        var profiles = RuntimeSettings.GetCloudLibraries(_configurationSource.GetCurrent()).ToArray();
+        var recommendations = profiles
+            .Select(CacheRecommendation)
+            .Where(recommendation => recommendation is not null)
+            .Cast<CloudCacheRecommendation>()
             .ToArray();
-        foreach (var profile in profiles)
+
+        foreach (var profile in profiles.Where(profile => profile.Enabled))
         {
             var check = CacheSpace(profile);
             if (check is not null)
@@ -177,7 +189,7 @@ public sealed class CloudPreflightService
         var status = checks.Any(check => check.Status == "fail")
             ? "fail"
             : checks.Any(check => check.Status == "warn") ? "warn" : "pass";
-        return new CloudPreflightResponse(status, checks);
+        return new CloudPreflightResponse(status, checks, recommendations);
     }
 
     private CloudPreflightCheck MountCapability()
@@ -206,6 +218,54 @@ public sealed class CloudPreflightService
         }
 
         return Warn("mount", "Mount capability is not verified on this platform.", null);
+    }
+
+    private CloudCacheRecommendation? CacheRecommendation(CloudLibraryProfile profile)
+    {
+        string cachePath;
+        try
+        {
+            var legacy = RuntimeSettings.ProfileAsLegacyConfiguration(profile);
+            cachePath = RuntimeSettings.ResolveCloudCachePath(
+                legacy,
+                profile.RemoteName,
+                profile.RemotePath,
+                Plugin.Instance?.HostApplicationPaths.DataPath);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        var fsType = _probe.FileSystemType(cachePath);
+        if (fsType is not null && NetworkLikeFileSystems.Contains(fsType))
+        {
+            return null;
+        }
+
+        var free = _probe.AvailableFreeBytes(cachePath);
+        if (free is null)
+        {
+            return null;
+        }
+
+        var freeGiB = free.Value / GiB;
+        var allocatableGiB = freeGiB - profile.CacheMinFreeSpaceGiB;
+        if (allocatableGiB <= 0)
+        {
+            return null;
+        }
+
+        // Keep most currently-free space outside the disposable cache. The cache may
+        // temporarily exceed its target while files are open, so use only one quarter
+        // of space above the configured free-space floor and cap the recommendation.
+        var suggested = (int)Math.Clamp(allocatableGiB / 4, 1, 64);
+        return new CloudCacheRecommendation(
+            profile.Id,
+            suggested,
+            freeGiB,
+            profile.CacheMinFreeSpaceGiB,
+            "25%-of-free-space-above-floor-capped-at-64GiB");
     }
 
     private CloudPreflightCheck? CacheSpace(CloudLibraryProfile profile)
