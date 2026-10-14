@@ -518,6 +518,21 @@
                                 <div class="fieldDescription">
                                     rclone evicts least-recently-accessed closed files when this target is exceeded. Open files can temporarily exceed it.
                                 </div>
+                                <div id="CloudCacheRecommendation"
+                                     class="fieldDescription"
+                                     role="status"
+                                     aria-live="polite">
+                                    Run setup readiness to calculate a conservative recommendation from trustworthy local free-space evidence.
+                                </div>
+                                <div class="ag-actions ag-actions--compact">
+                                    <button id="CloudApplyCacheRecommendationButton"
+                                            is="emby-button"
+                                            type="button"
+                                            class="raised emby-button"
+                                            disabled>
+                                        <span>Use recommended cache size</span>
+                                    </button>
+                                </div>
                             </div>
                             <div class="inputContainer">
                                 <label class="inputLabel inputLabelUnfocused" for="CloudCacheMaxAgeHours">Cache idle expiry (hours)</label>
@@ -750,6 +765,7 @@
             var CloudLibraryProfiles = [];
             var CloudActiveProfileId = '';
             var CloudPersistedProfileIds = new Set();
+            var CloudLastPreflight = null;
 
             function textList(value) {
                 return Array.isArray(value)
@@ -1066,6 +1082,7 @@
                 document.querySelector('#CloudLibraryName').value = profile.LibraryName || 'Cloud Media';
                 document.querySelector('#CloudCollectionType').value = profile.CollectionType || 'music';
                 document.querySelector('#CloudAutoCreateLibrary').checked = profile.AutoCreateLibrary !== false;
+                renderCloudCacheRecommendation(CloudLastPreflight);
                 CloudBrowserCurrentPath = normalizeCloudPath(profile.RemotePath || '');
                 document.querySelector('#CloudBrowserPath').value = CloudBrowserCurrentPath;
             }
@@ -1332,10 +1349,38 @@
                 }
             }
 
+            function renderCloudCacheRecommendation(response) {
+                const status = document.querySelector('#CloudCacheRecommendation');
+                const button = document.querySelector('#CloudApplyCacheRecommendationButton');
+                const recommendations = response && Array.isArray(response.cacheRecommendations)
+                    ? response.cacheRecommendations
+                    : [];
+                const recommendation = recommendations.find(function(candidate) {
+                    return candidate.projectionId === CloudActiveProfileId;
+                });
+
+                if (!recommendation) {
+                    status.textContent =
+                        'No trustworthy cache recommendation is available for this profile. Keep an explicit cap and review setup readiness.';
+                    button.disabled = true;
+                    button.dataset.suggestedGiB = '';
+                    return;
+                }
+
+                status.textContent =
+                    'Recommended target: ' + recommendation.suggestedMaxSizeGiB + ' GiB from ' +
+                    recommendation.availableFreeGiB + ' GiB currently free, preserving the ' +
+                    recommendation.minFreeSpaceGiB + ' GiB floor. The recommendation uses 25% of free space above the floor, capped at 64 GiB.';
+                button.disabled = false;
+                button.dataset.suggestedGiB = String(recommendation.suggestedMaxSizeGiB);
+            }
+
             function renderCloudPreflight(response) {
                 const list = document.querySelector('#CloudPreflightList');
                 const status = document.querySelector('#CloudPreflightStatus');
                 list.replaceChildren();
+                CloudLastPreflight = response || null;
+                renderCloudCacheRecommendation(CloudLastPreflight);
                 if (!response || !Array.isArray(response.checks)) {
                     status.textContent = 'Unable to run readiness checks.';
                     return;
@@ -1881,6 +1926,19 @@
             document.querySelector('#CloudPreflightButton')
                 .addEventListener('click', function() {
                     loadCloudPreflight();
+                });
+
+            document.querySelector('#CloudApplyCacheRecommendationButton')
+                .addEventListener('click', function(e) {
+                    const suggested = Number.parseInt(e.currentTarget.dataset.suggestedGiB, 10);
+                    if (!Number.isInteger(suggested) || suggested < 1) {
+                        return;
+                    }
+
+                    document.querySelector('#CloudCacheMaxSizeGiB').value = suggested;
+                    captureCloudProfileFromForm();
+                    document.querySelector('#CloudCacheRecommendation').textContent =
+                        'Recommended cache target applied to this profile. Save settings to persist it.';
                 });
 
             document.querySelector('#CloudRemoteName')
