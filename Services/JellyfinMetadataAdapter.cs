@@ -186,14 +186,22 @@ public class JellyfinMetadataAdapter
     /// Constructs an <see cref="ArtworkSet"/> from a track's album (resolved via the
     /// track's parent chain) and the supplied artist items.
     ///
-    /// AlbumCoverBack, AlbumCoverInset, AlbumDisc, and AlbumBackdrops are always null/empty
-    /// because Jellyfin does not natively store those image types.
+    /// The selected album BoxRear image is exposed when present, whether it came
+    /// from a user or a Jellyfin image provider. Other optional package surfaces
+    /// remain absent from this metadata projection.
     /// </summary>
     /// <param name="track">The audio track <see cref="BaseItem"/>.</param>
     /// <param name="artists">The artist <see cref="BaseItem"/> instances for this track.</param>
     /// <returns>A fully populated <see cref="ArtworkSet"/>.</returns>
     public ArtworkSet BuildArtworkSet(BaseItem track, IEnumerable<BaseItem> artists)
     {
+        // Keep album artwork bound to Jellyfin's selected album image, not to
+        // remote provider candidates or an inferred release/edition.
+        var album = _library.GetItemById(track.ParentId) as MusicAlbum;
+        string? albumCoverBack = album is not null && album.HasImage(ImageType.BoxRear)
+            ? BuildImageUrl(album.Id, ImageType.BoxRear, 1024, album.GetImageTag(ImageType.BoxRear))
+            : null;
+
         // ── Album cover front ────────────────────────────────────────────────
         string? albumCoverFront = null;
 
@@ -247,7 +255,7 @@ public class JellyfinMetadataAdapter
 
         return new ArtworkSet(
             AlbumCoverFront:  albumCoverFront,
-            AlbumCoverBack:   null,
+            AlbumCoverBack:   albumCoverBack,
             AlbumCoverInset:  null,
             AlbumDisc:        null,
             AlbumBackdrops:   new List<string>(),
