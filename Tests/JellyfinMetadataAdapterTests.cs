@@ -71,6 +71,16 @@ public class JellyfinMetadataAdapterTests
         Assert.Contains("fillWidth=1280", url);
     }
 
+    [Fact]
+    public void BuildImageUrl_WithAlbumRearCover_UsesJellyfinBoxRearSlot()
+    {
+        var id = Guid.Parse("11223344-5566-7788-99aa-bbccddeeff00");
+
+        var url = JellyfinMetadataAdapter.BuildImageUrl(id, ImageType.BoxRear, 1024, null);
+
+        Assert.Equal($"/Items/{id}/Images/BoxRear?quality=90&fillWidth=1024", url);
+    }
+
     // ── BuildCacheToken ───────────────────────────────────────────────────────
 
     [Fact]
