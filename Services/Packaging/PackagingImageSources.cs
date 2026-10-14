@@ -74,7 +74,7 @@ public static class PackagingImageSources
                 continue;
             }
 
-            var url = ReadString(image, "image");
+            var url = NormalizeRemoteImageUrl(ReadString(image, "image"), CoverArtArchive);
             if (url is null || !image.TryGetProperty("types", out var types))
             {
                 continue;
@@ -96,13 +96,14 @@ public static class PackagingImageSources
             string? thumbnail = null;
             if (image.TryGetProperty("thumbnails", out var thumbnails))
             {
-                thumbnail = ReadString(thumbnails, "500") ?? ReadString(thumbnails, "large");
+                thumbnail = NormalizeRemoteImageUrl(ReadString(thumbnails, "500"), CoverArtArchive)
+                    ?? NormalizeRemoteImageUrl(ReadString(thumbnails, "large"), CoverArtArchive);
             }
 
             candidates.Add(new PackagingImageCandidate(
                 slot.Value,
-                Https(url),
-                thumbnail is null ? null : Https(thumbnail),
+                url,
+                thumbnail,
                 null,
                 null,
                 CoverArtArchive,
@@ -137,11 +138,12 @@ public static class PackagingImageSources
         // against the live v1 API, 2026-10-11; strAlbumThumbBack is legacy).
         void Add(ImageType slot, params string[] fields)
         {
-            var url = fields.Select(field => ReadString(album, field)).FirstOrDefault(value => value is not null);
+            var url = fields.Select(field => NormalizeRemoteImageUrl(ReadString(album, field), AudioDb))
+                .FirstOrDefault(value => value is not null);
             if (url is not null)
             {
                 candidates.Add(new PackagingImageCandidate(
-                    slot, Https(url), $"{Https(url)}/preview", null, null, AudioDb, AudioDbRank));
+                    slot, url, $"{url}/preview", null, null, AudioDb, AudioDbRank));
             }
         }
 
@@ -186,16 +188,14 @@ public static class PackagingImageSources
                     continue;
                 }
 
-                var url = ReadString(cover, "url");
-                if (!Uri.TryCreate(url, UriKind.Absolute, out var parsed)
-                    || parsed.Scheme != Uri.UriSchemeHttps
-                    || !string.Equals(parsed.Host, "assets.fanart.tv", StringComparison.OrdinalIgnoreCase))
+                var url = NormalizeRemoteImageUrl(ReadString(cover, "url"), FanartTv);
+                if (url is null)
                 {
                     continue;
                 }
 
                 candidates.Add(new PackagingImageCandidate(
-                    ImageType.Primary, parsed.AbsoluteUri, null, null, null, FanartTv, FanartTvRank));
+                    ImageType.Primary, url, null, null, null, FanartTv, FanartTvRank));
             }
         }
 
@@ -243,7 +243,7 @@ public static class PackagingImageSources
         var secondary = 0;
         foreach (var image in images.EnumerateArray())
         {
-            var url = ReadString(image, "uri");
+            var url = NormalizeRemoteImageUrl(ReadString(image, "uri"), Discogs);
             if (url is null)
             {
                 continue;
@@ -266,7 +266,7 @@ public static class PackagingImageSources
             candidates.Add(new PackagingImageCandidate(
                 slot,
                 url,
-                ReadString(image, "uri150"),
+                NormalizeRemoteImageUrl(ReadString(image, "uri150"), Discogs),
                 ReadInt(image, "width"),
                 ReadInt(image, "height"),
                 Discogs,
@@ -288,9 +288,47 @@ public static class PackagingImageSources
             ? number
             : null;
 
-    /// <summary>The archive still hands out http:// links; Jellyfin fetches over https.</summary>
-    private static string Https(string url)
-        => url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
-            ? "https://" + url["http://".Length..]
-            : url;
+    /// <summary>
+    /// Accept only HTTPS image delivery from known packaging CDNs. Some Cover Art
+    /// Archive metadata still uses HTTP URLs; upgrade only known HTTP origins.
+    /// This guards offered candidates and direct Jellyfin image download calls.
+    /// It does not establish that the HTTP client's redirect handling is safe.
+    /// </summary>
+    public static string? NormalizeRemoteImageUrl(string? url, string? source = null)
+    {
+        if (string.IsNullOrWhiteSpace(url)
+            || !Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            || !uri.IsDefaultPort
+            || uri.UserInfo.Length > 0
+            || uri.Fragment.Length > 0)
+        {
+            return null;
+        }
+
+        var host = uri.Host.ToLowerInvariant();
+        var allowed = source switch
+        {
+            CoverArtArchive => host is "coverartarchive.org" or "www.coverartarchive.org",
+            AudioDb => host is "r2.theaudiodb.com" or "www.theaudiodb.com" or "theaudiodb.com",
+            FanartTv => host is "assets.fanart.tv",
+            Discogs => host is "i.discogs.com" or "img.discogs.com",
+            null => host is "coverartarchive.org" or "www.coverartarchive.org"
+                or "r2.theaudiodb.com" or "www.theaudiodb.com" or "theaudiodb.com"
+                or "assets.fanart.tv" or "i.discogs.com" or "img.discogs.com",
+            _ => false,
+        };
+        if (!allowed || (source == FanartTv && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            return null;
+        }
+
+        if (uri.Scheme == Uri.UriSchemeHttps)
+        {
+            return uri.AbsoluteUri;
+        }
+
+        // Normalize genuine legacy HTTP image links without allowing HTTP image fetches.
+        return new UriBuilder(uri) { Scheme = Uri.UriSchemeHttps, Port = -1 }.Uri.AbsoluteUri;
+    }
 }
