@@ -199,7 +199,7 @@ public class JellyfinMetadataAdapter
         // remote provider candidates or an inferred release/edition.
         var album = _library.GetItemById(track.ParentId) as MusicAlbum;
         string? albumCoverBack = album is not null && album.HasImage(ImageType.BoxRear)
-            ? BuildImageUrl(album.Id, ImageType.BoxRear, 1024, album.GetImageTag(ImageType.BoxRear))
+            ? BuildImageUrl(album.Id, ImageType.BoxRear, 1024, null)
             : null;
 
         // ── Album cover front ────────────────────────────────────────────────
