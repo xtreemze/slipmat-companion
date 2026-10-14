@@ -26,7 +26,7 @@ class CodecDouble:
             assert "--allow_jpeg_reconstruction=1" in command
             if self.mode == "encode-failed":
                 return False
-            contents = SOURCE if self.mode == "no-size-benefit" else JXL
+            contents = JXL + bytes(len(SOURCE)) if self.mode == "no-size-benefit" else JXL
             if self.mode == "invalid-jxl":
                 contents = b"not-jxl"
             Path(command[2]).write_bytes(contents)
