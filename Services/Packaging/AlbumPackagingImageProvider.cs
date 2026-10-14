@@ -128,7 +128,9 @@ public sealed class AlbumPackagingImageProvider : IRemoteImageProvider, IHasOrde
     /// <inheritdoc />
     public Task<HttpResponseMessage> GetImageResponse(string url, CancellationToken cancellationToken)
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, url);
+        var validatedUrl = PackagingImageSources.NormalizeRemoteImageUrl(url)
+            ?? throw new ArgumentException("Untrusted packaging image URL.", nameof(url));
+        var request = new HttpRequestMessage(HttpMethod.Get, validatedUrl);
         request.Headers.UserAgent.ParseAdd(UserAgent);
         return Client().SendAsync(request, cancellationToken);
     }
