@@ -18,6 +18,7 @@ namespace Jellyfin.Plugin.AudioGateway.Tests;
 public sealed class PackagingImageProviderTests
 {
     private const string ReleaseId = "76df3287-6cda-33eb-8e9a-044b5e15ffdd";
+    private const string ReleaseGroupId = "f6c334ab-42cd-4bbb-b33d-2c2ae7670c20";
 
     private const string CaaRelease = """
         {"images":[
@@ -34,6 +35,18 @@ public sealed class PackagingImageProviderTests
 
     private const string AudioDbAlbum = """
         {"album":[{"strAlbum":"X","strAlbumThumb":"https://r2.theaudiodb.com/images/front.jpg","strAlbumThumbHQ":null,"strAlbumBack":"https://r2.theaudiodb.com/images/back.jpg","strAlbumCDart":"https://r2.theaudiodb.com/images/cd.png","strAlbumSpine":"https://r2.theaudiodb.com/images/spine.jpg"}]}
+        """;
+
+    private const string FanartTvAlbum = """
+        {"albums":[
+          {"release_group_id":"f6c334ab-42cd-4bbb-b33d-2c2ae7670c20",
+            "albumcover":[
+              {"id":"front-1","url":"https://assets.fanart.tv/fanart/music/a/albumcover/front.jpg"},
+              {"id":"front-2","url":"https://other.example/images/not-fanart.jpg"}],
+            "cdart":[{"id":"disc-1","url":"https://assets.fanart.tv/fanart/music/a/cdart/disc.png"}]},
+          {"release_group_id":"11111111-1111-1111-1111-111111111111",
+            "albumcover":[{"id":"wrong","url":"https://assets.fanart.tv/fanart/music/b/albumcover/wrong.jpg"}]}
+        ]}
         """;
 
     private const string DiscogsSearch = """{"results":[{"id":12345,"title":"A - X"}]}""";
@@ -74,15 +87,69 @@ public sealed class PackagingImageProviderTests
     }
 
     [Fact]
-    public void Discogs_secondaries_follow_the_conventional_upload_order()
+    public void Discogs_unlabelled_secondaries_are_inserts_not_claimed_back_covers()
     {
         Assert.Equal(12345, PackagingImageSources.ParseDiscogsSearchReleaseId(DiscogsSearch));
         var candidates = PackagingImageSources.ParseDiscogsRelease(DiscogsRelease);
 
         Assert.Equal(
-            new[] { ImageType.Primary, ImageType.BoxRear, ImageType.Box },
+            new[] { ImageType.Primary, ImageType.Box, ImageType.Menu },
             candidates.Select(candidate => candidate.Type).ToArray());
         Assert.Equal(600, candidates[0].Width);
+    }
+
+    [Fact]
+    public void Fanart_release_group_art_never_claims_a_rear_cover_or_exact_disc()
+    {
+        var candidates = PackagingImageSources.ParseFanartTvAlbum(FanartTvAlbum, ReleaseGroupId);
+
+        var front = Assert.Single(candidates);
+        Assert.Equal(ImageType.Primary, front.Type);
+        Assert.Equal(PackagingImageSources.FanartTv, front.Source);
+        Assert.Contains("front.jpg", front.Url, StringComparison.Ordinal);
+        Assert.Empty(PackagingImageSources.ParseFanartTvAlbum(FanartTvAlbum, "11111111-1111-1111-1111-111111111112"));
+    }
+
+    [Fact]
+    public async Task Fanart_credentials_stay_in_request_headers_and_only_with_a_release_group()
+    {
+        var album = new MusicAlbum { Name = "X", AlbumArtists = new[] { "A" } };
+        album.SetProviderId(MetadataProvider.MusicBrainzReleaseGroup, ReleaseGroupId);
+        var handler = new RecordingHandler(url =>
+            url.Contains("fanart.tv/v3.2/music/albums/", StringComparison.Ordinal)
+                ? (HttpStatusCode.OK, FanartTvAlbum)
+                : (HttpStatusCode.NotFound, string.Empty));
+        var provider = Create(handler, new PluginConfiguration(), PackagingSourceKeys.From(null, null, "secret-fanart-key"));
+
+        var images = (await provider.GetImages(album, CancellationToken.None)).ToArray();
+
+        Assert.Contains(images, image => image.Type == ImageType.Primary
+            && image.ProviderName!.Contains("fanart.tv", StringComparison.Ordinal));
+        Assert.DoesNotContain(images, image => image.Type is ImageType.BoxRear or ImageType.Disc
+            && image.ProviderName!.Contains("fanart.tv", StringComparison.Ordinal));
+        Assert.Contains("secret-fanart-key", handler.FanartApiKeys);
+        Assert.DoesNotContain(handler.Requests, url => url.Contains("secret-fanart-key", StringComparison.Ordinal));
+
+        var unknownAlbum = new MusicAlbum { Name = "Unknown" };
+        await provider.GetImages(unknownAlbum, CancellationToken.None);
+        Assert.Single(handler.Requests, url => url.Contains("fanart.tv", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Cover_art_archive_group_candidates_cannot_supply_an_exact_back_scan()
+    {
+        var album = new MusicAlbum { Name = "X" };
+        album.SetProviderId(MetadataProvider.MusicBrainzReleaseGroup, ReleaseGroupId);
+        var handler = new RecordingHandler(url =>
+            url.Contains("coverartarchive.org/release-group/", StringComparison.Ordinal)
+                ? (HttpStatusCode.OK, CaaRelease)
+                : (HttpStatusCode.NotFound, string.Empty));
+        var images = (await Create(handler, new PluginConfiguration()).GetImages(album, CancellationToken.None)).ToArray();
+
+        Assert.Contains(images, image => image.Type == ImageType.Primary
+            && image.ProviderName!.Contains("Cover Art Archive", StringComparison.Ordinal));
+        Assert.DoesNotContain(images, image => image.Type == ImageType.BoxRear
+            && image.ProviderName!.Contains("Cover Art Archive", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -122,6 +189,7 @@ public sealed class PackagingImageProviderTests
 
         Assert.Empty(images);
         Assert.DoesNotContain(handler.Requests, url => url.Contains("discogs", StringComparison.Ordinal));
+        Assert.DoesNotContain(handler.Requests, url => url.Contains("fanart.tv", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -149,12 +217,15 @@ public sealed class PackagingImageProviderTests
         var keys = PackagingSourceKeys.From("  ", " ");
         Assert.Equal(PackagingSourceKeys.PublicAudioDbKey, keys.AudioDbApiKey);
         Assert.Null(keys.DiscogsToken);
+        Assert.Null(keys.FanartTvApiKey);
+        Assert.Equal("fanart-key", PackagingSourceKeys.From(null, null, " fanart-key ").FanartTvApiKey);
         Assert.Equal("abc", PackagingSourceKeys.From(" abc ", null).AudioDbApiKey);
     }
 
     private sealed class RecordingHandler(Func<string, (HttpStatusCode Status, string Body)> respond) : HttpMessageHandler
     {
         public List<string> Requests { get; } = new();
+        public List<string> FanartApiKeys { get; } = new();
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -162,6 +233,10 @@ public sealed class PackagingImageProviderTests
             lock (Requests)
             {
                 Requests.Add(url);
+                if (request.Headers.TryGetValues("api-key", out var apiKeys))
+                {
+                    FanartApiKeys.AddRange(apiKeys);
+                }
             }
 
             var (status, body) = respond(url);
