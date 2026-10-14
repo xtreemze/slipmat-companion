@@ -71,6 +71,13 @@ public class CloudConfigurationPageTests
         Assert.Contains("explicitly finalize local cleanup", html);
         Assert.Contains("migrate back", html);
         Assert.Contains("never uses rclone sync/move/purge", html);
+        Assert.Contains("rclone check --download", html);
+        Assert.Contains("one full remote-library read for each verification pass", html);
+        Assert.Contains("original local media stays on disk as rollback until Finalize", html);
+        Assert.Contains("Cloud analysis is request-driven", html);
+        Assert.Contains("manifestTotalBytes", html);
+        Assert.Contains("manifestFileCount", html);
+        Assert.Contains("Verification cost:", html);
     }
 
     [Fact]
