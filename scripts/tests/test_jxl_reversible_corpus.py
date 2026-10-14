@@ -9,8 +9,8 @@ import unittest
 from scripts.jxl_reversible_corpus import candidate_images, probe_jpeg, jxl_signature
 
 
-SOURCE = b"\\xff\\xd8\\xff\\xe0" + b"photographic-jpeg" * 24 + b"\\xff\\xd9"
-JXL = b"\\xff\\x0a\\x00\\x01"
+SOURCE = b"\xff\xd8\xff\xe0" + b"photographic-jpeg" * 24 + b"\xff\xd9"
+JXL = b"\xff\x0a\x00\x01"
 
 
 class CodecDouble:
