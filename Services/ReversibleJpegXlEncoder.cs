@@ -110,7 +110,7 @@ public sealed class ReversibleJpegXlEncoder
             }
 
             if (!await _run(_decoderExecutable, [
-                encoded, reconstructed, "--num_threads=2",
+                encoded, reconstructed, "--reconstruct_jpeg", "--num_threads=2",
             ], deadline.Token).ConfigureAwait(false))
             {
                 return null;
