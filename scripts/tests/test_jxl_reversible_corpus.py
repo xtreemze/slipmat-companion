@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+import io
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from unittest.mock import patch
 
-from scripts.jxl_reversible_corpus import candidate_images, probe_jpeg, jxl_signature
+from scripts.jxl_reversible_corpus import candidate_images, main, probe_jpeg, jxl_signature
 
 
 SOURCE = b"\xff\xd8\xff\xe0" + b"photographic-jpeg" * 24 + b"\xff\xd9"
@@ -96,6 +99,33 @@ class ReversibleCorpusTests(unittest.TestCase):
         self.assertTrue(jxl_signature(JXL))
         self.assertTrue(jxl_signature(bytes.fromhex("0000000c4a584c200d0a870a")))
         self.assertFalse(jxl_signature(b"jpeg"))
+
+    def test_cli_fails_when_no_real_conversion_is_verified(self):
+        with (
+            patch("sys.argv", ["jxl_reversible_corpus.py", str(self.root)]),
+            patch(
+                "scripts.jxl_reversible_corpus.probe_jpeg",
+                return_value={"status": "encode-failed"},
+            ),
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(main(), 1)
+
+    def test_cli_reports_success_only_for_verified_result(self):
+        with (
+            patch("sys.argv", ["jxl_reversible_corpus.py", str(self.root)]),
+            patch(
+                "scripts.jxl_reversible_corpus.probe_jpeg",
+                return_value={
+                    "status": "verified",
+                    "jpegBytes": len(SOURCE),
+                    "jxlBytes": len(JXL),
+                    "savedBytes": len(SOURCE) - len(JXL),
+                },
+            ),
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(main(), 0)
 
     def test_sample_enumeration_is_bounded_and_does_not_follow_symlinks(self):
         other = self.root / "other"
