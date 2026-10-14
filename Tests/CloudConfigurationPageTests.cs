@@ -90,6 +90,10 @@ public class CloudConfigurationPageTests
         Assert.Contains("the library is usable now", html);
         Assert.Contains("The scan cannot be paused", html);
         Assert.Contains("Embedded cover-art extraction", html);
+        Assert.Contains("CloudCacheRecommendation", html);
+        Assert.Contains("CloudApplyCacheRecommendationButton", html);
+        Assert.Contains("cacheRecommendations", html);
+        Assert.Contains("Save settings to persist it", html);
 
         // Jellyfin injects only the page body; a <style> in <head> is dropped, leaving the
         // whole dashboard unstyled.
