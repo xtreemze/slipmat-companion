@@ -36,7 +36,7 @@ def run_codec(arguments: list[str], seconds: int) -> bool:
 
 
 def jxl_signature(data: bytes) -> bool:
-    return data.startswith(b"\\xff\\x0a") or data.startswith(
+    return data.startswith(b"\xff\x0a") or data.startswith(
         bytes.fromhex("0000000c4a584c200d0a870a")
     )
 
@@ -60,7 +60,7 @@ def probe_jpeg(
         return {"status": "source-unreadable"}
     if len(jpeg) > max_bytes:
         return {"status": "source-too-large"}
-    if len(jpeg) < 4 or not jpeg.startswith(b"\\xff\\xd8\\xff"):
+    if len(jpeg) < 4 or not jpeg.startswith(b"\xff\xd8\xff"):
         return {"status": "not-jpeg"}
 
     with tempfile.TemporaryDirectory(prefix="slipmat-jxl-probe-") as root:
