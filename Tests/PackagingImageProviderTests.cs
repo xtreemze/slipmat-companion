@@ -34,7 +34,7 @@ public sealed class PackagingImageProviderTests
         """;
 
     private const string AudioDbAlbum = """
-        {"album":[{"strAlbum":"X","strAlbumThumb":"https://r2.theaudiodb.com/images/front.jpg","strAlbumThumbHQ":null,"strAlbumBack":"https://r2.theaudiodb.com/images/back.jpg","strAlbumCDart":"https://r2.theaudiodb.com/images/cd.png","strAlbumSpine":"https://r2.theaudiodb.com/images/spine.jpg"}]}
+        {"album":[{"idAlbum":"2115888","strAlbum":"X","strArtist":"A","strAlbumThumb":"https://r2.theaudiodb.com/images/front.jpg","strAlbumThumbHQ":null,"strAlbumBack":"https://r2.theaudiodb.com/images/back.jpg","strAlbumCDart":"https://r2.theaudiodb.com/images/cd.png","strAlbumSpine":"https://r2.theaudiodb.com/images/spine.jpg"}]}
         """;
 
     private const string FanartTvAlbum = """
@@ -151,6 +151,50 @@ public sealed class PackagingImageProviderTests
         Assert.Contains(candidates, c => c.Type == ImageType.Art && c.Url.EndsWith("spine.jpg", StringComparison.Ordinal));
         Assert.Contains(candidates, c => c.Type == ImageType.Primary && c.Url.EndsWith("front.jpg", StringComparison.Ordinal));
         Assert.Empty(PackagingImageSources.ParseAudioDb("""{"album":null}"""));
+    }
+
+    [Fact]
+    public void TheAudioDB_album_identity_selects_the_matching_record_and_rejects_wrong_scans()
+    {
+        const string payload = """
+            {"album":[
+              {"idAlbum":"100","strAlbum":"X","strArtist":"Other","strAlbumBack":"https://r2.theaudiodb.com/images/wrong.jpg"},
+              {"idAlbum":"200","strAlbum":"X","strArtist":"A","strAlbumBack":"https://r2.theaudiodb.com/images/correct.jpg"}
+            ]}
+            """;
+
+        var byName = PackagingImageSources.ParseAudioDb(
+            payload, expectedAlbumTitle: " x ", expectedArtist: "a");
+        Assert.Equal(
+            "https://r2.theaudiodb.com/images/correct.jpg",
+            Assert.Single(byName).Url);
+        Assert.Empty(PackagingImageSources.ParseAudioDb(
+            payload, expectedAlbumTitle: "X", expectedArtist: "Missing"));
+        Assert.Empty(PackagingImageSources.ParseAudioDb(
+            payload, expectedAlbumTitle: "X"));
+        Assert.Equal(
+            "https://r2.theaudiodb.com/images/wrong.jpg",
+            Assert.Single(PackagingImageSources.ParseAudioDb(
+                payload, expectedAlbumId: "100")).Url);
+        Assert.Empty(PackagingImageSources.ParseAudioDb(
+            payload, expectedAlbumId: "999"));
+    }
+
+    [Fact]
+    public async Task TheAudioDB_search_cannot_attribute_an_unrelated_back_scan_to_the_album()
+    {
+        var album = new MusicAlbum { Name = "X", AlbumArtists = new[] { "A" } };
+        var handler = new RecordingHandler(url =>
+            url.Contains("searchalbum.php", StringComparison.Ordinal)
+                ? (HttpStatusCode.OK, """
+                    {"album":[{"strAlbum":"X","strArtist":"Other","strAlbumBack":"https://r2.theaudiodb.com/images/wrong.jpg"}]}
+                    """)
+                : (HttpStatusCode.NotFound, string.Empty));
+
+        var images = (await Create(handler, new PluginConfiguration()).GetImages(
+            album, CancellationToken.None)).ToArray();
+
+        Assert.DoesNotContain(images, image => image.Type == ImageType.BoxRear);
     }
 
     [Fact]
