@@ -874,10 +874,10 @@
                     content.appendChild(details);
 
                     const selection = document.createElement('label');
-                    selection.innerHTML = '<input is="emby-checkbox" type="checkbox"><span>Subscribe</span>';
+                    selection.innerHTML = '<input is="emby-checkbox" type="checkbox"><span>Publish to Jellyfin</span>';
                     const checkbox = selection.querySelector('input');
                     checkbox.checked = IptvOrgPublishedChannelIds.has(channel.id);
-                    checkbox.setAttribute('aria-label', 'Subscribe ' + (channel.name || channel.id) + ' to Jellyfin Live TV');
+                    checkbox.setAttribute('aria-label', 'Publish ' + (channel.name || channel.id) + ' to Jellyfin Live TV');
                     checkbox.addEventListener('change', function() {
                         if (checkbox.checked) {
                             IptvOrgPublishedChannelIds.add(channel.id);
