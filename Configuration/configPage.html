@@ -674,6 +674,19 @@
                             them here and saves settings.
                         </div>
 
+                        <div class="fieldDescription ag-status" role="status" aria-live="polite">
+                            Jellyfin publication is separate from Slipmat's per-user Live TV subscriptions.
+                            Existing server-wide channel selections remain unchanged unless an administrator
+                            explicitly edits and saves them. Open Slipmat to browse and play channels.
+                        </div>
+                        <details class="ag-details" aria-labelledby="AgLiveTvManualTitle">
+                            <summary id="AgLiveTvManualTitle">Manage legacy server-wide published channels</summary>
+                            <div class="ag-details-body">
+                                <p class="fieldDescription">
+                                    Administrator-only Jellyfin integration. These channel selections affect
+                                    Jellyfin's published Live TV sources, not Slipmat subscriptions, favorites,
+                                    or current playback. Use this only when Jellyfin needs its own TV channel list.
+                                </p>
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="IptvOrgSearch">Search</label>
                             <input id="IptvOrgSearch"
@@ -743,6 +756,8 @@
                         <div id="IptvOrgResults"
                              class="verticalSection ag-list ag-list--stack"
                              aria-label="iptv-org channel results"></div>
+                            </div>
+                        </details>
                     </details>
 
                     <div class="verticalSection ag-section" role="region" aria-labelledby="AgStatusTitle">
