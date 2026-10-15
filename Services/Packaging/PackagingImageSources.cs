@@ -118,7 +118,11 @@ public static class PackagingImageSources
     /// provider already supplies the front; this adds the back cover and the
     /// disc art it leaves out.
     /// </summary>
-    public static IReadOnlyList<PackagingImageCandidate> ParseAudioDb(string json)
+    public static IReadOnlyList<PackagingImageCandidate> ParseAudioDb(
+        string json,
+        string? expectedAlbumId = null,
+        string? expectedAlbumTitle = null,
+        string? expectedArtist = null)
     {
         var candidates = new List<PackagingImageCandidate>();
         using var document = JsonDocument.Parse(json);
@@ -128,7 +132,40 @@ public static class PackagingImageSources
             return candidates;
         }
 
-        var album = albums.EnumerateArray().FirstOrDefault();
+        // A search can return multiple or unrelated albums. Never assign a
+        // rear scan to Jellyfin's album without matching the response identity.
+        // An explicit AudioDB ID takes precedence over display-name matching.
+        var album = albums.EnumerateArray().FirstOrDefault(candidate =>
+        {
+            if (candidate.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(expectedAlbumId))
+            {
+                return string.Equals(
+                    ReadString(candidate, "idAlbum"),
+                    expectedAlbumId.Trim(),
+                    StringComparison.Ordinal);
+            }
+
+            if (expectedAlbumTitle is not null || expectedArtist is not null)
+            {
+                return !string.IsNullOrWhiteSpace(expectedAlbumTitle)
+                    && !string.IsNullOrWhiteSpace(expectedArtist)
+                    && string.Equals(
+                        ReadString(candidate, "strAlbum")?.Trim(),
+                        expectedAlbumTitle.Trim(),
+                        StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(
+                        ReadString(candidate, "strArtist")?.Trim(),
+                        expectedArtist.Trim(),
+                        StringComparison.OrdinalIgnoreCase);
+            }
+
+            return true;
+        });
         if (album.ValueKind != JsonValueKind.Object)
         {
             return candidates;
