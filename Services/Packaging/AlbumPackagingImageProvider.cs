@@ -219,7 +219,13 @@ public sealed class AlbumPackagingImageProvider : IRemoteImageProvider, IHasOrde
         }
 
         var json = await GetJson(url, null, cancellationToken).ConfigureAwait(false);
-        return json is null ? Array.Empty<PackagingImageCandidate>() : PackagingImageSources.ParseAudioDb(json);
+        return json is null
+            ? Array.Empty<PackagingImageCandidate>()
+            : PackagingImageSources.ParseAudioDb(
+                json,
+                expectedAlbumId: id,
+                expectedAlbumTitle: album.Name,
+                expectedArtist: artist);
     }
 
 
