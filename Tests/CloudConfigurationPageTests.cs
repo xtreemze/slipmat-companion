@@ -7,6 +7,25 @@ namespace Jellyfin.Plugin.AudioGateway.Tests;
 public class CloudConfigurationPageTests
 {
     [Fact]
+    public void CompanionDashboard_KeepsLiveTvSelectionUnderAdvancedJellyfinPublication()
+    {
+        const string resourceName =
+            "Jellyfin.Plugin.AudioGateway.Configuration.configPage.html";
+        using var stream = typeof(Plugin).Assembly.GetManifestResourceStream(resourceName);
+        Assert.NotNull(stream);
+        using var reader = new StreamReader(stream!);
+        var html = reader.ReadToEnd();
+
+        Assert.Contains("Live TV channel discovery and playback belong in Slipmat", html);
+        Assert.Contains("<details class=\"verticalSection ag-section\" aria-labelledby=\"AgLiveTvTitle\">", html);
+        Assert.Contains("Advanced: Jellyfin Live TV publication", html);
+        Assert.Contains("<details class=\"ag-details\" aria-labelledby=\"AgLiveTvManualTitle\">", html);
+        Assert.Contains("Manage legacy server-wide published channels", html);
+        Assert.Contains("Jellyfin publication is separate from Slipmat's per-user Live TV subscriptions", html);
+        Assert.Contains("IptvOrgSearch", html);
+    }
+
+    [Fact]
     public void CloudConfigurationPage_ExplainsExternalReconnectBoundary()
     {
         const string resourceName =
