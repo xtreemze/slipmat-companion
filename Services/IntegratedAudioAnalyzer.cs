@@ -230,9 +230,20 @@ public sealed class IntegratedAudioAnalyzer
                 "Source file metadata is unavailable.");
         }
 
+        var existing = _sidecarLoader.LoadSidecarFromStore(storeRoot, storeKey);
+        // The scheduled backfill visits every local item. Reuse complete artifacts
+        // when the persisted size/mtime stamp matches, without reading the media
+        // payload merely to recompute a SHA-256 fingerprint on every run.
+        if (CanSkipUnmodifiedSource(storeRoot, storeKey, audio.Path, existing))
+        {
+            return new IntegratedAnalysisResult(IntegratedAnalysisStatus.Skipped);
+        }
+
+        // Missing/changed stamps still require the definitive full-source hash.
+        // Keep the existing matching-fingerprint path for metadata-only changes
+        // and artifacts generated before source stamps existed.
         var fingerprint = await FingerprintAsync(audio.Path, cancellationToken).ConfigureAwait(false);
 
-        var existing = _sidecarLoader.LoadSidecarFromStore(storeRoot, storeKey);
         var matchingExisting = existing is not null &&
             string.Equals(existing.SourceFingerprint, fingerprint, StringComparison.Ordinal)
                 ? existing
@@ -578,6 +589,16 @@ public sealed class IntegratedAudioAnalyzer
         var digest = await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false);
         return Convert.ToHexString(digest).ToLowerInvariant();
     }
+
+    internal static bool CanSkipUnmodifiedSource(
+        string storeRoot,
+        string storeKey,
+        string mediaPath,
+        AnalysisSidecar? existing)
+        => existing?.IsCurrentFor(storeKey) == true
+            && AnalysisSourceStamp.IsCurrent(storeRoot, storeKey, mediaPath)
+            && HasAllAmplitudeTiers(storeRoot, storeKey)
+            && HasCompleteHigherOrderAnalysis(storeRoot, storeKey, existing);
 
     private static bool HasAllAmplitudeTiers(string storeRoot, string storeKey)
     {
