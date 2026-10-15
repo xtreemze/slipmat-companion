@@ -23,6 +23,9 @@ public class CloudConfigurationPageTests
         Assert.Contains("Manage legacy server-wide published channels", html);
         Assert.Contains("Jellyfin publication is separate from Slipmat's per-user Live TV subscriptions", html);
         Assert.Contains("IptvOrgSearch", html);
+        Assert.Contains("<span>Publish to Jellyfin</span>", html);
+        Assert.Contains("to Jellyfin Live TV", html);
+        Assert.DoesNotContain("<span>Subscribe</span>", html);
     }
 
     [Fact]
