@@ -1,7 +1,7 @@
 ---
 name: "Audio Gateway"
 guid: "d3a2b1c0-e4f5-6789-abcd-ef0123456789"
-version: "0.5.2.0"
+version: "0.5.2.1"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 overview: "Optional Jellyfin companion that accelerates and enriches Slipmat."
@@ -15,4 +15,4 @@ category: "General"
 owner: "xtreemze"
 artifacts:
 - "Jellyfin.Plugin.AudioGateway.dll"
-changelog: "Expose Jellyfin-selected album back covers in Companion track events; add optional fanart.tv release-group front art without misclassifying back covers or discs; validate packaging image origins; improve cloud rclone readiness and physical-media material cache handling; add inactive JPEG XL corpus verification tooling."
+changelog: "Speed up repeated local audio analysis: reuse complete unchanged waveform and spectral artifacts using saved source size and modification time without full-file SHA-256 rescans; retain definitive content hashing for missing or changed stamps; continue excluding cloud VFS libraries from automatic analysis."
