@@ -127,6 +127,37 @@ public sealed class PackagingImageProviderTests
     }
 
     [Fact]
+    public void Malformed_Cover_Art_Archive_entries_do_not_hide_valid_back_covers()
+    {
+        const string payload = """
+            {"images":[
+              null,
+              "invalid",
+              {"image":"https://coverartarchive.org/release/r/ignored.jpg","types":null},
+              {"image":"https://coverartarchive.org/release/r/ignored.jpg","types":"Back"},
+              {"image":"https://coverartarchive.org/release/r/ignored.jpg","types":["Back"],"thumbnails":[]},
+              {"image":"https://coverartarchive.org/release/r/back.jpg","types":[null,42,"Back"],"thumbnails":null},
+              {"image":"https://coverartarchive.org/release/r/back-2.jpg","types":["Back"],"thumbnails":{"500":"https://coverartarchive.org/release/r/back-2-500.jpg"}}
+            ]}
+            """;
+
+        var candidates = PackagingImageSources.ParseCoverArtArchive(payload);
+
+        Assert.Equal(
+            new[]
+            {
+                "https://coverartarchive.org/release/r/ignored.jpg",
+                "https://coverartarchive.org/release/r/back.jpg",
+                "https://coverartarchive.org/release/r/back-2.jpg",
+            },
+            candidates.Select(candidate => candidate.Url).ToArray());
+        Assert.All(candidates, candidate => Assert.Equal(ImageType.BoxRear, candidate.Type));
+        Assert.Null(candidates[0].ThumbnailUrl);
+        Assert.Null(candidates[1].ThumbnailUrl);
+        Assert.Equal("https://coverartarchive.org/release/r/back-2-500.jpg", candidates[2].ThumbnailUrl);
+    }
+
+    [Fact]
     public void Cover_Art_Archive_types_map_to_the_slots_the_inspector_reads()
     {
         var candidates = PackagingImageSources.ParseCoverArtArchive(CaaRelease);
