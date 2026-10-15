@@ -664,13 +664,14 @@
                         </div>
                     </div>
 
-                    <div class="verticalSection ag-section" role="region" aria-labelledby="AgLiveTvTitle">
-                        <h3 id="AgLiveTvTitle" class="sectionTitle">iptv-org Live TV discovery</h3>
+                    <details class="verticalSection ag-section" aria-labelledby="AgLiveTvTitle">
+                        <summary id="AgLiveTvTitle" class="sectionTitle">Advanced: Jellyfin Live TV publication</summary>
                         <div class="fieldDescription">
-                            Browse the public iptv-org JSON catalog and subscribe channels to this Jellyfin server.
-                            Selected channels are published through Jellyfin's native Live TV service, including
-                            per-stream Referer/User-Agent requirements when provided by iptv-org. This server-wide
-                            source configuration is separate from Slipmat's per-user client subscription library.
+                            Browse and subscribe to TV channels in the Slipmat client. This optional administrator
+                            configuration publishes a separate server-wide channel set to Jellyfin Live TV.
+                            It does not change Slipmat subscriptions or playback selections.
+                            Existing Jellyfin-published channels remain configured until an administrator changes
+                            them here and saves settings.
                         </div>
 
                         <div class="inputContainer">
@@ -742,7 +743,7 @@
                         <div id="IptvOrgResults"
                              class="verticalSection ag-list ag-list--stack"
                              aria-label="iptv-org channel results"></div>
-                    </div>
+                    </details>
 
                     <div class="verticalSection ag-section" role="region" aria-labelledby="AgStatusTitle">
                         <h3 id="AgStatusTitle" class="sectionTitle">Companion health</h3>
