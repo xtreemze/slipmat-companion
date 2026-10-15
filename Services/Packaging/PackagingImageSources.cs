@@ -68,6 +68,13 @@ public static class PackagingImageSources
 
         foreach (var image in images.EnumerateArray())
         {
+            // Ignore malformed individual records rather than losing the
+            // release's valid rear scans to an unrelated bad image.
+            if (image.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
             if (image.TryGetProperty("approved", out var approved)
                 && approved.ValueKind == JsonValueKind.False)
             {
@@ -75,12 +82,14 @@ public static class PackagingImageSources
             }
 
             var url = NormalizeRemoteImageUrl(ReadString(image, "image"), CoverArtArchive);
-            if (url is null || !image.TryGetProperty("types", out var types))
+            if (url is null || !image.TryGetProperty("types", out var types)
+                || types.ValueKind != JsonValueKind.Array)
             {
                 continue;
             }
 
             var labels = types.EnumerateArray()
+                .Where(type => type.ValueKind == JsonValueKind.String)
                 .Select(type => type.GetString())
                 .Where(type => type is not null)
                 .ToArray();
@@ -94,7 +103,8 @@ public static class PackagingImageSources
             }
 
             string? thumbnail = null;
-            if (image.TryGetProperty("thumbnails", out var thumbnails))
+            if (image.TryGetProperty("thumbnails", out var thumbnails)
+                && thumbnails.ValueKind == JsonValueKind.Object)
             {
                 thumbnail = NormalizeRemoteImageUrl(ReadString(thumbnails, "500"), CoverArtArchive)
                     ?? NormalizeRemoteImageUrl(ReadString(thumbnails, "large"), CoverArtArchive);
