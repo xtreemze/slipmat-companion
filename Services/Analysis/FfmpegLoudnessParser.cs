@@ -63,21 +63,16 @@ internal static partial class FfmpegLoudnessParser
     private static double? LastValue(Regex regex, string text)
     {
         var matches = regex.Matches(text);
-        for (var index = matches.Count - 1; index >= 0; index--)
+        // The final loudnorm report is authoritative. If its value is invalid,
+        // fail closed instead of borrowing a valid value from an earlier report.
+        if (matches.Count == 0)
         {
-            var raw = matches[index].Groups["value"].Value;
-            if (double.TryParse(
-                    raw,
-                    NumberStyles.Float,
-                    CultureInfo.InvariantCulture,
-                    out var value) &&
-                double.IsFinite(value))
-            {
-                return value;
-            }
+            return null;
         }
 
-        return null;
+        var raw = matches[^1].Groups["value"].Value;
+        return double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+            && double.IsFinite(value) ? value : null;
     }
 
     [GeneratedRegex(
