@@ -94,6 +94,7 @@ public sealed class AnalysisBackfillTask : IScheduledTask
                     {
                         failed++;
                         _logger.LogWarning(ex, "Scheduled audio analysis failed for item {ItemId}", audio.Id);
+                        throw;
                     }
                 }
                 else
