@@ -348,6 +348,11 @@ Atlas acquisition requests are persisted canonically in the client request store
 
 - **.NET 10 SDK 10.0.401** (pinned by `global.json`)
 - NuGet access to `nuget.org` (configured in `NuGet.Config`)
+- A Jellyfin FFmpeg parity executable to run the full test suite. Set
+  `SLIPMAT_PARITY_FFMPEG` to the executable for your host; the required version
+  and checksum are owned by the `Resolve Jellyfin FFmpeg parity decoder` step
+  in `.github/workflows/ci.yml`. Use the matching platform asset from the
+  official Jellyfin FFmpeg release.
 
 ## Local build
 
@@ -355,6 +360,7 @@ Atlas acquisition requests are persisted canonically in the client request store
 # From repository root
 dotnet restore
 dotnet build --configuration Release
+# Set SLIPMAT_PARITY_FFMPEG to the pinned Jellyfin FFmpeg executable first.
 dotnet test Tests/ --logger "console;verbosity=normal"
 ```
 
