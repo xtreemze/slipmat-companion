@@ -33,19 +33,23 @@ public class ArtifactsController : ControllerBase
 {
     private readonly ILogger<ArtifactsController> _logger;
     private readonly SidecarLoader _sidecarLoader;
+    private readonly AnalysisArtifactRetentionService _artifactRetention;
     private readonly JellyfinAnalysisSubjectFactory _subjectFactory;
     private readonly IntegratedAnalysisWorker _analysisWorker;
     private readonly ILibraryManager _library;
 
+    /// <summary>Creates the authenticated analysis artifact endpoints.</summary>
     public ArtifactsController(
         ILogger<ArtifactsController> logger,
         SidecarLoader sidecarLoader,
+        AnalysisArtifactRetentionService artifactRetention,
         JellyfinAnalysisSubjectFactory subjectFactory,
         IntegratedAnalysisWorker analysisWorker,
         ILibraryManager library)
     {
         _logger = logger;
         _sidecarLoader = sidecarLoader;
+        _artifactRetention = artifactRetention;
         _subjectFactory = subjectFactory;
         _analysisWorker = analysisWorker;
         _library = library;
@@ -79,43 +83,62 @@ public class ArtifactsController : ControllerBase
             return BadRequest("Resolved sidecar path escaped the configured store root.");
         }
 
-        var sidecar = _sidecarLoader.LoadSidecarFromStore(storeRoot, subjectStoreKey);
-        var parsedItemId = Guid.TryParse(itemId, out var itemGuid) ? itemGuid : (Guid?)null;
-        if (sidecar is not null
-            && parsedItemId is Guid currentItemId
-            && IsStaleCloudArtifact(config, storeRoot, subjectStoreKey, currentItemId))
+        var lease = _artifactRetention.TryAcquire(storeRoot, subjectStoreKey);
+        if (lease is null)
         {
-            sidecar = null;
-        }
-
-        if (sidecar is null)
-        {
-            _logger.LogDebug(
-                "Compatible current sidecar not found for itemId={ItemId} subject={SubjectStoreKey}",
-                itemId,
-                subjectStoreKey);
-            if (parsedItemId is Guid missingItemId)
+            if (Guid.TryParse(itemId, out var itemBeingEvicted))
             {
-                _analysisWorker.TryEnqueue(missingItemId);
+                _analysisWorker.TryEnqueue(itemBeingEvicted);
             }
 
             return NotFound();
         }
-
-        var etagValue = BuildETagForAnalysis(sidecar.SourceFingerprint);
-        var etag = new EntityTagHeaderValue(etagValue);
-
-        if (Request.Headers.TryGetValue(HeaderNames.IfNoneMatch, out var clientEtag) &&
-            EntityTagHeaderValue.TryParse(clientEtag.ToString(), out var parsed) &&
-            etag.Compare(parsed, useStrongComparison: false))
+        try
         {
-            return StatusCode(StatusCodes.Status304NotModified);
-        }
+            var sidecar = _sidecarLoader.LoadSidecarFromStore(storeRoot, subjectStoreKey);
+            var parsedItemId = Guid.TryParse(itemId, out var itemGuid) ? itemGuid : (Guid?)null;
+            if (sidecar is not null
+                && parsedItemId is Guid currentItemId
+                && IsStaleCloudArtifact(config, storeRoot, subjectStoreKey, currentItemId))
+            {
+                sidecar = null;
+            }
 
-        Response.Headers[HeaderNames.ETag] = etag.ToString();
-        Response.Headers[HeaderNames.CacheControl] = "no-cache";
-        var stream = System.IO.File.OpenRead(sidecarPath);
-        return File(stream, MediaTypeNames.Application.Json, enableRangeProcessing: true);
+            if (sidecar is null)
+            {
+                _logger.LogDebug(
+                    "Compatible current sidecar not found for itemId={ItemId} subject={SubjectStoreKey}",
+                    itemId,
+                    subjectStoreKey);
+                if (parsedItemId is Guid missingItemId)
+                {
+                    _analysisWorker.TryEnqueue(missingItemId);
+                }
+
+                return NotFound();
+            }
+
+            var etagValue = BuildETagForAnalysis(sidecar.SourceFingerprint);
+            var etag = new EntityTagHeaderValue(etagValue);
+
+            if (Request.Headers.TryGetValue(HeaderNames.IfNoneMatch, out var clientEtag) &&
+                EntityTagHeaderValue.TryParse(clientEtag.ToString(), out var parsed) &&
+                etag.Compare(parsed, useStrongComparison: false))
+            {
+                return StatusCode(StatusCodes.Status304NotModified);
+            }
+
+            Response.Headers[HeaderNames.ETag] = etag.ToString();
+            Response.Headers[HeaderNames.CacheControl] = "no-cache";
+            var stream = System.IO.File.OpenRead(sidecarPath);
+            Response.RegisterForDispose(lease);
+            lease = null;
+            return File(stream, MediaTypeNames.Application.Json, enableRangeProcessing: true);
+        }
+        finally
+        {
+            lease?.Dispose();
+        }
     }
 
     /// <summary>
@@ -150,57 +173,77 @@ public class ArtifactsController : ControllerBase
             return BadRequest("Resolved waveform path escaped the configured store root.");
         }
 
-        if (!System.IO.File.Exists(datPath))
+        var lease = _artifactRetention.TryAcquire(storeRoot, subjectStoreKey);
+        if (lease is null)
         {
-            _logger.LogDebug("Waveform not found: itemId={ItemId} variant={Variant} pps={Pps}", itemId, variant, pps);
-            if (string.Equals(
-                    variant,
-                    IntegratedAudioAnalyzer.AmplitudeVariant,
-                    StringComparison.Ordinal) &&
-                Guid.TryParse(itemId, out var missingItemId))
+            if (string.Equals(variant, IntegratedAudioAnalyzer.AmplitudeVariant, StringComparison.Ordinal)
+                && Guid.TryParse(itemId, out var itemBeingEvicted))
             {
-                _analysisWorker.TryEnqueue(missingItemId);
+                _analysisWorker.TryEnqueue(itemBeingEvicted);
             }
 
             return NotFound();
         }
-
-        var sidecar = _sidecarLoader.LoadSidecarFromStore(storeRoot, subjectStoreKey);
-        if (sidecar is null
-            || (Guid.TryParse(itemId, out var currentItemId)
-                && IsStaleCloudArtifact(
-                    config,
-                    storeRoot,
-                    subjectStoreKey,
-                    currentItemId)))
+        try
         {
-            _logger.LogDebug(
-                "Waveform sidecar missing, mismatched, or stale for itemId={ItemId} subject={SubjectStoreKey}",
-                itemId,
-                subjectStoreKey);
-            if (Guid.TryParse(itemId, out var missingItemId))
+            if (!System.IO.File.Exists(datPath))
             {
-                _analysisWorker.TryEnqueue(missingItemId);
+                _logger.LogDebug("Waveform not found: itemId={ItemId} variant={Variant} pps={Pps}", itemId, variant, pps);
+                if (string.Equals(
+                        variant,
+                        IntegratedAudioAnalyzer.AmplitudeVariant,
+                        StringComparison.Ordinal) &&
+                    Guid.TryParse(itemId, out var missingItemId))
+                {
+                    _analysisWorker.TryEnqueue(missingItemId);
+                }
+
+                return NotFound();
             }
 
-            return NotFound();
+            var sidecar = _sidecarLoader.LoadSidecarFromStore(storeRoot, subjectStoreKey);
+            if (sidecar is null
+                || (Guid.TryParse(itemId, out var currentItemId)
+                    && IsStaleCloudArtifact(
+                        config,
+                        storeRoot,
+                        subjectStoreKey,
+                        currentItemId)))
+            {
+                _logger.LogDebug(
+                    "Waveform sidecar missing, mismatched, or stale for itemId={ItemId} subject={SubjectStoreKey}",
+                    itemId,
+                    subjectStoreKey);
+                if (Guid.TryParse(itemId, out var missingItemId))
+                {
+                    _analysisWorker.TryEnqueue(missingItemId);
+                }
+
+                return NotFound();
+            }
+
+            var etagValue = BuildETagForWaveform(sidecar.SourceFingerprint, variant, pps);
+
+            var etag = new EntityTagHeaderValue(etagValue);
+
+            if (Request.Headers.TryGetValue(HeaderNames.IfNoneMatch, out var clientEtag) &&
+                EntityTagHeaderValue.TryParse(clientEtag.ToString(), out var parsed) &&
+                etag.Compare(parsed, useStrongComparison: false))
+            {
+                return StatusCode(StatusCodes.Status304NotModified);
+            }
+
+            Response.Headers[HeaderNames.ETag] = etag.ToString();
+            Response.Headers[HeaderNames.CacheControl] = "no-cache";
+            var stream = System.IO.File.OpenRead(datPath);
+            Response.RegisterForDispose(lease);
+            lease = null;
+            return File(stream, MediaTypeNames.Application.Octet, enableRangeProcessing: true);
         }
-
-        var etagValue = BuildETagForWaveform(sidecar.SourceFingerprint, variant, pps);
-
-        var etag = new EntityTagHeaderValue(etagValue);
-
-        if (Request.Headers.TryGetValue(HeaderNames.IfNoneMatch, out var clientEtag) &&
-            EntityTagHeaderValue.TryParse(clientEtag.ToString(), out var parsed) &&
-            etag.Compare(parsed, useStrongComparison: false))
+        finally
         {
-            return StatusCode(StatusCodes.Status304NotModified);
+            lease?.Dispose();
         }
-
-        Response.Headers[HeaderNames.ETag] = etag.ToString();
-        Response.Headers[HeaderNames.CacheControl] = "no-cache";
-        var stream = System.IO.File.OpenRead(datPath);
-        return File(stream, MediaTypeNames.Application.Octet, enableRangeProcessing: true);
     }
 
 

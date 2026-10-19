@@ -87,7 +87,7 @@ public sealed class AnalysisBackfillTask : IScheduledTask
                     else
                     {
                         var result = await _analyzer.AnalyzeItemAsync(
-                            audio.Id, cancellationToken).ConfigureAwait(false);
+                            audio.Id, cancellationToken, onDemand: false).ConfigureAwait(false);
                         switch (result.Status)
                         {
                             case IntegratedAnalysisStatus.Generated:

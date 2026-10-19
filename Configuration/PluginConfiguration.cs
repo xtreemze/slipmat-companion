@@ -47,6 +47,18 @@ public class PluginConfiguration : BasePluginConfiguration
     public string StoreRoot { get; set; } = string.Empty;
 
     /// <summary>
+    /// Gets or sets the optional maximum size for reproducible analysis artifacts
+    /// in GiB. Zero preserves the existing unbounded cache.
+    /// </summary>
+    public int AnalysisArtifactMaxSizeGiB { get; set; }
+
+    /// <summary>
+    /// Gets or sets the optional idle retention age for analysis artifacts.
+    /// Zero preserves the existing cache contents indefinitely.
+    /// </summary>
+    public int AnalysisArtifactMaxAgeHours { get; set; }
+
+    /// <summary>
     /// Gets or sets the server-wide iptv-org channel IDs published through
     /// Jellyfin's Live TV service. This is source configuration, not Slipmat's
     /// per-user client subscription authority.

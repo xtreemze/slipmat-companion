@@ -266,6 +266,31 @@
                         </div>
                     </div>
 
+                    <div class="verticalSection ag-section" role="region" aria-labelledby="ArtifactRetentionTitle">
+                        <h3 id="ArtifactRetentionTitle" class="sectionTitle">Analysis artifact retention</h3>
+                        <div class="fieldDescription">
+                            Optional cleanup for reproducible analysis JSON and waveform/spectral files. Zero keeps the current
+                            unlimited retention behavior. Source-stamp metadata, physical-media maps, Jellyfin data, and media
+                            files are outside this policy. Cleanup runs daily and skips artifacts currently in use.
+                        </div>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="AnalysisArtifactMaxSizeGiB">Maximum artifact size (GiB; 0 disables)</label>
+                            <input id="AnalysisArtifactMaxSizeGiB" name="AnalysisArtifactMaxSizeGiB" type="number" min="0" max="1024" step="1" is="emby-input" value="0" />
+                        </div>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="AnalysisArtifactMaxAgeHours">Idle artifact age (hours; 0 disables)</label>
+                            <input id="AnalysisArtifactMaxAgeHours" name="AnalysisArtifactMaxAgeHours" type="number" min="0" max="87600" step="1" is="emby-input" value="0" />
+                        </div>
+                        <div id="AnalysisArtifactRetentionStatus" class="fieldDescription ag-status" role="status" aria-live="polite">
+                            Reading analysis artifact usage…
+                        </div>
+                        <div class="ag-actions ag-actions--compact">
+                            <button id="AnalysisArtifactRetentionRefreshButton" is="emby-button" type="button" class="raised emby-button">
+                                <span>Refresh artifact usage</span>
+                            </button>
+                        </div>
+                    </div>
+
                     <div class="verticalSection ag-section" role="region" aria-labelledby="AgCloudTitle">
                         <h3 id="AgCloudTitle" class="sectionTitle">Cloud media — rclone</h3>
                         <div class="fieldDescription">
@@ -1898,9 +1923,36 @@
                 }
             }
 
+            async function loadAnalysisArtifactRetention() {
+                const status = document.querySelector('#AnalysisArtifactRetentionStatus');
+                try {
+                    const response = await ApiClient.getJSON(
+                        ApiClient.getUrl('Plugins/AudioGateway/diagnostics/artifact-retention')
+                    );
+                    const used = Number(response.usedBytes ?? response.UsedBytes ?? 0);
+                    const maximum = response.maximumBytes ?? response.MaximumBytes;
+                    const maxAge = response.maximumAgeHours ?? response.MaximumAgeHours;
+                    const active = Number(response.activeSubjects ?? response.ActiveSubjects ?? 0);
+                    const policy = maximum || maxAge
+                        ? 'policy: ' + (maximum ? (Number(maximum) / 1073741824).toFixed(1) + ' GiB' : 'no size cap') +
+                            (maxAge ? ', idle ' + maxAge + ' h' : ', no age expiry')
+                        : 'retention disabled';
+                    status.textContent = 'Analysis artifacts: ' + (used / 1073741824).toFixed(2) +
+                        ' GiB across ' + Number(response.subjectCount ?? response.SubjectCount ?? 0) +
+                        ' subjects; ' + policy + '; active subjects: ' + active + '.';
+                } catch {
+                    status.textContent = 'Unable to read analysis artifact usage.';
+                }
+            }
+
             document.querySelector('#CloudLibraryProfile')
                 .addEventListener('change', function(e) {
                     activateCloudProfile(e.currentTarget.value);
+                });
+
+            document.querySelector('#AnalysisArtifactRetentionRefreshButton')
+                .addEventListener('click', function() {
+                    loadAnalysisArtifactRetention();
                 });
 
             document.querySelector('#CloudAddLibraryButton')
@@ -2112,6 +2164,10 @@
                     ApiClient.getPluginConfiguration(AudioGatewayConfig.pluginUniqueId)
                         .then(function(config) {
                             document.querySelector('#StoreRoot').value = config.StoreRoot || '';
+                            document.querySelector('#AnalysisArtifactMaxSizeGiB').value =
+                                config.AnalysisArtifactMaxSizeGiB || 0;
+                            document.querySelector('#AnalysisArtifactMaxAgeHours').value =
+                                config.AnalysisArtifactMaxAgeHours || 0;
                             loadCloudProfiles(config);
                             IptvOrgPublishedChannelIds = new Set(textList(config.IptvOrgLiveTvChannelIds));
                             const activeProfile = currentCloudProfile();
@@ -2119,6 +2175,7 @@
                                 activeProfile ? activeProfile.RemotePath : '');
                             return Promise.all([
                                 loadAudioGatewayStatus(),
+                                loadAnalysisArtifactRetention(),
                                 loadCloudPreflight(),
                                 loadCloudRemotes(activeProfile ? activeProfile.RemoteName : '').then(function() {
                                     CloudBrowserCurrentRemote = document.querySelector('#CloudRemoteName').value;
@@ -2149,6 +2206,10 @@
                     ApiClient.getPluginConfiguration(AudioGatewayConfig.pluginUniqueId)
                         .then(function(config) {
                             config.StoreRoot = document.querySelector('#StoreRoot').value.trim();
+                            config.AnalysisArtifactMaxSizeGiB = Math.max(0, Math.min(1024,
+                                Number.parseInt(document.querySelector('#AnalysisArtifactMaxSizeGiB').value, 10) || 0));
+                            config.AnalysisArtifactMaxAgeHours = Math.max(0, Math.min(87600,
+                                Number.parseInt(document.querySelector('#AnalysisArtifactMaxAgeHours').value, 10) || 0));
                             config.CloudProjectionEnabled =
                                 document.querySelector('#CloudProjectionEnabled').checked;
                             config.CloudRemoteName =
@@ -2206,6 +2267,7 @@
                         .then(function() {
                             return Promise.all([
                                 loadAudioGatewayStatus(),
+                                loadAnalysisArtifactRetention(),
                                 loadCloudStatus(),
                                 browseIptvOrg(false)
                             ]);

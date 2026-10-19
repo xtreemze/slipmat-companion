@@ -19,6 +19,7 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
         IServerApplicationHost applicationHost)
     {
         serviceCollection.AddSingleton<SidecarLoader>();
+        serviceCollection.AddSingleton<AnalysisArtifactRetentionService>();
         serviceCollection.AddSingleton(_ => new JellyfinAnalysisSubjectFactory(applicationHost));
         serviceCollection.AddSingleton<JellyfinMetadataAdapter>();
         serviceCollection.AddSingleton<ArtworkPaletteService>();
@@ -44,6 +45,7 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<IHostedService>(
             services => services.GetRequiredService<CloudProjectionStartupReconciler>());
         serviceCollection.AddSingleton<IScheduledTask, CloudProjectionRefreshTask>();
+        serviceCollection.AddSingleton<IScheduledTask, AnalysisArtifactRetentionTask>();
 
         serviceCollection.AddSingleton<CloudMigrationStore>();
         serviceCollection.AddSingleton<CloudMigrationQueue>();
