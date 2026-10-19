@@ -12,6 +12,7 @@ namespace Jellyfin.Plugin.AudioGateway.Services;
 public static class RemoteDeviceSnapshotProjection
 {
     private const int MaximumDevices = 256;
+    private const int MaximumObservations = 4096;
     private const int MaximumActions = 16;
     private static readonly HashSet<string> KnownProviders = new(StringComparer.Ordinal)
     {
@@ -32,7 +33,9 @@ public static class RemoteDeviceSnapshotProjection
 
         // Entries from a different principal must never reach the response.
         // Stable sorting makes truncation deterministic.
-        var candidates = observations
+        var bounded = observations.Take(MaximumObservations + 1).ToArray();
+        var inputTruncated = bounded.Length > MaximumObservations;
+        var candidates = bounded.Take(MaximumObservations)
             .Where(o => o is not null &&
                 string.Equals(o.OwnerId, authenticatedOwnerId, StringComparison.Ordinal) &&
                 KnownProviders.Contains(o.Provider) &&
@@ -78,7 +81,7 @@ public static class RemoteDeviceSnapshotProjection
             Authoritative: false,
             ObservedAt: now,
             Devices: entries,
-            Truncated: candidates.Select(o => o.Provider + ":" + o.DeviceId)
+            Truncated: inputTruncated || candidates.Select(o => o.Provider + ":" + o.DeviceId)
                 .Distinct(StringComparer.Ordinal).Skip(MaximumDevices).Any());
     }
 
