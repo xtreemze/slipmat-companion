@@ -21,6 +21,17 @@ public class FfmpegLoudnessFinalMeasurementTests
         Assert.Equal(6.1d, result.DynamicRange);
     }
 
+    [Fact]
+    public void Parse_RejectsFieldsSplitAcrossReports()
+    {
+        const string output = """
+            {"input_i":"-18.0","input_tp":"-2.0","input_lra":"4.0"}
+            {"input_tp":"-0.8"}
+            """;
+
+        Assert.Null(FfmpegLoudnessParser.Parse(output));
+    }
+
     [Theory]
     [InlineData("input_i")]
     [InlineData("input_tp")]
