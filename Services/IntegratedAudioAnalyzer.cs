@@ -604,7 +604,9 @@ public sealed class IntegratedAudioAnalyzer
     {
         foreach (var pps in AmplitudeEnvelopeBuilder.Tiers)
         {
-            if (!File.Exists(StorePaths.WaveformDatPath(storeRoot, storeKey, AmplitudeVariant, pps)))
+            if (!IsValidAmplitudeArtifact(
+                    StorePaths.WaveformDatPath(storeRoot, storeKey, AmplitudeVariant, pps),
+                    pps))
             {
                 return false;
             }
@@ -628,18 +630,125 @@ public sealed class IntegratedAudioAnalyzer
 
         foreach (var pps in SpectralArtifactEncoder.Tiers)
         {
-            if (!File.Exists(
+            if (!IsValidSpectralArtifact(
                     StorePaths.WaveformDatPath(
                         storeRoot,
                         storeKey,
                         SpectralArtifactEncoder.Variant,
-                        pps)))
+                        pps),
+                    pps))
             {
                 return false;
             }
         }
 
         return true;
+    }
+
+    private static bool IsValidAmplitudeArtifact(string path, int pointsPerSecond)
+    {
+        try
+        {
+            using var stream = File.OpenRead(path);
+            Span<byte> header = stackalloc byte[60];
+            if (stream.Length < header.Length)
+            {
+                return false;
+            }
+
+            stream.ReadExactly(header);
+
+            var dataLength = BinaryPrimitives.ReadUInt32LittleEndian(header[56..60]);
+            var expectedLength = 60L + dataLength + (dataLength & 1);
+            return header[..4].SequenceEqual("RIFF"u8)
+                && BinaryPrimitives.ReadUInt32LittleEndian(header[4..8]) == stream.Length - 8
+                && header[8..12].SequenceEqual("WAVE"u8)
+                && header[12..16].SequenceEqual("fmt "u8)
+                && BinaryPrimitives.ReadUInt32LittleEndian(header[16..20]) == 16
+                && BinaryPrimitives.ReadUInt16LittleEndian(header[20..22]) == 1
+                && BinaryPrimitives.ReadUInt16LittleEndian(header[22..24]) == 1
+                && BinaryPrimitives.ReadUInt32LittleEndian(header[24..28]) == pointsPerSecond
+                && BinaryPrimitives.ReadUInt32LittleEndian(header[28..32]) == pointsPerSecond
+                && BinaryPrimitives.ReadUInt16LittleEndian(header[32..34]) == 1
+                && BinaryPrimitives.ReadUInt16LittleEndian(header[34..36]) == 8
+                && header[36..40].SequenceEqual("JUNK"u8)
+                && BinaryPrimitives.ReadUInt32LittleEndian(header[40..44]) == 8
+                && header[52..56].SequenceEqual("data"u8)
+                && dataLength > 0
+                && expectedLength == stream.Length;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsValidSpectralArtifact(string path, int framesPerSecond)
+    {
+        const int baseHeaderLength = 52;
+        try
+        {
+            using var stream = File.OpenRead(path);
+            Span<byte> header = stackalloc byte[baseHeaderLength];
+            if (stream.Length < header.Length)
+            {
+                return false;
+            }
+
+            stream.ReadExactly(header);
+
+            var headerLength = BinaryPrimitives.ReadUInt16LittleEndian(header[6..8]);
+            var frameCount = BinaryPrimitives.ReadUInt32LittleEndian(header[16..20]);
+            var channelCount = header[20];
+            var payloadLength = (ulong)frameCount * channelCount * 6;
+            if (!header[..4].SequenceEqual("SLWS"u8)
+                || BinaryPrimitives.ReadUInt16LittleEndian(header[4..6]) != SpectralArtifactEncoder.FormatVersion
+                || headerLength < baseHeaderLength
+                || headerLength > stream.Length
+                || BinaryPrimitives.ReadUInt32LittleEndian(header[12..16]) != framesPerSecond
+                || frameCount == 0
+                || channelCount is < 1 or > 2
+                || payloadLength != (ulong)(stream.Length - headerLength))
+            {
+                return false;
+            }
+
+            stream.Position = headerLength;
+            return ComputeCrc32(stream) == BinaryPrimitives.ReadUInt32LittleEndian(header[48..52]);
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static uint ComputeCrc32(Stream stream)
+    {
+        var buffer = new byte[64 * 1024];
+        var crc = 0xFFFF_FFFFu;
+        int count;
+        while ((count = stream.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            for (var index = 0; index < count; index++)
+            {
+                crc ^= buffer[index];
+                for (var bit = 0; bit < 8; bit++)
+                {
+                    var mask = (uint)-(int)(crc & 1);
+                    crc = (crc >> 1) ^ (0xEDB8_8320u & mask);
+                }
+            }
+        }
+
+        return ~crc;
     }
 
     private static async Task AtomicWriteAsync(

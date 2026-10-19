@@ -86,6 +86,34 @@ public sealed class IncrementalAnalysisCacheTests
             fixture.Sidecar with { SchemaVersion = "2.0.0" }));
     }
 
+    [Fact]
+    public async Task CorruptAmplitudeArtifact_RequiresRegeneration()
+    {
+        using var fixture = new CacheFixture();
+        await fixture.WriteStampAsync();
+
+        var path = StorePaths.WaveformDatPath(
+            fixture.Root, StoreKey, IntegratedAudioAnalyzer.AmplitudeVariant, 10);
+        File.WriteAllBytes(path, [1, 2, 3]);
+
+        Assert.False(fixture.CanSkip());
+    }
+
+    [Fact]
+    public async Task CorruptSpectralPayload_RequiresRegeneration()
+    {
+        using var fixture = new CacheFixture();
+        await fixture.WriteStampAsync();
+
+        var path = StorePaths.WaveformDatPath(
+            fixture.Root, StoreKey, SpectralArtifactEncoder.Variant, 100);
+        var bytes = File.ReadAllBytes(path);
+        bytes[^1] ^= 0xff;
+        File.WriteAllBytes(path, bytes);
+
+        Assert.False(fixture.CanSkip());
+    }
+
     private sealed class CacheFixture : IDisposable
     {
         public CacheFixture()
@@ -152,7 +180,18 @@ public sealed class IncrementalAnalysisCacheTests
         {
             var path = StorePaths.WaveformDatPath(Root, StoreKey, variant, pps);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllBytes(path, [1]);
+            var bytes = variant == IntegratedAudioAnalyzer.AmplitudeVariant
+                ? AmplitudeEnvelopeBuilder.EncodeRiff(pps, [1])
+                : SpectralArtifactEncoder.EncodeTiers(
+                    new SpectralWaveformData(
+                        SampleRate: 100,
+                        FramesPerSecond: 100,
+                        ChannelCount: 1,
+                        SourceFrameCount: 1,
+                        Frames: [default]),
+                    boundaries: null,
+                    rhythm: new RhythmAnalysisResult(null, 0, [], [], null))[pps];
+            File.WriteAllBytes(path, bytes);
         }
     }
 }
