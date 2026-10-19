@@ -15,4 +15,4 @@ category: "General"
 owner: "xtreemze"
 artifacts:
 - "Jellyfin.Plugin.AudioGateway.dll"
-changelog: "Improve audio-analysis reliability and scheduled-run diagnostics; reject truncated JPEG input before optional reversible JPEG XL encoding; add an elevated read-only inventory of active Jellyfin remote-control sessions; and clarify that Companion Live TV controls publish administrator-selected channels through Jellyfin. Slipmat remains fully functional without the companion."
+changelog: "Improve audio-analysis reliability and scheduled-run diagnostics; reject truncated JPEG input before optional reversible JPEG XL encoding; add read-only administrator and user-scoped Jellyfin remote-session discovery; and clarify that Companion Live TV controls publish administrator-selected channels through Jellyfin. Slipmat remains fully functional without the companion."
