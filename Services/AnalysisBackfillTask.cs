@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
@@ -9,6 +10,7 @@ using MediaBrowser.Controller.Entities.Audio;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Tasks;
+using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.AudioGateway.Services;
 
@@ -21,15 +23,18 @@ public sealed class AnalysisBackfillTask : IScheduledTask
     private readonly ILibraryManager _library;
     private readonly IntegratedAudioAnalyzer _analyzer;
     private readonly ICloudProjectionConfigurationSource _configurationSource;
+    private readonly ILogger<AnalysisBackfillTask> _logger;
 
     public AnalysisBackfillTask(
         ILibraryManager library,
         IntegratedAudioAnalyzer analyzer,
-        ICloudProjectionConfigurationSource configurationSource)
+        ICloudProjectionConfigurationSource configurationSource,
+        ILogger<AnalysisBackfillTask> logger)
     {
         _library = library;
         _analyzer = analyzer;
         _configurationSource = configurationSource;
+        _logger = logger;
     }
 
     public string Name => "Slipmat audio analysis";
@@ -37,7 +42,7 @@ public sealed class AnalysisBackfillTask : IScheduledTask
     public string Key => "SlipmatAudioGatewayAnalysis";
 
     public string Description =>
-        "Precomputes optional Slipmat waveform artifacts for local Jellyfin audio; cloud mounts are request-driven.";
+        "Reconciles cached waveform, spectral and loudness analysis for local audio; cloud mounts are request-driven.";
 
     public string Category => "Library";
 
@@ -45,32 +50,79 @@ public sealed class AnalysisBackfillTask : IScheduledTask
         IProgress<double> progress,
         CancellationToken cancellationToken)
     {
-        var items = _library.GetItemList(new InternalItemsQuery
-        {
-            MediaTypes = [MediaType.Audio],
-            IncludeItemTypes = [BaseItemKind.Audio],
-            Recursive = true,
-        });
+        var elapsed = Stopwatch.StartNew();
+        var generated = 0;
+        var skipped = 0;
+        var unsupported = 0;
+        var failed = 0;
+        var cloudExcluded = 0;
+        var completed = 0;
 
-        var config = _configurationSource.GetCurrent();
-        var total = items.Count;
-        if (total == 0)
+        try
         {
-            progress.Report(100);
-            return;
-        }
-
-        for (var index = 0; index < total; index++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (items[index] is Audio audio
-                && audio.IsFileProtocol
-                && !RuntimeSettings.IsCloudProjectionPath(config, audio.Path))
+            var items = _library.GetItemList(new InternalItemsQuery
             {
-                await _analyzer.AnalyzeItemAsync(audio.Id, cancellationToken).ConfigureAwait(false);
+                MediaTypes = [MediaType.Audio],
+                IncludeItemTypes = [BaseItemKind.Audio],
+                Recursive = true,
+            });
+
+            var config = _configurationSource.GetCurrent();
+            var total = items.Count;
+            if (total == 0)
+            {
+                progress.Report(100);
+                return;
             }
 
-            progress.Report((index + 1) * 100d / total);
+            for (var index = 0; index < total; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (items[index] is Audio audio && audio.IsFileProtocol)
+                {
+                    if (RuntimeSettings.IsCloudProjectionPath(config, audio.Path))
+                    {
+                        cloudExcluded++;
+                    }
+                    else
+                    {
+                        var result = await _analyzer.AnalyzeItemAsync(
+                            audio.Id, cancellationToken).ConfigureAwait(false);
+                        switch (result.Status)
+                        {
+                            case IntegratedAnalysisStatus.Generated:
+                                generated++;
+                                break;
+                            case IntegratedAnalysisStatus.Skipped:
+                                skipped++;
+                                break;
+                            case IntegratedAnalysisStatus.Unsupported:
+                                unsupported++;
+                                break;
+                            case IntegratedAnalysisStatus.Failed:
+                                failed++;
+                                break;
+                        }
+                    }
+                }
+                else
+                {
+                    unsupported++;
+                }
+
+                completed++;
+                progress.Report(completed * 100d / total);
+            }
+        }
+        finally
+        {
+            elapsed.Stop();
+            // Aggregate only; never log source paths, titles, or credentials.
+            _logger.LogInformation(
+                "Slipmat scheduled analysis {Outcome}: examined={Examined}, generated={Generated}, skipped={Skipped}, unsupported={Unsupported}, failed={Failed}, cloudExcluded={CloudExcluded}, elapsedMs={ElapsedMs}",
+                cancellationToken.IsCancellationRequested ? "cancelled" : "ended",
+                completed, generated, skipped, unsupported, failed, cloudExcluded,
+                elapsed.ElapsedMilliseconds);
         }
     }
 
