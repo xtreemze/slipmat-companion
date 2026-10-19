@@ -30,6 +30,7 @@ public sealed class RemoteSessionProjectionTests
         Assert.Equal(2, result.Sessions.Count);
         Assert.Equal("jellyfin-session:one", result.Sessions[0].Id);
         Assert.Equal("New", result.Sessions[0].Name);
+        Assert.Equal(Now.AddSeconds(44), result.Sessions[0].ExpiresAt);
         Assert.Equal("jellyfin-session:two", result.Sessions[1].Id);
     }
 
@@ -47,6 +48,20 @@ public sealed class RemoteSessionProjectionTests
         ], Owner, Now);
         Assert.Single(result.Sessions);
         Assert.Equal("TVName", result.Sessions.Single().Name);
+    }
+
+    [Fact]
+    public void Project_ExpirationIsDerivedFromObservedActivity()
+    {
+        var result = RemoteSessionProjection.ProjectForUser(
+        [
+            new("edge", null, "Receiver", true, true, Now.AddSeconds(-45), Owner),
+            new("expired", null, "Old", true, true, Now.AddSeconds(-46), Owner)
+        ], Owner, Now);
+
+        var entry = Assert.Single(result.Sessions);
+        Assert.Equal(Now, entry.ExpiresAt);
+        Assert.Equal(Now.AddSeconds(-45), entry.ObservedAt);
     }
 
     [Fact]
