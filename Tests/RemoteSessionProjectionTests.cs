@@ -25,6 +25,7 @@ public sealed class RemoteSessionProjectionTests
             new("two", "device-b", "TV", true, true, Now, Owner)
         ], Owner, Now);
         Assert.False(result.Authoritative);
+        Assert.False(result.Truncated);
         Assert.Equal(1, result.SchemaVersion);
         Assert.Equal(2, result.Sessions.Count);
         Assert.Equal("jellyfin-session:one", result.Sessions[0].Id);
@@ -81,7 +82,37 @@ public sealed class RemoteSessionProjectionTests
         var observations = Enumerable.Range(0, 500)
             .Select(i => new RemoteSessionProjection.Observation(
                 $"s{i}", null, "Device", true, true, Now, Owner));
-        Assert.Equal(128, RemoteSessionProjection.ProjectForUser(observations, Owner, Now).Sessions.Count);
+        var result = RemoteSessionProjection.ProjectForUser(observations, Owner, Now);
+        Assert.Equal(128, result.Sessions.Count);
+        Assert.True(result.Truncated);
+    }
+
+    [Fact]
+    public void Project_SkipsStaleCandidatesBeforeFindingFreshSessionsWithinTheObservationBound()
+    {
+        var observations = Enumerable.Range(0, 150)
+            .Select(i => new RemoteSessionProjection.Observation(
+                $"stale-{i}", null, "Old device", true, true, Now.AddMinutes(-2), Owner))
+            .Append(new RemoteSessionProjection.Observation(
+                "fresh", null, "Fresh device", true, true, Now, Owner));
+
+        var result = RemoteSessionProjection.ProjectForUser(observations, Owner, Now);
+
+        Assert.False(result.Truncated);
+        Assert.Equal("jellyfin-session:fresh", Assert.Single(result.Sessions).Id);
+    }
+
+    [Fact]
+    public void Project_ReportsWhenTheObservationBoundStopsEnumeration()
+    {
+        var observations = Enumerable.Range(0, RemoteSessionProjection.MaximumObservations + 1)
+            .Select(i => new RemoteSessionProjection.Observation(
+                $"inactive-{i}", null, "Device", false, true, Now, Owner));
+
+        var result = RemoteSessionProjection.ProjectForUser(observations, Owner, Now);
+
+        Assert.Empty(result.Sessions);
+        Assert.True(result.Truncated);
     }
 
     [Fact]

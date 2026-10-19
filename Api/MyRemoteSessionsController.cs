@@ -38,7 +38,6 @@ public sealed class MyRemoteSessionsController : ControllerBase
         var now = DateTimeOffset.UtcNow;
         var observations = _sessions.Sessions
             .Where(session => session.UserId == userId)
-            .Take(RemoteSessionProjection.MaximumSessions + 1)
             .Select(session => new RemoteSessionProjection.Observation(
                 SessionId: session.Id,
                 DeviceId: session.DeviceId,
