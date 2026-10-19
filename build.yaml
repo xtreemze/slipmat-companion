@@ -1,7 +1,7 @@
 ---
 name: "Audio Gateway"
 guid: "d3a2b1c0-e4f5-6789-abcd-ef0123456789"
-version: "0.5.2.2"
+version: "0.5.2.3"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 overview: "Optional Jellyfin companion that accelerates and enriches Slipmat."
@@ -15,4 +15,4 @@ category: "General"
 owner: "xtreemze"
 artifacts:
 - "Jellyfin.Plugin.AudioGateway.dll"
-changelog: "Protect Package Inspector rear-cover artwork: validate TheAudioDB album identity before offering its images to Jellyfin, and preserve valid exact-release Cover Art Archive back scans when neighboring image metadata is malformed. Rear images remain Jellyfin-owned BoxRear artwork; fanart.tv supplies album-front candidates, not back-cover scans."
+changelog: "Improve audio-analysis reliability and scheduled-run diagnostics; reject truncated JPEG input before optional reversible JPEG XL encoding; add an elevated read-only inventory of active Jellyfin remote-control sessions; and clarify that Companion Live TV controls publish administrator-selected channels through Jellyfin. Slipmat remains fully functional without the companion."
