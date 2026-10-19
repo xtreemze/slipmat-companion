@@ -5,10 +5,7 @@ using System.Text.Json.Serialization;
 
 namespace Jellyfin.Plugin.AudioGateway.Models;
 
-/// <summary>
-/// Non-authoritative, read-only projection of sessions already authorized by Jellyfin.
-/// The caller must filter sessions to the authenticated principal before calling Project.
-/// </summary>
+/// <summary>Non-authoritative, read-only projection scoped to the authenticated Jellyfin user.</summary>
 public static class RemoteSessionProjection
 {
     public const int MaximumSessions = 128;
@@ -20,7 +17,8 @@ public static class RemoteSessionProjection
         string? DisplayName,
         bool Active,
         bool SupportsRemoteControl,
-        DateTimeOffset ObservedAt);
+        DateTimeOffset ObservedAt,
+        Guid OwnerUserId);
 
     public sealed record Session(
         [property: JsonPropertyName("id")] string Id,
@@ -37,18 +35,24 @@ public static class RemoteSessionProjection
     private static readonly string[] TransportCommands =
         ["play", "pause", "stop", "seek", "next", "previous"];
 
-    public static Snapshot Project(IEnumerable<Observation> authorizedObservations, DateTimeOffset now)
+    public static Snapshot ProjectForUser(
+        IEnumerable<Observation> observations,
+        Guid authenticatedUserId,
+        DateTimeOffset now)
     {
-        ArgumentNullException.ThrowIfNull(authorizedObservations);
+        ArgumentNullException.ThrowIfNull(observations);
+        if (authenticatedUserId == Guid.Empty)
+            return new Snapshot(1, false, Array.Empty<Session>());
 
-        // Never trust advertised remote control as proof of an individual optional
-        // transport or media capability. These are baseline Jellyfin session commands.
+        // Session identity is exposed only after ownership, liveness, capability,
+        // and freshness checks. The owner identifier never enters the projection.
         var selected = new Dictionary<string, Session>(StringComparer.Ordinal);
-        foreach (var observation in authorizedObservations.Take(MaximumSessions + 1))
+        foreach (var observation in observations.Take(MaximumSessions + 1))
         {
             if (selected.Count >= MaximumSessions)
                 break;
-            if (!observation.Active || !observation.SupportsRemoteControl ||
+            if (observation.OwnerUserId != authenticatedUserId ||
+                !observation.Active || !observation.SupportsRemoteControl ||
                 !ValidId(observation.SessionId) ||
                 observation.ObservedAt > now ||
                 now - observation.ObservedAt > MaximumAge)
