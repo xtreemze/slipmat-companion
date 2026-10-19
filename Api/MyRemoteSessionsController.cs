@@ -17,6 +17,8 @@ public sealed class MyRemoteSessionsController : ControllerBase
     private const string JellyfinUserIdClaim = "Jellyfin-UserId";
     private readonly ISessionManager _sessions;
 
+    /// <summary>Creates the current-user session projection endpoint.</summary>
+    /// <param name="sessions">Jellyfin's live session authority.</param>
     public MyRemoteSessionsController(ISessionManager sessions)
     {
         _sessions = sessions;
