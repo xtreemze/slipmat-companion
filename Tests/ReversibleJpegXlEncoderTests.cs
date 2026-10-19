@@ -71,6 +71,26 @@ public sealed class ReversibleJpegXlEncoderTests
     }
 
     [Fact]
+    public async Task RejectsTruncatedJpegBeforeInvokingCodec()
+    {
+        var calls = 0;
+        var encoder = new ReversibleJpegXlEncoder(
+            "cjxl", "djxl",
+            (_, _, _) =>
+            {
+                calls++;
+                return Task.FromResult(true);
+            });
+
+        var truncated = Jpeg();
+        truncated[^2] = 0x00;
+        truncated[^1] = 0x00;
+
+        Assert.Null(await encoder.TryEncodeAsync(truncated));
+        Assert.Equal(0, calls);
+    }
+
+    [Fact]
     public async Task RejectsJxlThatIsNotSmallerOrHasWrongSignature()
     {
         var jpeg = Jpeg();

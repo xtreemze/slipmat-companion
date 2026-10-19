@@ -178,7 +178,8 @@ public sealed class ReversibleJpegXlEncoder
 
     private static bool IsJpeg(ReadOnlySpan<byte> bytes) =>
         bytes.Length >= 4
-        && bytes[0] == 0xff && bytes[1] == 0xd8 && bytes[2] == 0xff;
+        && bytes[0] == 0xff && bytes[1] == 0xd8 && bytes[2] == 0xff
+        && bytes[^2] == 0xff && bytes[^1] == 0xd9;
 
     private static bool IsJxl(ReadOnlySpan<byte> bytes) =>
         (bytes.Length >= 2 && bytes[0] == 0xff && bytes[1] == 0x0a)
