@@ -60,4 +60,21 @@ public sealed class RemoteDeviceSnapshotProjectionTests
         Assert.Equal("dlna:device-000", snapshot.Devices[0].Id);
         Assert.Equal("dlna:device-255", snapshot.Devices[^1].Id);
     }
+    [Fact]
+    public void Snapshot_BoundsUntrustedInputEnumeration()
+    {
+        var enumerated = 0;
+        var observations = Enumerable.Range(0, 10_000).Select(i =>
+        {
+            enumerated++;
+            return Item(id: $"device-{i:D5}");
+        });
+
+        var snapshot = RemoteDeviceSnapshotProjection.Create("alice", observations, Now);
+
+        Assert.Equal(4097, enumerated);
+        Assert.Equal(256, snapshot.Devices.Count);
+        Assert.True(snapshot.Truncated);
+    }
+
 }
