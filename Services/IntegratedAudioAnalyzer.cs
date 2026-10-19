@@ -54,23 +54,27 @@ public sealed class IntegratedAudioAnalyzer
     private readonly IMediaEncoder _mediaEncoder;
     private readonly JellyfinAnalysisSubjectFactory _subjectFactory;
     private readonly SidecarLoader _sidecarLoader;
+    private readonly AnalysisArtifactRetentionService _artifactRetention;
     private readonly ILogger<IntegratedAudioAnalyzer> _logger;
     private readonly SemaphoreSlim _analysisGate = new(1, 1);
     private readonly object _availabilityGate = new();
     private string? _probedEncoderPath;
     private bool _probedAvailability;
 
+    /// <summary>Creates the single-authority Jellyfin audio analyzer.</summary>
     public IntegratedAudioAnalyzer(
         ILibraryManager library,
         IMediaEncoder mediaEncoder,
         JellyfinAnalysisSubjectFactory subjectFactory,
         SidecarLoader sidecarLoader,
+        AnalysisArtifactRetentionService artifactRetention,
         ILogger<IntegratedAudioAnalyzer> logger)
     {
         _library = library;
         _mediaEncoder = mediaEncoder;
         _subjectFactory = subjectFactory;
         _sidecarLoader = sidecarLoader;
+        _artifactRetention = artifactRetention;
         _logger = logger;
     }
 
@@ -175,9 +179,11 @@ public sealed class IntegratedAudioAnalyzer
         }
     }
 
+    /// <summary>Analyzes one Jellyfin item; scheduled backfill may skip intentional retention evictions.</summary>
     public async Task<IntegratedAnalysisResult> AnalyzeItemAsync(
         Guid itemId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool onDemand = true)
     {
         var item = _library.GetItemById(itemId);
         if (item is not Audio audio ||
@@ -191,7 +197,7 @@ public sealed class IntegratedAudioAnalyzer
         await _analysisGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            return await AnalyzeLocalAudioAsync(audio, cancellationToken).ConfigureAwait(false);
+            return await AnalyzeLocalAudioAsync(audio, cancellationToken, onDemand).ConfigureAwait(false);
         }
         finally
         {
@@ -201,7 +207,8 @@ public sealed class IntegratedAudioAnalyzer
 
     private async Task<IntegratedAnalysisResult> AnalyzeLocalAudioAsync(
         Audio audio,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool onDemand)
     {
         if (!IsAvailable)
         {
@@ -222,12 +229,20 @@ public sealed class IntegratedAudioAnalyzer
         var storeRoot = RuntimeSettings.ResolveStoreRoot(config);
         var subject = _subjectFactory.ForItem(audio.Id);
         var storeKey = subject.StoreKey();
+        using var artifactLease = await _artifactRetention
+            .AcquireAsync(storeRoot, storeKey, cancellationToken)
+            .ConfigureAwait(false);
         var sourceStamp = AnalysisSourceStamp.Capture(audio.Path);
         if (sourceStamp is null)
         {
             return new IntegratedAnalysisResult(
                 IntegratedAnalysisStatus.Failed,
                 "Source file metadata is unavailable.");
+        }
+
+        if (!onDemand && AnalysisSourceStamp.WereArtifactsEvicted(storeRoot, storeKey, audio.Path))
+        {
+            return new IntegratedAnalysisResult(IntegratedAnalysisStatus.Skipped);
         }
 
         var existing = _sidecarLoader.LoadSidecarFromStore(storeRoot, storeKey);

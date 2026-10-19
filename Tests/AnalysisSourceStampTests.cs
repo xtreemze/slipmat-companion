@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.AudioGateway.Services;
@@ -80,6 +81,25 @@ public class AnalysisSourceStampTests
         File.WriteAllText(mediaPath, "fixture");
 
         Assert.False(AnalysisSourceStamp.IsCurrent(temp.Path, StoreKey, mediaPath));
+    }
+
+    [Fact]
+    public void IsCurrent_ReadsLegacyStampWithoutRetentionState()
+    {
+        using var temp = new TemporaryDirectory();
+        var mediaPath = Path.Combine(temp.Path, "track.flac");
+        File.WriteAllText(mediaPath, "fixture");
+        var stamp = AnalysisSourceStamp.Capture(mediaPath)!;
+        var stampPath = StorePaths.AnalysisSourceStampPath(temp.Path, StoreKey);
+        Directory.CreateDirectory(Path.GetDirectoryName(stampPath)!);
+        File.WriteAllText(stampPath, JsonSerializer.Serialize(new
+        {
+            length = stamp.Length,
+            lastWriteUtcTicks = stamp.LastWriteUtcTicks,
+        }));
+
+        Assert.True(AnalysisSourceStamp.IsCurrent(temp.Path, StoreKey, mediaPath));
+        Assert.False(AnalysisSourceStamp.WereArtifactsEvicted(temp.Path, StoreKey, mediaPath));
     }
 
     private sealed class TemporaryDirectory : IDisposable

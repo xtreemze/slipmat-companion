@@ -135,4 +135,22 @@ public class CloudConfigurationPageTests
         Assert.True(start >= 0 && end > start);
         Assert.DoesNotContain("innerHTML", html.Substring(start, end - start));
     }
+
+    [Fact]
+    public void CloudConfigurationPage_ExposesOptInAnalysisArtifactRetentionAndUsage()
+    {
+        const string resourceName =
+            "Jellyfin.Plugin.AudioGateway.Configuration.configPage.html";
+        using var stream = typeof(Plugin).Assembly.GetManifestResourceStream(resourceName);
+        Assert.NotNull(stream);
+        using var reader = new StreamReader(stream!);
+        var html = reader.ReadToEnd();
+
+        Assert.Contains("AnalysisArtifactMaxSizeGiB", html);
+        Assert.Contains("AnalysisArtifactMaxAgeHours", html);
+        Assert.Contains("diagnostics/artifact-retention", html);
+        Assert.Contains("Source-stamp metadata", html);
+        Assert.Contains("Zero keeps the current", html);
+        Assert.Contains("Refresh artifact usage", html);
+    }
 }

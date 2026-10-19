@@ -25,6 +25,10 @@ public class JellyfinHostIntegrationTests
                 && descriptor.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(
             services,
+            descriptor => descriptor.ServiceType == typeof(AnalysisArtifactRetentionService)
+                && descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
             descriptor => descriptor.ServiceType == typeof(JellyfinAnalysisSubjectFactory)
                 && descriptor.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(
@@ -100,6 +104,11 @@ public class JellyfinHostIntegrationTests
                 && descriptor.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(
             services,
+            descriptor => descriptor.ServiceType == typeof(IScheduledTask)
+                && descriptor.ImplementationType == typeof(AnalysisArtifactRetentionTask)
+                && descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
             descriptor => descriptor.ServiceType == typeof(ICloudProjectionConfigurationStore)
                 && descriptor.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(
@@ -128,6 +137,14 @@ public class JellyfinHostIntegrationTests
     {
         Assert.Contains(
             typeof(AnalysisBackfillTask).GetInterfaces(),
+            type => type == typeof(MediaBrowser.Model.Tasks.IScheduledTask));
+    }
+
+    [Fact]
+    public void AnalysisArtifactRetentionTask_IsDiscoverableByJellyfin()
+    {
+        Assert.Contains(
+            typeof(AnalysisArtifactRetentionTask).GetInterfaces(),
             type => type == typeof(MediaBrowser.Model.Tasks.IScheduledTask));
     }
 
