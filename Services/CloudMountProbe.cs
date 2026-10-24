@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Linq;
 
 namespace Jellyfin.Plugin.AudioGateway.Services;
 
@@ -85,8 +84,17 @@ public sealed class LinuxCloudMountProbe : ICloudMountProbe
             try
             {
                 // Enumerate at most one entry. An empty readable remote is valid.
-                var readable = canEnumerate?.Invoke(target)
-                    ?? Directory.EnumerateFileSystemEntries(target).Take(1).ToArray() is not null;
+                bool readable;
+                if (canEnumerate is not null)
+                {
+                    readable = canEnumerate(target);
+                }
+                else
+                {
+                    using var entries = Directory.EnumerateFileSystemEntries(target).GetEnumerator();
+                    _ = entries.MoveNext();
+                    readable = true;
+                }
                 return readable
                     ? new(true, true, true, "mount-ready")
                     : new(true, true, false, "mount-read-failed");
