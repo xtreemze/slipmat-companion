@@ -329,6 +329,13 @@ public class CloudProjectionTests
     [Fact]
     public async Task Unmount_DisabledDetachedOwnedMount_OnlyUnmountsAndRetainsCache()
     {
+        if (!OperatingSystem.IsLinux()
+            && !OperatingSystem.IsMacOS()
+            && !OperatingSystem.IsFreeBSD())
+        {
+            return;
+        }
+
         using var temp = new TempDirectory();
         var path = Path.Combine(temp.Path, "projection");
         Directory.CreateDirectory(path);
