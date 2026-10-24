@@ -83,7 +83,7 @@ public sealed class CloudMountProbeTests
         try
         {
             var helper = Path.Combine(root, "find-test");
-            File.WriteAllText(helper, "#!/bin/sh\\nsleep 10\\n");
+            File.WriteAllText(helper, "#!/bin/sh\nsleep 10\n");
             File.SetUnixFileMode(helper,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
 
