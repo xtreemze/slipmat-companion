@@ -1,7 +1,7 @@
 ---
 name: "Audio Gateway"
 guid: "d3a2b1c0-e4f5-6789-abcd-ef0123456789"
-version: "0.5.2.4"
+version: "0.5.2.5"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 overview: "Optional Jellyfin companion that accelerates and enriches Slipmat."
@@ -15,4 +15,4 @@ category: "General"
 owner: "xtreemze"
 artifacts:
 - "Jellyfin.Plugin.AudioGateway.dll"
-changelog: "Complete the cloud VFS mount and refresh workflow in the Jellyfin dashboard; report legacy projection and mount-path ownership blockers, preserve reconcile failures, and guide safe recovery without mounting over local files. Includes accumulated Companion improvements after 0.5.2.3. Slipmat remains fully functional without Companion."
+changelog: "Verify active Linux rclone FUSE mounts in Jellyfin before declaring Cloud VFS ready or creating libraries; safely reject stale markers, foreign filesystems, and mount failures; recognize empty mounted cloud roots; improve VFS status and recovery guidance. Existing cloud migration custody protections remain in force."
