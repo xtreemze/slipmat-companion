@@ -122,6 +122,10 @@ On Linux, Companion reads `/proc/self/mountinfo` in the Jellyfin process namespa
 
 If reconciliation reports `legacy-materialized-projection-present` or `projection-path-not-owned`, do **not** bypass the guard with `rclone mount --allow-non-empty`. Preserve any local files and marker. Choose a new, empty, dedicated mount path and save/reconcile the profile, or archive the old projection only after checking the authoritative remote and the retained local data. The mount command is executed in the Jellyfin process context and inherits its `RCLONE_CONFIG` and `SLIPMAT_RCLONE` environment settings.
 
+## Managed unmount
+
+The elevated `POST /Plugins/AudioGateway/cloud/rclone/unmount?projectionId=...` action and **Unmount disabled profile** button are deliberate, guarded operations. First disable the selected VFS profile and **Save settings**; otherwise the startup/scheduled reconciler would remount it. Before detaching, remove the Jellyfin library mapping or complete a verified migration to a different path. The backend refuses unmount while the library still targets the VFS path, when the mount/remote identity cannot be verified, or when a foreign filesystem is present. A successful unmount retains the cloud media and local VFS cache; no automatic deletion or migration occurs. The endpoint exposes only bounded status codes, not command output or credentials.
+
 ## Migration from the former copy projection
 
 Older Audio Gateway builds used additive `rclone copy` materialization and wrote a `.slipmat-rclone-cloud-projection.json` marker inside the local projection.
