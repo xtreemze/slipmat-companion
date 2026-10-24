@@ -1709,6 +1709,30 @@
                 }
             }
 
+            async function selectedCloudProfileIsPersisted() {
+                captureCloudProfileFromForm();
+                const selectedId = CloudActiveProfileId;
+                if (!CloudPersistedProfileIds.has(selectedId)) {
+                    return false;
+                }
+
+                const config = await ApiClient.getPluginConfiguration(
+                    AudioGatewayConfig.pluginUniqueId);
+                const savedProfiles = Array.isArray(config.CloudLibraries) &&
+                    config.CloudLibraries.length
+                    ? config.CloudLibraries
+                    : [legacyCloudProfile(config)];
+                const saved = savedProfiles.find(function(profile) {
+                    return String(profile.Id || profile.id || '') === selectedId;
+                });
+                if (!saved || CloudActiveProfileId !== selectedId) {
+                    return false;
+                }
+
+                return JSON.stringify(normalizeCloudProfile(saved, selectedId)) ===
+                    JSON.stringify(normalizeCloudProfile(currentCloudProfile(), selectedId));
+            }
+
             async function reconcileCloud() {
                 const status = document.querySelector('#CloudStatus');
                 const button = document.querySelector('#CloudReconcileButton');
@@ -1718,8 +1742,13 @@
                 }
 
                 button.disabled = true;
-                status.textContent = 'Preparing the read-only cloud mount and refreshing the Jellyfin library…';
+                status.textContent = 'Checking the saved VFS profile before mount…';
                 try {
+                    if (!await selectedCloudProfileIsPersisted()) {
+                        status.textContent = 'This VFS profile has unsaved settings. Save settings before Mount / refresh.';
+                        return;
+                    }
+                    status.textContent = 'Preparing the read-only cloud mount and refreshing the Jellyfin library…';
                     const response = await ApiClient.ajax({
                         type: 'POST',
                         dataType: 'json',
