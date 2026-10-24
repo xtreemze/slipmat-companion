@@ -1601,7 +1601,10 @@
                         ? (response.projectionPathManaged ? 'Managed path: ' : 'Resolved override: ') + response.projectionPath
                         : 'The managed path is resolved after a remote is selected.';
 
-                    await loadCloudRecoverySuggestion(response, CloudActiveProfileId);
+                    if (requestedProfileId !== CloudActiveProfileId) {
+                        return null;
+                    }
+                    await loadCloudRecoverySuggestion(response, requestedProfileId);
                     return response;
                 } catch {
                     document.querySelector('#CloudRecoveryPathButton').style.display = 'none';
