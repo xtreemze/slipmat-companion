@@ -72,6 +72,79 @@ public sealed class CloudProjectionService
 
     public bool MountInProgress => Volatile.Read(ref _mountInProgress) != 0;
 
+    /// <summary>
+    /// Suggests a distinct, unused mountpoint when the current one contains
+    /// legacy materialized media. This never moves files or edits configuration.
+    /// The operator must explicitly save the suggestion as a profile override.
+    /// </summary>
+    public CloudVfsRecoverySuggestion SuggestRecoveryPath(string? projectionId)
+    {
+        var rootConfig = _configurationSource.GetCurrent();
+        if (!TrySelectProjectionConfiguration(
+                rootConfig, projectionId, out var config, out var selectionCode))
+        {
+            return new CloudVfsRecoverySuggestion(selectionCode, null, null);
+        }
+
+        if (!TryResolveConfiguration(config, out var resolved, out var code))
+        {
+            return new CloudVfsRecoverySuggestion(code, null, null);
+        }
+
+        // The legacy marker is inside the old copied-media directory.
+        // Leave that entire directory and its contents unchanged.
+        var legacyMarker = Path.Combine(resolved.ProjectionPath, LegacyMarkerFileName);
+        if (!File.Exists(legacyMarker))
+        {
+            return new CloudVfsRecoverySuggestion("legacy-marker-not-present", null, null);
+        }
+
+        var profiles = RuntimeSettings.GetCloudLibraries(rootConfig);
+        for (var suffix = 1; suffix <= 8; suffix++)
+        {
+            var candidate = string.Concat(
+                resolved.ProjectionPath,
+                suffix == 1 ? "-vfs" : "-vfs-" + suffix.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+            try
+            {
+                var path = Path.GetFullPath(candidate);
+                // A recovery mount must not overlap any configured profile
+                // mount/cache, nor the selected profile cache. Do not overwrite
+                // even an empty existing directory or an adjacent mount marker.
+                if (PathsOverlap(path, resolved.CachePath)
+                    || File.Exists(path)
+                    || Directory.Exists(path)
+                    || File.Exists(GetMountMarkerPath(path))
+                    || new DirectoryInfo(path).LinkTarget is not null
+                    || profiles.Any(profile =>
+                        TryResolveProfileStorage(profile, out var mount, out var cache)
+                        && (PathsOverlap(path, mount) || PathsOverlap(path, cache)))
+                    && !string.Equals(path, resolved.ProjectionPath, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var mount = _mountProbe.Inspect(path, RcloneCliHost.BuildRemoteSpec(
+                    resolved.RemoteName, resolved.RemotePath));
+                if (!mount.Active && mount.Code == "mount-not-active")
+                {
+                    return new CloudVfsRecoverySuggestion(
+                        "safe-empty-recovery-path-available", resolved.ProjectionPath, path);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                or ArgumentException or NotSupportedException)
+            {
+                return new CloudVfsRecoverySuggestion(
+                    "recovery-path-check-failed", resolved.ProjectionPath, null);
+            }
+        }
+
+        return new CloudVfsRecoverySuggestion(
+            "recovery-path-unavailable", resolved.ProjectionPath, null);
+    }
+
     public Task<CloudProjectionStatusResponse> GetStatusAsync(
         CancellationToken cancellationToken = default)
         => GetStatusAsync(null, cancellationToken);
