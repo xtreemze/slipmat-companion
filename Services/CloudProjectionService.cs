@@ -51,6 +51,7 @@ public sealed class CloudProjectionService
     private readonly ICloudProjectionConfigurationSource _configurationSource;
     private readonly IRcloneProcessRunner _runner;
     private readonly ICloudLibraryProjection _libraryProjection;
+    private readonly ICloudMountProbe _mountProbe;
     private readonly ILogger<CloudProjectionService> _logger;
     private readonly SemaphoreSlim _reconcileGate = new(1, 1);
     private int _mountInProgress;
@@ -59,11 +60,13 @@ public sealed class CloudProjectionService
         ICloudProjectionConfigurationSource configurationSource,
         IRcloneProcessRunner runner,
         ICloudLibraryProjection libraryProjection,
-        ILogger<CloudProjectionService> logger)
+        ILogger<CloudProjectionService> logger,
+        ICloudMountProbe mountProbe)
     {
         _configurationSource = configurationSource;
         _runner = runner;
         _libraryProjection = libraryProjection;
+        _mountProbe = mountProbe;
         _logger = logger;
     }
 
@@ -198,7 +201,13 @@ public sealed class CloudProjectionService
             remote.Type,
             createIfMissing: false);
 
-        var library = root.Ready && root.HasFiles
+        var mount = root.Ready && root.MarkerPresent
+            ? _mountProbe.Inspect(
+                resolved.ProjectionPath,
+                RcloneCliHost.BuildRemoteSpec(resolved.RemoteName, resolved.RemotePath))
+            : null;
+        var mountReady = mount?.Ready == true;
+        var library = mountReady
             ? _libraryProjection.Inspect(resolved.LibraryName, resolved.ProjectionPath)
             : new CloudLibraryEnsureResult(false, false, "library-not-ready");
 
@@ -209,12 +218,13 @@ public sealed class CloudProjectionService
         return new CloudProjectionStatusResponse(
             Configured: true,
             Enabled: true,
-            Health: remoteProbe.Success && root.Ready
+            Health: remoteProbe.Success && mountReady
                 ? HealthName(cliStatus.Health)
                 : "degraded",
             Code: !remoteProbe.Success
                 ? remoteProbe.ErrorCode ?? "remote-unavailable"
-                : root.Ready ? cliStatus.Code : root.Code,
+                : !root.Ready ? root.Code
+                : mountReady ? cliStatus.Code : mount?.Code ?? root.Code,
             RcloneVersion: cliStatus.Version,
             RemoteCount: cliStatus.Remotes.Count,
             SelectedRemote: resolved.RemoteName,
@@ -223,8 +233,8 @@ public sealed class CloudProjectionService
             ProjectionPath: resolved.ProjectionPath,
             ProjectionPathManaged: resolved.ProjectionPathManaged,
             MountInProgress: MountInProgress,
-            ProjectionPathReady: root.Ready,
-            ProjectionHasFiles: root.HasFiles,
+            ProjectionPathReady: mountReady,
+            ProjectionHasFiles: mountReady && root.HasFiles,
             LibraryReady: library.Ready,
             LibraryName: resolved.LibraryName,
             CollectionType: resolved.CollectionType.ToString(),
@@ -374,9 +384,29 @@ public sealed class CloudProjectionService
                 return Reconcile("blocked", root.Code);
             }
 
-            var mountReady = root.MarkerPresent && root.HasFiles;
+            var remoteSpec = RcloneCliHost.BuildRemoteSpec(
+                resolved.RemoteName, resolved.RemotePath);
+            var observed = _mountProbe.Inspect(resolved.ProjectionPath, remoteSpec);
+            if (observed.Active && (!root.MarkerPresent || !observed.Ready))
+            {
+                return Reconcile(
+                    "blocked",
+                    root.MarkerPresent ? observed.Code : "mount-active-unowned");
+            }
+
+            if (!observed.Active && observed.Code != "mount-not-active")
+            {
+                return Reconcile("blocked", observed.Code);
+            }
+
+            var mountReady = root.MarkerPresent && observed.Ready;
             if (!mountReady)
             {
+                // Never hide stale local media under a remounted filesystem.
+                if (root.HasFiles)
+                {
+                    return Reconcile("blocked", "projection-path-not-empty-unmounted");
+                }
                 Interlocked.Exchange(ref _mountInProgress, 1);
                 RcloneCommandResult mount;
                 try
@@ -419,6 +449,12 @@ public sealed class CloudProjectionService
                     return Reconcile("failed", mountFailure);
                 }
 
+                observed = _mountProbe.Inspect(resolved.ProjectionPath, remoteSpec);
+                if (!observed.Ready)
+                {
+                    return Reconcile("failed", observed.Code);
+                }
+
                 WriteProjectionMarker(
                     GetMountMarkerPath(resolved.ProjectionPath),
                     new ProjectionMarker(
@@ -432,7 +468,14 @@ public sealed class CloudProjectionService
             root = InspectProjectionRoot(resolved, remote.Type, createIfMissing: false);
             if (!root.Ready)
             {
-                return Reconcile("blocked", root.Code, mountReady: mountReady);
+                return Reconcile("blocked", root.Code);
+            }
+
+            // A mount can disappear between daemon startup and library work.
+            observed = _mountProbe.Inspect(resolved.ProjectionPath, remoteSpec);
+            if (!observed.Ready)
+            {
+                return Reconcile("failed", observed.Code);
             }
 
             var library = _libraryProjection.Inspect(
@@ -678,6 +721,33 @@ public sealed class CloudProjectionService
             }
 
             var cli = new RcloneCliHost(runner: _runner);
+            var cliStatus = await cli.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+            var remote = FindRemote(cliStatus, resolved.RemoteName);
+            if (remote is null)
+            {
+                return "selected-remote-missing";
+            }
+
+            var root = InspectProjectionRoot(resolved, remote.Type, createIfMissing: false);
+            if (!root.Ready || !root.MarkerPresent)
+            {
+                return root.Code;
+            }
+
+            var remoteSpec = RcloneCliHost.BuildRemoteSpec(
+                resolved.RemoteName, resolved.RemotePath);
+            var observed = _mountProbe.Inspect(resolved.ProjectionPath, remoteSpec);
+            if (!observed.Ready)
+            {
+                return observed.Code;
+            }
+
+            // Do not detach a live Jellyfin library from under its users.
+            if (_libraryProjection.Inspect(resolved.LibraryName, resolved.ProjectionPath).Ready)
+            {
+                return "library-still-attached";
+            }
+
             var unmount = await cli
                 .UnmountAsync(resolved.ProjectionPath, cancellationToken)
                 .ConfigureAwait(false);
@@ -700,6 +770,11 @@ public sealed class CloudProjectionService
             if (unmount.ExitCode != 0)
             {
                 return "unmount-failed";
+            }
+
+            if (_mountProbe.Inspect(resolved.ProjectionPath, remoteSpec).Active)
+            {
+                return "unmount-not-confirmed";
             }
 
             TryDeleteProjectionMarker(GetMountMarkerPath(resolved.ProjectionPath));
