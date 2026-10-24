@@ -67,6 +67,23 @@ public sealed class CloudMountProbeTests
     }
 
     [Fact]
+    public void OverMountedRclone_IsNotMistakenForVisibleFilesystem()
+    {
+        var result = LinuxCloudMountProbe.InspectMountInfo(
+            [
+                ExampleMount,
+                "42 41 0:78 / /mnt/music rw - tmpfs tmpfs rw",
+            ],
+            "/mnt/music",
+            "tele2:Music",
+            _ => true);
+
+        Assert.True(result.Active);
+        Assert.False(result.Ready);
+        Assert.Equal("mount-foreign-filesystem", result.Code);
+    }
+
+    [Fact]
     public void EscapedMountpoint_IsComparedAfterDecoding()
     {
         var result = LinuxCloudMountProbe.InspectMountInfo(
