@@ -1102,7 +1102,7 @@ public class CloudProjectionTests
         private int _inspections;
 
         public CloudMountObservation Inspect(string mountPath, string remoteSpec)
-            => ++_inspections == 1
+            => ++_inspections <= 2
                 ? new(true, true, true, "mount-ready")
                 : new(false, false, false, "mount-not-active");
     }
