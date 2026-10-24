@@ -628,10 +628,19 @@
                                     class="raised emby-button">
                                 <span>Mount / refresh cloud library</span>
                             </button>
+                            <button id="CloudUnmountButton"
+                                    is="emby-button"
+                                    type="button"
+                                    class="raised emby-button ag-danger">
+                                <span>Unmount disabled profile</span>
+                            </button>
                         </div>
                         <div class="fieldDescription">
                             Save the selected VFS profile before mounting. Mount / refresh uses its saved remote,
                             cache policy, and path. It does not overwrite an existing local directory.
+                            For unmount: first disable this projection and save, then detach its Jellyfin library
+                            or complete its migration. Unmount will not remove media or cache. An attached library
+                            or another filesystem blocks the request.
                         </div>
 
                         <div id="CloudStatus"
@@ -1674,6 +1683,49 @@
                 }
             }
 
+            async function unmountCloud() {
+                const status = document.querySelector('#CloudStatus');
+                const button = document.querySelector('#CloudUnmountButton');
+                if (!CloudPersistedProfileIds.has(CloudActiveProfileId)) {
+                    status.textContent = 'Save the selected VFS profile before unmounting.';
+                    return;
+                }
+                if (!window.confirm(
+                    'Unmount the selected disabled VFS profile? Active Jellyfin libraries will be protected. ' +
+                    'This does not delete cloud media or local cache.')) {
+                    return;
+                }
+
+                button.disabled = true;
+                status.textContent = 'Checking mount ownership and active Jellyfin library…';
+                try {
+                    const response = await ApiClient.ajax({
+                        type: 'POST',
+                        dataType: 'json',
+                        url: ApiClient.getUrl('Plugins/AudioGateway/cloud/rclone/unmount', {
+                            projectionId: CloudActiveProfileId
+                        })
+                    });
+                    switch (response.code) {
+                        case 'unmounted':
+                            status.textContent = 'Unmounted. Local data and cache were retained.';
+                            break;
+                        case 'disable-projection-before-unmount':
+                            status.textContent = 'Disable cloud media projection and Save settings before unmounting.';
+                            break;
+                        case 'library-still-attached':
+                            status.textContent = 'Unmount blocked: a Jellyfin library still uses this mount. Migrate or detach the library first.';
+                            break;
+                        default:
+                            status.textContent = 'Unmount blocked: ' + response.code + '. No files were deleted.';
+                    }
+                } catch {
+                    status.textContent = 'Unable to request managed unmount. Check Jellyfin logs.';
+                } finally {
+                    button.disabled = false;
+                }
+            }
+
             function migrationDirection() {
                 return document.querySelector('#CloudMigrationDirection').value;
             }
@@ -2162,6 +2214,11 @@
             document.querySelector('#CloudReconcileButton')
                 .addEventListener('click', function() {
                     reconcileCloud();
+                });
+
+            document.querySelector('#CloudUnmountButton')
+                .addEventListener('click', function() {
+                    unmountCloud();
                 });
 
             document.querySelector('#CloudMigrationRefreshButton')

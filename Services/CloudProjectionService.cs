@@ -720,6 +720,13 @@ public sealed class CloudProjectionService
                 return configurationCode;
             }
 
+            // A live enabled profile would be remounted by startup or scheduled
+            // reconciliation. Require the operator to disable and save first.
+            if (config.CloudProjectionEnabled)
+            {
+                return "disable-projection-before-unmount";
+            }
+
             var cli = new RcloneCliHost(runner: _runner);
             var cliStatus = await cli.GetStatusAsync(cancellationToken).ConfigureAwait(false);
             var remote = FindRemote(cliStatus, resolved.RemoteName);

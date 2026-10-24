@@ -86,6 +86,10 @@ public class CloudConfigurationPageTests
         Assert.Contains("Remove profile", html);
         Assert.Contains("CloudLibraries", html);
         Assert.Contains("Mount / refresh cloud library", html);
+        Assert.Contains("Unmount disabled profile", html);
+        Assert.Contains("CloudUnmountButton", html);
+        Assert.Contains("disable-projection-before-unmount", html);
+        Assert.Contains("library-still-attached", html);
         Assert.Contains("Mount / refresh uses its saved remote", html);
         Assert.Contains("legacy-materialized-projection-present", html);
         Assert.Contains("projection-path-not-owned", html);
