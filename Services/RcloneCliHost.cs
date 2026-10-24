@@ -615,6 +615,8 @@ public sealed partial class RcloneCliHost
                     "mount",
                     BuildRemoteSpec(remote, path),
                     fullMountPath,
+                    // Keep the live mount-table source stable for ownership checks.
+                    string.Concat("--devname=", BuildRemoteSpec(remote, path)),
                     "--daemon",
                     "--daemon-wait=20s",
                     "--read-only",
