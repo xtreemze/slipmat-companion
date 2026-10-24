@@ -291,6 +291,70 @@ public class CloudProjectionTests
     }
 
     [Fact]
+    public async Task Unmount_EnabledProfile_RequiresDisableAndSave()
+    {
+        using var temp = new TempDirectory();
+        var runner = new FakeRunner();
+        var code = await CreateService(
+            EnabledConfig(Path.Combine(temp.Path, "projection")),
+            runner,
+            new FakeLibraryProjection())
+            .UnmountAsync("legacy");
+
+        Assert.Equal("disable-projection-before-unmount", code);
+        Assert.Empty(runner.Invocations);
+    }
+
+    [Fact]
+    public async Task Unmount_AttachedJellyfinLibrary_FailsWithoutCallingUnmountHelper()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "projection");
+        var config = EnabledConfig(path);
+        var library = new FakeLibraryProjection();
+        await CreateService(
+            config, HealthyRunner(Result(0), Result(0)), library)
+            .ReconcileAsync();
+
+        config.CloudProjectionEnabled = false;
+        var runner = HealthyRunner();
+        var code = await CreateService(
+            config, runner, library, new SimulatedMountProbe(initiallyMounted: true))
+            .UnmountAsync("legacy");
+
+        Assert.Equal("library-still-attached", code);
+        Assert.Equal(2, runner.Invocations.Count);
+    }
+
+    [Fact]
+    public async Task Unmount_DisabledDetachedOwnedMount_OnlyUnmountsAndRetainsCache()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "projection");
+        Directory.CreateDirectory(path);
+        var config = EnabledConfig(path);
+        config.CloudProjectionEnabled = false;
+        File.WriteAllText(
+            string.Concat(path, ".slipmat-rclone-cloud-mount.json"),
+            "{\"Version\":2,\"RemoteName\":\"tele2\",\"RemoteType\":\"jottacloud\",\"RemotePath\":\"Media/Music\"}");
+        var cache = Path.Combine(temp.Path, "cache");
+        Directory.CreateDirectory(cache);
+        File.WriteAllText(Path.Combine(cache, "retain.bin"), "cache");
+        var runner = HealthyRunner(Result(0));
+
+        var code = await CreateService(
+            config, runner, new FakeLibraryProjection(), new UnmountSequenceProbe())
+            .UnmountAsync("legacy");
+
+        Assert.Equal("unmounted", code);
+        Assert.False(File.Exists(string.Concat(path, ".slipmat-rclone-cloud-mount.json")));
+        Assert.Equal("cache", File.ReadAllText(Path.Combine(cache, "retain.bin")));
+        Assert.Equal(
+            OperatingSystem.IsLinux() ? "fusermount3" : "umount",
+            runner.Invocations[^1].Executable);
+    }
+
+    [Fact]
     public async Task Reconcile_EmptyOwnedRoot_StartsBoundedReadOnlyVfsMount()
     {
         using var temp = new TempDirectory();
@@ -911,6 +975,16 @@ public class CloudProjectionTests
         {
             ScanCalls++;
         }
+    }
+
+    private sealed class UnmountSequenceProbe : ICloudMountProbe
+    {
+        private int _inspections;
+
+        public CloudMountObservation Inspect(string mountPath, string remoteSpec)
+            => ++_inspections == 1
+                ? new(true, true, true, "mount-ready")
+                : new(false, false, false, "mount-not-active");
     }
 
     private sealed class SimulatedMountProbe : ICloudMountProbe
