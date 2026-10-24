@@ -144,7 +144,7 @@ public sealed class LinuxCloudMountProbe : ICloudMountProbe
         }
     }
 
-    private async Task<(bool Readable, bool HasFiles, string Code)> CheckDirectoryAsync(
+    internal async Task<(bool Readable, bool HasFiles, string Code)> CheckDirectoryAsync(
         string mountPath,
         CancellationToken cancellationToken)
     {
