@@ -312,6 +312,7 @@ public class CloudProjectionTests
         Assert.Equal("mount", mount[0]);
         Assert.Equal("tele2:Media/Music", mount[1]);
         Assert.Equal(projectionPath, mount[2]);
+        Assert.Contains("--devname=tele2:Media/Music", mount);
         Assert.Contains("--read-only", mount);
         Assert.Contains("--vfs-cache-mode=full", mount);
         Assert.Contains("--vfs-cache-max-size=16G", mount);
