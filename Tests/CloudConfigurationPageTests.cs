@@ -102,6 +102,10 @@ public class CloudConfigurationPageTests
         Assert.Contains("Stage disabled profile", html);
         Assert.Contains("profile-remote-required", html);
         Assert.Contains("candidate.libraryName", html);
+        Assert.Contains("Migration destination is NOT EMPTY", html);
+        Assert.Contains("Choose or create a new empty remote folder", html);
+        Assert.Contains("Destination confirmed empty", html);
+        Assert.Contains("config.CloudLibraries", html);
         Assert.Contains("Mount: verified, empty namespace", html);
         Assert.Contains("mount-foreign-filesystem", html);
         Assert.Contains("projection-path-not-empty-unmounted", html);
