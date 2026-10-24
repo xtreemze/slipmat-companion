@@ -105,6 +105,8 @@ public class CloudConfigurationPageTests
         Assert.Contains("Migration destination is NOT EMPTY", html);
         Assert.Contains("Choose or create a new empty remote folder", html);
         Assert.Contains("Destination confirmed empty", html);
+        Assert.Contains("selectedCloudProfileIsPersisted", html);
+        Assert.Contains("This VFS profile has unsaved settings", html);
         Assert.Contains("config.CloudLibraries", html);
         Assert.Contains("Mount: verified, empty namespace", html);
         Assert.Contains("mount-foreign-filesystem", html);
