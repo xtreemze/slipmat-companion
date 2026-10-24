@@ -271,6 +271,51 @@ public class CloudProjectionTests
     }
 
     [Fact]
+    public async Task GetStatus_WhenMountedFuseProbeTimesOut_IsDegradedAndDoesNotScan()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "projection");
+        // The adjacent marker identifies the expected mount; the probe
+        // simulates the kernel namespace and an unresponsive FUSE readdir.
+        Directory.CreateDirectory(path);
+        File.WriteAllText(
+            string.Concat(path, ".slipmat-rclone-cloud-mount.json"),
+            "{\"Version\":2,\"RemoteName\":\"tele2\",\"RemoteType\":\"jottacloud\",\"RemotePath\":\"Media/Music\"}");
+        var library = new FakeLibraryProjection();
+        var status = await CreateService(
+            EnabledConfig(path), HealthyRunner(Result(0)), library,
+            new TimeoutMountProbe()).GetStatusAsync();
+
+        Assert.Equal("degraded", status.Health);
+        Assert.Equal("mount-probe-timeout", status.Code);
+        Assert.False(status.ProjectionPathReady);
+        Assert.False(status.LibraryReady);
+        Assert.Equal(0, library.ScanCalls);
+    }
+
+    [Fact]
+    public async Task Reconcile_WhenFuseReadTimesOut_DoesNotStartSecondRclone()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "projection");
+        Directory.CreateDirectory(path);
+        File.WriteAllText(
+            string.Concat(path, ".slipmat-rclone-cloud-mount.json"),
+            "{\"Version\":2,\"RemoteName\":\"tele2\",\"RemoteType\":\"jottacloud\",\"RemotePath\":\"Media/Music\"}");
+        var runner = HealthyRunner(Result(0));
+        var library = new FakeLibraryProjection();
+        var result = await CreateService(
+            EnabledConfig(path), runner, library, new TimeoutMountProbe())
+            .ReconcileAsync();
+
+        Assert.Equal("blocked", result.Status);
+        Assert.Equal("mount-probe-timeout", result.Code);
+        Assert.DoesNotContain(runner.Invocations, invocation =>
+            invocation.Arguments.Count > 0 && invocation.Arguments[0] == "mount");
+        Assert.Equal(0, library.ScanCalls);
+    }
+
+    [Fact]
     public async Task GetStatus_UnownedProjectionPath_ReportsOwnershipFailure()
     {
         using var temp = new TempDirectory();
@@ -1057,9 +1102,21 @@ public class CloudProjectionTests
         private int _inspections;
 
         public CloudMountObservation Inspect(string mountPath, string remoteSpec)
-            => ++_inspections == 1
+            => ++_inspections <= 2
                 ? new(true, true, true, "mount-ready")
                 : new(false, false, false, "mount-not-active");
+    }
+
+    private sealed class TimeoutMountProbe : ICloudMountProbe
+    {
+        public CloudMountObservation Inspect(string mountPath, string remoteSpec)
+            => new(true, true, false, "mount-read-not-checked");
+
+        public Task<CloudMountObservation> InspectAsync(
+            string mountPath, string remoteSpec,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(new CloudMountObservation(
+                true, true, false, "mount-probe-timeout"));
     }
 
     private sealed class SimulatedMountProbe : ICloudMountProbe

@@ -110,6 +110,9 @@ public class CloudConfigurationPageTests
         Assert.Contains("config.CloudLibraries", html);
         Assert.Contains("Mount: verified, empty namespace", html);
         Assert.Contains("mount-foreign-filesystem", html);
+        Assert.Contains("mount-probe-timeout", html);
+        Assert.Contains("mount-probe-busy", html);
+        Assert.Contains("mount-probe-helper-unavailable", html);
         Assert.Contains("projection-path-not-empty-unmounted", html);
         Assert.Contains("projectionId", html);
         Assert.Contains("scheduled waveform/peak/loudness analysis never traverses VFS media", html);

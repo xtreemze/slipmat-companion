@@ -91,15 +91,8 @@ public sealed class CloudProjectionService
             return new CloudVfsRecoverySuggestion(code, null, null);
         }
 
-        // The legacy marker is inside the old copied-media directory.
-        // Leave that entire directory and its contents unchanged.
-        var legacyMarker = Path.Combine(resolved.ProjectionPath, LegacyMarkerFileName);
-        if (!File.Exists(legacyMarker))
-        {
-            return new CloudVfsRecoverySuggestion("legacy-marker-not-present", null, null);
-        }
-
-        // Never recommend abandoning an active or foreign mount at the old path.
+        // Check the kernel mount table BEFORE touching the old FUSE path.
+        // A failed daemon may leave readdir/stat blocked indefinitely.
         var oldMount = _mountProbe.Inspect(
             resolved.ProjectionPath,
             RcloneCliHost.BuildRemoteSpec(resolved.RemoteName, resolved.RemotePath));
@@ -107,6 +100,14 @@ public sealed class CloudProjectionService
         {
             return new CloudVfsRecoverySuggestion(
                 "recovery-original-mount-not-idle", resolved.ProjectionPath, null);
+        }
+
+        // The legacy marker is inside the old copied-media directory.
+        // Leave that entire directory and its contents unchanged.
+        var legacyMarker = Path.Combine(resolved.ProjectionPath, LegacyMarkerFileName);
+        if (!File.Exists(legacyMarker))
+        {
+            return new CloudVfsRecoverySuggestion("legacy-marker-not-present", null, null);
         }
 
         var profiles = RuntimeSettings.GetCloudLibraries(rootConfig);
@@ -278,17 +279,20 @@ public sealed class CloudProjectionService
                 CollectionType: resolved.CollectionType.ToString());
         }
 
+        // Mount metadata never reads the FUSE directory. Consult it BEFORE
+        // inspecting markers or local entries, then read mounted media only
+        // through the bounded child probe.
+        var remoteSpec = RcloneCliHost.BuildRemoteSpec(
+            resolved.RemoteName, resolved.RemotePath);
+        var metadata = _mountProbe.Inspect(resolved.ProjectionPath, remoteSpec);
         var root = InspectProjectionRoot(
-            resolved,
-            remote.Type,
-            createIfMissing: false);
-
-        var mount = root.Ready && root.MarkerPresent
-            ? _mountProbe.Inspect(
-                resolved.ProjectionPath,
-                RcloneCliHost.BuildRemoteSpec(resolved.RemoteName, resolved.RemotePath))
-            : null;
-        var mountReady = mount?.Ready == true;
+            resolved, remote.Type, createIfMissing: false,
+            mountActive: metadata.Active);
+        var mount = metadata.Active && metadata.Owned && root.Ready && root.MarkerPresent
+            ? await _mountProbe.InspectAsync(
+                resolved.ProjectionPath, remoteSpec, cancellationToken).ConfigureAwait(false)
+            : metadata;
+        var mountReady = root.Ready && root.MarkerPresent && mount.Ready;
         var library = mountReady
             ? _libraryProjection.Inspect(resolved.LibraryName, resolved.ProjectionPath)
             : new CloudLibraryEnsureResult(false, false, "library-not-ready");
@@ -305,8 +309,9 @@ public sealed class CloudProjectionService
                 : "degraded",
             Code: !remoteProbe.Success
                 ? remoteProbe.ErrorCode ?? "remote-unavailable"
+                : metadata.Active && !metadata.Owned ? metadata.Code
                 : !root.Ready ? root.Code
-                : mountReady ? cliStatus.Code : mount?.Code ?? root.Code,
+                : mountReady ? cliStatus.Code : mount.Code,
             RcloneVersion: cliStatus.Version,
             RemoteCount: cliStatus.Remotes.Count,
             SelectedRemote: resolved.RemoteName,
@@ -316,7 +321,7 @@ public sealed class CloudProjectionService
             ProjectionPathManaged: resolved.ProjectionPathManaged,
             MountInProgress: MountInProgress,
             ProjectionPathReady: mountReady,
-            ProjectionHasFiles: mountReady && root.HasFiles,
+            ProjectionHasFiles: mountReady && mount.HasFiles,
             LibraryReady: library.Ready,
             LibraryName: resolved.LibraryName,
             CollectionType: resolved.CollectionType.ToString(),
@@ -460,15 +465,21 @@ public sealed class CloudProjectionService
                 return Reconcile("failed", remoteProbe.ErrorCode ?? "remote-unavailable");
             }
 
-            var root = InspectProjectionRoot(resolved, remote.Type, createIfMissing: true);
+            var remoteSpec = RcloneCliHost.BuildRemoteSpec(
+                resolved.RemoteName, resolved.RemotePath);
+            var metadata = _mountProbe.Inspect(resolved.ProjectionPath, remoteSpec);
+            var root = InspectProjectionRoot(
+                resolved, remote.Type, createIfMissing: true,
+                mountActive: metadata.Active);
             if (!root.Ready)
             {
                 return Reconcile("blocked", root.Code);
             }
 
-            var remoteSpec = RcloneCliHost.BuildRemoteSpec(
-                resolved.RemoteName, resolved.RemotePath);
-            var observed = _mountProbe.Inspect(resolved.ProjectionPath, remoteSpec);
+            var observed = metadata.Active && metadata.Owned
+                ? await _mountProbe.InspectAsync(
+                    resolved.ProjectionPath, remoteSpec, cancellationToken).ConfigureAwait(false)
+                : metadata;
             if (observed.Active && (!root.MarkerPresent || !observed.Ready))
             {
                 return Reconcile(
@@ -531,7 +542,8 @@ public sealed class CloudProjectionService
                     return Reconcile("failed", mountFailure);
                 }
 
-                observed = _mountProbe.Inspect(resolved.ProjectionPath, remoteSpec);
+                observed = await _mountProbe.InspectAsync(
+                    resolved.ProjectionPath, remoteSpec, cancellationToken).ConfigureAwait(false);
                 if (!observed.Ready)
                 {
                     return Reconcile("failed", observed.Code);
@@ -547,14 +559,17 @@ public sealed class CloudProjectionService
                 mountReady = true;
             }
 
-            root = InspectProjectionRoot(resolved, remote.Type, createIfMissing: false);
+            root = InspectProjectionRoot(
+                resolved, remote.Type, createIfMissing: false,
+                mountActive: true);
             if (!root.Ready)
             {
                 return Reconcile("blocked", root.Code);
             }
 
             // A mount can disappear between daemon startup and library work.
-            observed = _mountProbe.Inspect(resolved.ProjectionPath, remoteSpec);
+            observed = await _mountProbe.InspectAsync(
+                resolved.ProjectionPath, remoteSpec, cancellationToken).ConfigureAwait(false);
             if (!observed.Ready)
             {
                 return Reconcile("failed", observed.Code);
@@ -817,15 +832,19 @@ public sealed class CloudProjectionService
                 return "selected-remote-missing";
             }
 
-            var root = InspectProjectionRoot(resolved, remote.Type, createIfMissing: false);
+            var remoteSpec = RcloneCliHost.BuildRemoteSpec(
+                resolved.RemoteName, resolved.RemotePath);
+            var metadata = _mountProbe.Inspect(resolved.ProjectionPath, remoteSpec);
+            var root = InspectProjectionRoot(
+                resolved, remote.Type, createIfMissing: false,
+                mountActive: metadata.Active);
             if (!root.Ready || !root.MarkerPresent)
             {
                 return root.Code;
             }
 
-            var remoteSpec = RcloneCliHost.BuildRemoteSpec(
-                resolved.RemoteName, resolved.RemotePath);
-            var observed = _mountProbe.Inspect(resolved.ProjectionPath, remoteSpec);
+            var observed = await _mountProbe.InspectAsync(
+                resolved.ProjectionPath, remoteSpec, cancellationToken).ConfigureAwait(false);
             if (!observed.Ready)
             {
                 return observed.Code;
@@ -1079,11 +1098,14 @@ public sealed class CloudProjectionService
     private static ProjectionRootState InspectProjectionRoot(
         ResolvedConfiguration resolved,
         string? remoteType,
-        bool createIfMissing)
+        bool createIfMissing,
+        bool mountActive = false)
     {
         try
         {
-            if (!Directory.Exists(resolved.ProjectionPath))
+            // No managed directory operations against live FUSE here: even
+            // File.Exists or a single readdir can block the Jellyfin thread.
+            if (!mountActive && !Directory.Exists(resolved.ProjectionPath))
             {
                 if (!createIfMissing)
                 {
@@ -1096,7 +1118,7 @@ public sealed class CloudProjectionService
             var legacyMarkerPath = Path.Combine(
                 resolved.ProjectionPath,
                 LegacyMarkerFileName);
-            if (File.Exists(legacyMarkerPath))
+            if (!mountActive && File.Exists(legacyMarkerPath))
             {
                 return new ProjectionRootState(
                     false,
@@ -1132,9 +1154,14 @@ public sealed class CloudProjectionService
 
                 return new ProjectionRootState(
                     true,
-                    HasVisibleEntries(resolved.ProjectionPath),
+                    !mountActive && HasVisibleEntries(resolved.ProjectionPath),
                     true,
                     "projection-ready");
+            }
+
+            if (mountActive)
+            {
+                return new ProjectionRootState(false, false, false, "mount-active-unowned");
             }
 
             if (Directory.EnumerateFileSystemEntries(resolved.ProjectionPath).Any())
