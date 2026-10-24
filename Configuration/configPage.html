@@ -1436,6 +1436,12 @@
                     case 'mount-permission-denied':
                     case 'mount-read-failed':
                         return 'A mounted FUSE filesystem exists, but Jellyfin cannot read its namespace. Check FUSE, service permissions, and the rclone daemon.';
+                    case 'mount-probe-timeout':
+                        return 'The live FUSE mount did not respond within the bounded health-check deadline. Reconcile will not launch a second mount or scan while this mount remains present. Check the rclone daemon and network.';
+                    case 'mount-probe-busy':
+                        return 'A bounded FUSE health check is already running. Refresh status after it completes.';
+                    case 'mount-probe-helper-unavailable':
+                        return 'The Linux find utility is unavailable to the Jellyfin service. Install findutils (or provide the system find executable), then retry.';
                     case 'mount-probe-unavailable':
                     case 'mount-probe-unsupported':
                         return 'Live mount verification is unavailable. Cloud mounting requires a supported Linux FUSE deployment.';
