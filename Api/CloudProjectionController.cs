@@ -108,6 +108,18 @@ public sealed class CloudProjectionController : ControllerBase
             : Conflict(new { code });
     }
 
+    [HttpPost("unmount")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<ActionResult> Unmount(
+        [FromQuery] string projectionId,
+        CancellationToken cancellationToken = default)
+        => Ok(new
+        {
+            code = await _projectionService
+                .UnmountAsync(projectionId, cancellationToken)
+                .ConfigureAwait(false),
+        });
+
     [HttpPost("reconcile")]
     [ProducesResponseType(typeof(CloudProjectionReconcileResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<CloudProjectionReconcileResponse>> Reconcile(
