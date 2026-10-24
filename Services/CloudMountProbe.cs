@@ -59,9 +59,11 @@ public sealed class LinuxCloudMountProbe : ICloudMountProbe
         Func<string, bool>? canEnumerate = null)
     {
         var target = Path.TrimEndingDirectorySeparator(Path.GetFullPath(mountPath));
-        foreach (var line in lines)
+        // A later mount can hide an earlier mount at the same path.
+        // Inspect the topmost entry, not an over-mounted stale rclone.
+        for (var index = lines.Length - 1; index >= 0; index--)
         {
-            var sections = line.Split(" - ", 2, StringSplitOptions.None);
+            var sections = lines[index].Split(" - ", 2, StringSplitOptions.None);
             if (sections.Length != 2)
             {
                 continue;
