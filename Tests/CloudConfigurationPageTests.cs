@@ -90,6 +90,9 @@ public class CloudConfigurationPageTests
         Assert.Contains("legacy-materialized-projection-present", html);
         Assert.Contains("projection-path-not-owned", html);
         Assert.Contains("CloudPersistedProfileIds.has(CloudActiveProfileId)", html);
+        Assert.Contains("Mount: verified, empty namespace", html);
+        Assert.Contains("mount-foreign-filesystem", html);
+        Assert.Contains("projection-path-not-empty-unmounted", html);
         Assert.Contains("projectionId", html);
         Assert.Contains("scheduled waveform/peak/loudness analysis never traverses VFS media", html);
         Assert.Contains("copy it to an empty cloud destination", html);

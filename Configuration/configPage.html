@@ -1399,6 +1399,19 @@
                     case 'projection-marker-missing':
                     case 'projection-path-missing':
                         return 'No managed mount is established. Save the profile, then select Mount / refresh cloud library.';
+                    case 'projection-path-not-empty-unmounted':
+                        return 'A previous mount marker exists, but this path has local files and no live mount. Preserve these files and choose a new empty mount folder.';
+                    case 'mount-not-active':
+                        return 'No live FUSE mount is present. Use Mount / refresh cloud library to reconcile the saved profile.';
+                    case 'mount-foreign-filesystem':
+                    case 'mount-active-unowned':
+                        return 'Another filesystem or unowned mount occupies this path. Do not unmount or replace it automatically; use a dedicated mount folder.';
+                    case 'mount-permission-denied':
+                    case 'mount-read-failed':
+                        return 'A mounted FUSE filesystem exists, but Jellyfin cannot read its namespace. Check FUSE, service permissions, and the rclone daemon.';
+                    case 'mount-probe-unavailable':
+                    case 'mount-probe-unsupported':
+                        return 'Live mount verification is unavailable. Cloud mounting requires a supported Linux FUSE deployment.';
                     case 'mount-failed':
                     case 'mount-timeout':
                     case 'rclone-unavailable':
@@ -1519,8 +1532,8 @@
 
                     const mount = response.mountInProgress
                         ? 'Mount: starting'
-                        : (response.projectionPathReady && response.projectionHasFiles
-                            ? 'Mount: media visible (verify FUSE mount separately)'
+                        : (response.projectionPathReady
+                            ? (response.projectionHasFiles ? 'Mount: verified, media visible' : 'Mount: verified, empty namespace')
                             : 'Mount: not ready');
                     const library = response.libraryReady ? 'Library: ready' : 'Library: not ready';
                     const scan = response.jellyfinScanActive ? 'Jellyfin scan active' : 'no Jellyfin scan active';
