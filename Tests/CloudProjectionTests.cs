@@ -341,7 +341,9 @@ public class CloudProjectionTests
         File.WriteAllText(Path.Combine(projectionPath, "track.flac"), "fixture");
 
         var secondRunner = HealthyRunner(Result(0));
-        var result = await CreateService(config, secondRunner, library).ReconcileAsync();
+        var result = await CreateService(
+            config, secondRunner, library, new SimulatedMountProbe(initiallyMounted: true))
+            .ReconcileAsync();
 
         Assert.Equal("scan-queued", result.Status);
         Assert.True(result.MountReady);
@@ -397,7 +399,8 @@ public class CloudProjectionTests
         var result = await CreateService(
             config,
             HealthyRunner(Result(0)),
-            library)
+            library,
+            new SimulatedMountProbe(initiallyMounted: true))
             .ReconcileAsync();
 
         Assert.Equal("scan-queued", result.Status);
@@ -424,7 +427,8 @@ public class CloudProjectionTests
         var result = await CreateService(
             config,
             HealthyRunner(Result(0)),
-            library)
+            library,
+            new SimulatedMountProbe(initiallyMounted: true))
             .ReconcileAsync();
 
         Assert.Equal("blocked", result.Status);
@@ -700,12 +704,14 @@ public class CloudProjectionTests
     private static CloudProjectionService CreateService(
         PluginConfiguration config,
         FakeRunner runner,
-        FakeLibraryProjection library)
+        FakeLibraryProjection library,
+        ICloudMountProbe? mountProbe = null)
         => new(
             new FakeConfigurationSource(config),
             runner,
             library,
-            NullLogger<CloudProjectionService>.Instance);
+            NullLogger<CloudProjectionService>.Instance,
+            mountProbe ?? new SimulatedMountProbe());
 
     private static RcloneCommandResult Result(
         int exitCode,
@@ -802,6 +808,32 @@ public class CloudProjectionTests
         public void QueueScan()
         {
             ScanCalls++;
+        }
+    }
+
+    private sealed class SimulatedMountProbe : ICloudMountProbe
+    {
+        private readonly bool _neverMounts;
+        private bool _mounted;
+        private int _observations;
+
+        public SimulatedMountProbe(bool initiallyMounted = false, bool neverMounts = false)
+        {
+            _mounted = initiallyMounted;
+            _neverMounts = neverMounts;
+        }
+
+        public CloudMountObservation Inspect(string mountPath, string remoteSpec)
+        {
+            _observations++;
+            if (!_neverMounts && _observations > 1)
+            {
+                _mounted = true;
+            }
+
+            return _mounted
+                ? new(true, true, true, "mount-ready")
+                : new(false, false, false, "mount-not-active");
         }
     }
 
