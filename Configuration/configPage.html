@@ -1404,6 +1404,13 @@
                     return;
                 }
 
+                if (response.code === 'legacy-materialized-projection-present') {
+                    summary.textContent =
+                        'The selected remote is configured, but its legacy local projection path is blocked. ' +
+                        'Use the guarded recovery suggestion under Advanced local storage; copied media stays intact.';
+                    return;
+                }
+
                 summary.textContent = 'rclone cloud access is not ready · ' + response.code + '.';
             }
 
@@ -2046,8 +2053,42 @@
 
             async function startMigration(candidate) {
                 const status = document.querySelector('#CloudMigrationStatus');
-                status.textContent = 'Queuing verified migration for ' + candidate.libraryName + '…';
+                status.textContent = 'Checking migration destination for ' + candidate.libraryName + '…';
                 try {
+                    if (migrationDirection() === 'local-to-vfs') {
+                        // Read the saved server configuration, not potentially unsaved form values.
+                        const config = await ApiClient.getPluginConfiguration(
+                            AudioGatewayConfig.pluginUniqueId);
+                        const profiles = Array.isArray(config.CloudLibraries) && config.CloudLibraries.length
+                            ? config.CloudLibraries
+                            : [legacyCloudProfile(config)];
+                        const profile = profiles.find(function(item) {
+                            return String(item.Id || item.id || '') === candidate.profileId;
+                        });
+                        const remote = profile && String(profile.RemoteName || profile.remoteName || '').trim();
+                        const remotePath = profile && String(profile.RemotePath || profile.remotePath || '').trim();
+                        if (!remote) {
+                            status.textContent =
+                                'Choose an rclone remote and a NEW EMPTY destination folder; Save settings before preparing.';
+                            return;
+                        }
+                        const listing = await ApiClient.getJSON(
+                            ApiClient.getUrl('Plugins/AudioGateway/cloud/rclone/browse', {
+                                remote: remote,
+                                path: remotePath || undefined
+                            })
+                        );
+                        const entries = Array.isArray(listing.entries) ? listing.entries : [];
+                        if (listing.truncated || entries.length > 0) {
+                            const first = entries.length ? ' First existing item: ' + entries[0].name + '.' : '';
+                            status.textContent = 'Migration destination is NOT EMPTY: ' +
+                                remote + ':' + (remotePath || '/') + '.' + first +
+                                ' Choose or create a new empty remote folder; never overwrite an existing object.';
+                            return;
+                        }
+                    }
+                    status.textContent =
+                        'Destination confirmed empty; queuing additive copy and exact verification…';
                     await ApiClient.ajax({
                         type: 'POST',
                         contentType: 'application/json',
@@ -2062,8 +2103,11 @@
                     status.textContent =
                         'Migration preparation queued. No local media will be deleted during copy or verification.';
                     await refreshMigrations();
-                } catch {
-                    status.textContent = 'Unable to start migration; inspect eligibility and cloud destination state.';
+                } catch (error) {
+                    const code = error && error.responseJSON && error.responseJSON.code;
+                    status.textContent = code
+                        ? 'Migration not accepted: ' + code + '. Local and cloud media remain unchanged.'
+                        : 'Unable to start migration; inspect eligibility, cloud permissions and destination state.';
                 }
             }
 
@@ -2080,8 +2124,14 @@
                     });
                     const started = response && Array.isArray(response.started) ? response.started.length : 0;
                     const skipped = response && Array.isArray(response.skipped) ? response.skipped.length : 0;
+                    const reasons = Array.isArray(response.skipped)
+                        ? response.skipped.slice(0, 3).map(function(item) {
+                            return (item.libraryName || 'Library') + ': ' + item.code;
+                        }).join('; ')
+                        : '';
                     status.textContent = 'Queued ' + started + ' migration' +
                         (started === 1 ? '' : 's') + '; skipped ' + skipped +
+                        (reasons ? ' (' + reasons + ')' : '') +
                         '. Cutover and local cleanup remain separate.';
                     await refreshMigrations();
                 } catch {
