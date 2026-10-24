@@ -119,8 +119,7 @@ public sealed class CloudProjectionService
                     || new DirectoryInfo(path).LinkTarget is not null
                     || profiles.Any(profile =>
                         TryResolveProfileStorage(profile, out var mount, out var cache)
-                        && (PathsOverlap(path, mount) || PathsOverlap(path, cache)))
-                    && !string.Equals(path, resolved.ProjectionPath, StringComparison.Ordinal))
+                        && (PathsOverlap(path, mount) || PathsOverlap(path, cache))))
                 {
                     continue;
                 }
