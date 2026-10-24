@@ -1575,10 +1575,11 @@
                 const status = document.querySelector('#CloudStatus');
                 const resolvedPath = document.querySelector('#CloudResolvedProjectionPath');
                 status.textContent = 'Checking rclone…';
+                const requestedProfileId = CloudActiveProfileId;
                 try {
                     const response = await ApiClient.getJSON(
                         ApiClient.getUrl('Plugins/AudioGateway/cloud/rclone/status', {
-                            projectionId: CloudActiveProfileId || undefined
+                            projectionId: requestedProfileId || undefined
                         })
                     );
                     describeCloudSetup(response);
