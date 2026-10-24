@@ -177,6 +177,51 @@ public class CloudProjectionTests
     }
 
     [Fact]
+    public async Task GetStatus_LegacyMaterializedProjection_ReportsActionableBlocker()
+    {
+        using var temp = new TempDirectory();
+        var projectionPath = Path.Combine(temp.Path, "projection");
+        Directory.CreateDirectory(projectionPath);
+        var legacyMarker = Path.Combine(projectionPath, ".slipmat-rclone-cloud-projection.json");
+        File.WriteAllText(legacyMarker, "{}");
+
+        var runner = HealthyRunner(Result(0));
+        var service = CreateService(
+            EnabledConfig(projectionPath),
+            runner,
+            new FakeLibraryProjection());
+
+        var status = await service.GetStatusAsync();
+
+        Assert.Equal("degraded", status.Health);
+        Assert.Equal("legacy-materialized-projection-present", status.Code);
+        Assert.False(status.ProjectionPathReady);
+        Assert.False(status.LibraryReady);
+        Assert.True(File.Exists(legacyMarker));
+        Assert.DoesNotContain(runner.Invocations, invocation =>
+            invocation.Arguments.Count > 0 && invocation.Arguments[0] == "mount");
+    }
+
+    [Fact]
+    public async Task GetStatus_UnownedProjectionPath_ReportsOwnershipFailure()
+    {
+        using var temp = new TempDirectory();
+        var projectionPath = Path.Combine(temp.Path, "projection");
+        Directory.CreateDirectory(projectionPath);
+        File.WriteAllText(Path.Combine(projectionPath, "keep.flac"), "local");
+
+        var status = await CreateService(
+            EnabledConfig(projectionPath),
+            HealthyRunner(Result(0)),
+            new FakeLibraryProjection()).GetStatusAsync();
+
+        Assert.Equal("degraded", status.Health);
+        Assert.Equal("projection-path-not-owned", status.Code);
+        Assert.False(status.ProjectionPathReady);
+        Assert.False(status.LibraryReady);
+    }
+
+    [Fact]
     public async Task GetStatus_DisabledSelectedRemoteExpiredOAuth_StillRequiresReconnect()
     {
         var config = new PluginConfiguration

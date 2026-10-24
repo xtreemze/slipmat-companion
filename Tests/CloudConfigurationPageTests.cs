@@ -85,6 +85,11 @@ public class CloudConfigurationPageTests
         Assert.Contains("Add VFS library", html);
         Assert.Contains("Remove profile", html);
         Assert.Contains("CloudLibraries", html);
+        Assert.Contains("Mount / refresh cloud library", html);
+        Assert.Contains("Mount / refresh uses its saved remote", html);
+        Assert.Contains("legacy-materialized-projection-present", html);
+        Assert.Contains("projection-path-not-owned", html);
+        Assert.Contains("CloudPersistedProfileIds.has(CloudActiveProfileId)", html);
         Assert.Contains("projectionId", html);
         Assert.Contains("scheduled waveform/peak/loudness analysis never traverses VFS media", html);
         Assert.Contains("copy it to an empty cloud destination", html);

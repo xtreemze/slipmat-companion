@@ -112,6 +112,14 @@ Jellyfin's own catalog/library scan is a different operation: it enumerates the 
 
 rclone maintains directory metadata for the mounted namespace and polls supported remotes. Audio Gateway reconciles every enabled VFS profile once when Jellyfin starts and every six hours thereafter. Each profile is handled independently, so an unavailable provider does not block unrelated mounts. The task can queue Jellyfin namespace/catalog refresh after a mount is ready; it never performs Companion analysis backfill or copies the media collection.
 
+## Diagnosing a saved profile that is not mounted
+
+Saving a VFS profile persists its settings; it does **not** start the mount. On the current dashboard select the saved profile and use **Mount / refresh cloud library**. That button calls the elevated `POST /Plugins/AudioGateway/cloud/rclone/reconcile?projectionId=...` API, which invokes the rclone mount command after preflight. Startup and scheduled reconciliation use the same service.
+
+If the installed dashboard does not show **Mount / refresh cloud library**, it is not serving the current configuration page. Verify the deployed Audio Gateway plugin build against the repository/release and restart Jellyfin after installing the updated plugin; do not infer mount failure solely from an older page. Confirm mount readiness as the Jellyfin service identity using a mount-table probe and a directory listing. Do not treat the presence of a profile JSON file or the plugin's adjacent identity marker alone as a live FUSE mount.
+
+If reconciliation reports `legacy-materialized-projection-present` or `projection-path-not-owned`, do **not** bypass the guard with `rclone mount --allow-non-empty`. Preserve any local files and marker. Choose a new, empty, dedicated mount path and save/reconcile the profile, or archive the old projection only after checking the authoritative remote and the retained local data. The mount command is executed in the Jellyfin process context and inherits its `RCLONE_CONFIG` and `SLIPMAT_RCLONE` environment settings.
+
 ## Migration from the former copy projection
 
 Older Audio Gateway builds used additive `rclone copy` materialization and wrote a `.slipmat-rclone-cloud-projection.json` marker inside the local projection.

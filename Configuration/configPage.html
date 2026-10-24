@@ -629,6 +629,10 @@
                                 <span>Mount / refresh cloud library</span>
                             </button>
                         </div>
+                        <div class="fieldDescription">
+                            Save the selected VFS profile before mounting. Mount / refresh uses its saved remote,
+                            cache policy, and path. It does not overwrite an existing local directory.
+                        </div>
 
                         <div id="CloudStatus"
                              class="fieldDescription ag-status"
@@ -1383,6 +1387,27 @@
                 summary.textContent = 'rclone cloud access is not ready · ' + response.code + '.';
             }
 
+            function cloudMountGuidance(code) {
+                switch (code) {
+                    case 'legacy-materialized-projection-present':
+                        return 'This path contains a legacy copied-media projection marker. Do not use --allow-non-empty. Choose a new empty mount folder, or preserve and inspect the old data before archiving it.';
+                    case 'projection-path-not-owned':
+                        return 'The mount folder contains files not owned by this VFS profile. Choose an empty dedicated folder; do not mount over existing files.';
+                    case 'projection-marker-invalid':
+                    case 'projection-marker-mismatch':
+                        return 'The mount identity marker is invalid or names another remote. Do not reuse this path until its ownership has been checked.';
+                    case 'projection-marker-missing':
+                    case 'projection-path-missing':
+                        return 'No managed mount is established. Save the profile, then select Mount / refresh cloud library.';
+                    case 'mount-failed':
+                    case 'mount-timeout':
+                    case 'rclone-unavailable':
+                        return 'The mount could not start. Review the rclone and FUSE readiness checks and Jellyfin service logs.';
+                    default:
+                        return '';
+                }
+            }
+
             function describeReconcile(response) {
                 switch (response.code) {
                     case 'mount-ready-scan-queued':
@@ -1492,15 +1517,18 @@
                     );
                     describeCloudSetup(response);
 
-                    const projection = response.projectionHasFiles
-                        ? 'remote namespace visible'
-                        : (response.projectionPathReady ? 'mount point ready' : 'mount not ready yet');
-                    const library = response.libraryReady ? 'library ready' : 'library not ready';
-                    const mount = response.mountInProgress ? 'mount starting' : 'idle';
+                    const mount = response.mountInProgress
+                        ? 'Mount: starting'
+                        : (response.projectionPathReady && response.projectionHasFiles
+                            ? 'Mount: media visible (verify FUSE mount separately)'
+                            : 'Mount: not ready');
+                    const library = response.libraryReady ? 'Library: ready' : 'Library: not ready';
                     const scan = response.jellyfinScanActive ? 'Jellyfin scan active' : 'no Jellyfin scan active';
+                    const guidance = cloudMountGuidance(response.code);
 
-                    status.textContent = response.health + ' · ' + response.code + ' · ' +
-                        mount + ' · ' + projection + ' · ' + library + ' · ' + scan;
+                    status.textContent = mount + ' · rclone: ' + response.health + ' (' +
+                        response.code + ') · ' + library + ' · ' + scan +
+                        (guidance ? ' · ' + guidance : '');
 
                     resolvedPath.textContent = response.projectionPath
                         ? (response.projectionPathManaged ? 'Managed path: ' : 'Resolved override: ') + response.projectionPath
@@ -1604,6 +1632,13 @@
 
             async function reconcileCloud() {
                 const status = document.querySelector('#CloudStatus');
+                const button = document.querySelector('#CloudReconcileButton');
+                if (!CloudPersistedProfileIds.has(CloudActiveProfileId)) {
+                    status.textContent = 'Save this VFS profile before mounting. The server cannot mount unsaved settings.';
+                    return;
+                }
+
+                button.disabled = true;
                 status.textContent = 'Preparing the read-only cloud mount and refreshing the Jellyfin library…';
                 try {
                     const response = await ApiClient.ajax({
@@ -1613,11 +1648,16 @@
                             projectionId: CloudActiveProfileId || undefined
                         })
                     });
-                    status.textContent = describeReconcile(response);
+                    const result = describeReconcile(response);
                     await loadCloudStatus();
+                    if (response.status === 'blocked' || response.status === 'failed' || response.status === 'disabled') {
+                        status.textContent = result + ' · ' + status.textContent;
+                    }
                     await loadCloudPreflight();
                 } catch {
-                    status.textContent = 'Unable to prepare or refresh the cloud mount.';
+                    status.textContent = 'Unable to prepare or refresh the cloud mount. Review the service logs and readiness checks.';
+                } finally {
+                    button.disabled = false;
                 }
             }
 
