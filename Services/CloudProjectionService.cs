@@ -209,10 +209,12 @@ public sealed class CloudProjectionService
         return new CloudProjectionStatusResponse(
             Configured: true,
             Enabled: true,
-            Health: remoteProbe.Success ? HealthName(cliStatus.Health) : "degraded",
-            Code: remoteProbe.Success
-                ? cliStatus.Code
-                : remoteProbe.ErrorCode ?? "remote-unavailable",
+            Health: remoteProbe.Success && root.Ready
+                ? HealthName(cliStatus.Health)
+                : "degraded",
+            Code: !remoteProbe.Success
+                ? remoteProbe.ErrorCode ?? "remote-unavailable"
+                : root.Ready ? cliStatus.Code : root.Code,
             RcloneVersion: cliStatus.Version,
             RemoteCount: cliStatus.Remotes.Count,
             SelectedRemote: resolved.RemoteName,
