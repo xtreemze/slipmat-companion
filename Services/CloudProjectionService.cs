@@ -99,6 +99,16 @@ public sealed class CloudProjectionService
             return new CloudVfsRecoverySuggestion("legacy-marker-not-present", null, null);
         }
 
+        // Never recommend abandoning an active or foreign mount at the old path.
+        var oldMount = _mountProbe.Inspect(
+            resolved.ProjectionPath,
+            RcloneCliHost.BuildRemoteSpec(resolved.RemoteName, resolved.RemotePath));
+        if (oldMount.Active || oldMount.Code != "mount-not-active")
+        {
+            return new CloudVfsRecoverySuggestion(
+                "recovery-original-mount-not-idle", resolved.ProjectionPath, null);
+        }
+
         var profiles = RuntimeSettings.GetCloudLibraries(rootConfig);
         for (var suffix = 1; suffix <= 8; suffix++)
         {
