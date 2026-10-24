@@ -168,9 +168,11 @@ public sealed class LinuxCloudMountProbe : ICloudMountProbe
         process.StartInfo.ArgumentList.Add("-print");
         process.StartInfo.ArgumentList.Add("-quit");
 
+        var started = false;
         try
         {
-            if (!process.Start())
+            started = process.Start();
+            if (!started)
             {
                 return (false, false, "mount-probe-helper-unavailable");
             }
@@ -203,7 +205,7 @@ public sealed class LinuxCloudMountProbe : ICloudMountProbe
         }
         finally
         {
-            if (process.Id != 0 && !process.HasExited)
+            if (started && !process.HasExited)
             {
                 try
                 {
