@@ -418,6 +418,17 @@ public sealed class CloudMigrationCoordinator
                     "profile-must-be-disabled-before-migration");
             }
 
+            if (string.IsNullOrWhiteSpace(profile.RemoteName))
+            {
+                return new CloudMigrationCandidate(
+                    folder.Name,
+                    folder.CollectionType?.ToString(),
+                    path,
+                    profile.Id,
+                    false,
+                    "profile-remote-required");
+            }
+
             if (!Directory.Exists(path))
             {
                 return new CloudMigrationCandidate(

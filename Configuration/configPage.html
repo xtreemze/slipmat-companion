@@ -526,6 +526,17 @@
                             </div>
                             <div id="CloudResolvedProjectionPath"
                                  class="fieldDescription"></div>
+                            <button id="CloudRecoveryPathButton"
+                                    is="emby-button"
+                                    type="button"
+                                    class="raised emby-button"
+                                    style="display:none">
+                                <span>Use a new empty VFS mount path</span>
+                            </button>
+                            <div id="CloudRecoveryPathStatus"
+                                 class="fieldDescription"
+                                 role="status"
+                                 aria-live="polite"></div>
                             <div class="inputContainer" style="margin-top:0.75em">
                                 <label class="inputLabel inputLabelUnfocused" for="CloudCachePath">VFS cache folder override</label>
                                 <input id="CloudCachePath"
@@ -1393,6 +1404,13 @@
                     return;
                 }
 
+                if (response.code === 'legacy-materialized-projection-present') {
+                    summary.textContent =
+                        'The selected remote is configured, but its legacy local projection path is blocked. ' +
+                        'Use the guarded recovery suggestion under Advanced local storage; copied media stays intact.';
+                    return;
+                }
+
                 summary.textContent = 'rclone cloud access is not ready · ' + response.code + '.';
             }
 
@@ -1527,14 +1545,48 @@
                 }
             }
 
+            async function loadCloudRecoverySuggestion(statusResponse, selectedId) {
+                const button = document.querySelector('#CloudRecoveryPathButton');
+                const note = document.querySelector('#CloudRecoveryPathStatus');
+                button.style.display = 'none';
+                button.dataset.recoveryPath = '';
+                note.textContent = '';
+                if (!statusResponse ||
+                    statusResponse.code !== 'legacy-materialized-projection-present') {
+                    return;
+                }
+
+                try {
+                    const suggestion = await ApiClient.getJSON(
+                        ApiClient.getUrl('Plugins/AudioGateway/cloud/rclone/recovery-suggestion', {
+                            projectionId: selectedId
+                        })
+                    );
+                    if (CloudActiveProfileId !== selectedId ||
+                        !suggestion.suggestedPath ||
+                        suggestion.blockedPath !== statusResponse.projectionPath) {
+                        return;
+                    }
+                    button.dataset.recoveryPath = suggestion.suggestedPath;
+                    button.style.display = '';
+                    note.textContent =
+                        'The original copied-media folder remains untouched. ' +
+                        'Choose the separate unused path below, Save settings, then Mount / refresh. ' +
+                        'Suggested path: ' + suggestion.suggestedPath;
+                } catch {
+                    note.textContent = 'Unable to suggest a verified unused mount path. Do not mount over legacy files.';
+                }
+            }
+
             async function loadCloudStatus() {
                 const status = document.querySelector('#CloudStatus');
                 const resolvedPath = document.querySelector('#CloudResolvedProjectionPath');
                 status.textContent = 'Checking rclone…';
+                const requestedProfileId = CloudActiveProfileId;
                 try {
                     const response = await ApiClient.getJSON(
                         ApiClient.getUrl('Plugins/AudioGateway/cloud/rclone/status', {
-                            projectionId: CloudActiveProfileId || undefined
+                            projectionId: requestedProfileId || undefined
                         })
                     );
                     describeCloudSetup(response);
@@ -1556,8 +1608,13 @@
                         ? (response.projectionPathManaged ? 'Managed path: ' : 'Resolved override: ') + response.projectionPath
                         : 'The managed path is resolved after a remote is selected.';
 
+                    if (requestedProfileId !== CloudActiveProfileId) {
+                        return null;
+                    }
+                    await loadCloudRecoverySuggestion(response, requestedProfileId);
                     return response;
                 } catch {
+                    document.querySelector('#CloudRecoveryPathButton').style.display = 'none';
                     describeCloudSetup(null);
                     resolvedPath.textContent = '';
                     status.textContent = 'Unable to read cloud projection status.';
@@ -1652,6 +1709,30 @@
                 }
             }
 
+            async function selectedCloudProfileIsPersisted() {
+                captureCloudProfileFromForm();
+                const selectedId = CloudActiveProfileId;
+                if (!CloudPersistedProfileIds.has(selectedId)) {
+                    return false;
+                }
+
+                const config = await ApiClient.getPluginConfiguration(
+                    AudioGatewayConfig.pluginUniqueId);
+                const savedProfiles = Array.isArray(config.CloudLibraries) &&
+                    config.CloudLibraries.length
+                    ? config.CloudLibraries
+                    : [legacyCloudProfile(config)];
+                const saved = savedProfiles.find(function(profile) {
+                    return String(profile.Id || profile.id || '') === selectedId;
+                });
+                if (!saved || CloudActiveProfileId !== selectedId) {
+                    return false;
+                }
+
+                return JSON.stringify(normalizeCloudProfile(saved, selectedId)) ===
+                    JSON.stringify(normalizeCloudProfile(currentCloudProfile(), selectedId));
+            }
+
             async function reconcileCloud() {
                 const status = document.querySelector('#CloudStatus');
                 const button = document.querySelector('#CloudReconcileButton');
@@ -1661,8 +1742,13 @@
                 }
 
                 button.disabled = true;
-                status.textContent = 'Preparing the read-only cloud mount and refreshing the Jellyfin library…';
+                status.textContent = 'Checking the saved VFS profile before mount…';
                 try {
+                    if (!await selectedCloudProfileIsPersisted()) {
+                        status.textContent = 'This VFS profile has unsaved settings. Save settings before Mount / refresh.';
+                        return;
+                    }
+                    status.textContent = 'Preparing the read-only cloud mount and refreshing the Jellyfin library…';
                     const response = await ApiClient.ajax({
                         type: 'POST',
                         dataType: 'json',
@@ -1755,6 +1841,25 @@
                             (candidate.localPath || '') + ' · ' +
                             (candidate.eligible ? 'eligible' : (candidate.code || 'not eligible'));
                         row.appendChild(details);
+                        const guidance = document.createElement('div');
+                        guidance.className = 'fieldDescription';
+                        guidance.textContent = migrationBlockerGuidance(candidate);
+                        row.appendChild(guidance);
+
+                        if (!candidate.eligible &&
+                            migrationDirection() === 'local-to-vfs' &&
+                            ['matching-vfs-profile-required',
+                             'profile-must-be-disabled-before-migration',
+                             'profile-remote-required'].includes(candidate.code)) {
+                            const repairLabel = candidate.code === 'matching-vfs-profile-required'
+                                ? 'Create disabled VFS profile'
+                                : candidate.code === 'profile-must-be-disabled-before-migration'
+                                    ? 'Stage disabled profile'
+                                    : 'Configure remote';
+                            row.appendChild(migrationActionButton(repairLabel, function() {
+                                stageCandidateRepair(candidate);
+                            }));
+                        }
 
                         if (candidate.eligible && candidate.profileId) {
                             const button = document.createElement('button');
@@ -1776,6 +1881,64 @@
                     error.className = 'fieldDescription';
                     error.textContent = 'Unable to inspect Jellyfin migration candidates.';
                     container.appendChild(error);
+                }
+            }
+
+            async function stageCandidateRepair(candidate) {
+                const status = document.querySelector('#CloudMigrationStatus');
+                if (candidate.code === 'matching-vfs-profile-required') {
+                    captureCloudProfileFromForm();
+                    const profile = normalizeCloudProfile({
+                        LibraryName: candidate.libraryName,
+                        CollectionType: candidate.collectionType || 'music',
+                        Enabled: false,
+                        AutoCreateLibrary: false
+                    }, newCloudProfileId());
+                    CloudLibraryProfiles.push(profile);
+                    CloudActiveProfileId = profile.Id;
+                    renderCloudProfileSelect();
+                    applyCloudProfileToForm(profile);
+                    await loadCloudRemotes('');
+                    status.textContent =
+                        'Draft profile created for ' + candidate.libraryName +
+                        '. Select an rclone remote and a NEW EMPTY destination folder, then Save settings. ' +
+                        'The original Jellyfin library and its local files are unchanged.';
+                    document.querySelector('#CloudRemoteName').focus();
+                    return;
+                }
+                if (candidate.code === 'profile-must-be-disabled-before-migration') {
+                    await activateCloudProfile(candidate.profileId);
+                    document.querySelector('#CloudProjectionEnabled').checked = false;
+                    captureCloudProfileFromForm();
+                    status.textContent =
+                        'Profile staged as disabled. Save settings to make it eligible for local-to-VFS Prepare. ' +
+                        'The cloud mount is started at verified cutover, not before. ' +
+                        'The remote destination MUST be empty.';
+                    document.querySelector('#CloudProjectionEnabled').focus();
+                    return;
+                }
+                if (candidate.code === 'profile-remote-required') {
+                    await activateCloudProfile(candidate.profileId);
+                    status.textContent =
+                        'Choose an rclone remote and a new empty destination folder, then Save settings.';
+                    document.querySelector('#CloudRemoteName').focus();
+                }
+            }
+
+            function migrationBlockerGuidance(candidate) {
+                switch (candidate.code) {
+                    case 'matching-vfs-profile-required':
+                        return 'Create a disabled VFS profile whose Jellyfin library name matches this library. Choose an empty remote destination.';
+                    case 'profile-must-be-disabled-before-migration':
+                        return 'Disable this profile and Save first. Preparation copies and verifies to the cloud; verified cutover enables the mount.';
+                    case 'profile-remote-required':
+                        return 'Select a configured rclone remote and an empty destination path; Save before preparing.';
+                    case 'eligible':
+                        return migrationDirection() === 'local-to-vfs'
+                            ? 'Preparation requires an EMPTY cloud folder. Source files remain in place until verified cutover.'
+                            : 'Verify a writable local destination before cutover.';
+                    default:
+                        return candidate.code || 'Not eligible';
                 }
             }
 
@@ -1919,8 +2082,42 @@
 
             async function startMigration(candidate) {
                 const status = document.querySelector('#CloudMigrationStatus');
-                status.textContent = 'Queuing verified migration for ' + candidate.libraryName + '…';
+                status.textContent = 'Checking migration destination for ' + candidate.libraryName + '…';
                 try {
+                    if (migrationDirection() === 'local-to-vfs') {
+                        // Read the saved server configuration, not potentially unsaved form values.
+                        const config = await ApiClient.getPluginConfiguration(
+                            AudioGatewayConfig.pluginUniqueId);
+                        const profiles = Array.isArray(config.CloudLibraries) && config.CloudLibraries.length
+                            ? config.CloudLibraries
+                            : [legacyCloudProfile(config)];
+                        const profile = profiles.find(function(item) {
+                            return String(item.Id || item.id || '') === candidate.profileId;
+                        });
+                        const remote = profile && String(profile.RemoteName || profile.remoteName || '').trim();
+                        const remotePath = profile && String(profile.RemotePath || profile.remotePath || '').trim();
+                        if (!remote) {
+                            status.textContent =
+                                'Choose an rclone remote and a NEW EMPTY destination folder; Save settings before preparing.';
+                            return;
+                        }
+                        const listing = await ApiClient.getJSON(
+                            ApiClient.getUrl('Plugins/AudioGateway/cloud/rclone/browse', {
+                                remote: remote,
+                                path: remotePath || undefined
+                            })
+                        );
+                        const entries = Array.isArray(listing.entries) ? listing.entries : [];
+                        if (listing.truncated || entries.length > 0) {
+                            const first = entries.length ? ' First existing item: ' + entries[0].name + '.' : '';
+                            status.textContent = 'Migration destination is NOT EMPTY: ' +
+                                remote + ':' + (remotePath || '/') + '.' + first +
+                                ' Choose or create a new empty remote folder; never overwrite an existing object.';
+                            return;
+                        }
+                    }
+                    status.textContent =
+                        'Destination confirmed empty; queuing additive copy and exact verification…';
                     await ApiClient.ajax({
                         type: 'POST',
                         contentType: 'application/json',
@@ -1935,8 +2132,11 @@
                     status.textContent =
                         'Migration preparation queued. No local media will be deleted during copy or verification.';
                     await refreshMigrations();
-                } catch {
-                    status.textContent = 'Unable to start migration; inspect eligibility and cloud destination state.';
+                } catch (error) {
+                    const code = error && error.responseJSON && error.responseJSON.code;
+                    status.textContent = code
+                        ? 'Migration not accepted: ' + code + '. Local and cloud media remain unchanged.'
+                        : 'Unable to start migration; inspect eligibility, cloud permissions and destination state.';
                 }
             }
 
@@ -1953,8 +2153,14 @@
                     });
                     const started = response && Array.isArray(response.started) ? response.started.length : 0;
                     const skipped = response && Array.isArray(response.skipped) ? response.skipped.length : 0;
+                    const reasons = Array.isArray(response.skipped)
+                        ? response.skipped.slice(0, 3).map(function(item) {
+                            return (item.libraryName || 'Library') + ': ' + item.code;
+                        }).join('; ')
+                        : '';
                     status.textContent = 'Queued ' + started + ' migration' +
                         (started === 1 ? '' : 's') + '; skipped ' + skipped +
+                        (reasons ? ' (' + reasons + ')' : '') +
                         '. Cutover and local cleanup remain separate.';
                     await refreshMigrations();
                 } catch {
@@ -2219,6 +2425,22 @@
             document.querySelector('#CloudUnmountButton')
                 .addEventListener('click', function() {
                     unmountCloud();
+                });
+
+            document.querySelector('#CloudRecoveryPathButton')
+                .addEventListener('click', function() {
+                    const button = document.querySelector('#CloudRecoveryPathButton');
+                    const suggestion = button.dataset.recoveryPath;
+                    if (!suggestion) {
+                        return;
+                    }
+                    document.querySelector('#CloudProjectionPath').value = suggestion;
+                    captureCloudProfileFromForm();
+                    button.style.display = 'none';
+                    document.querySelector('#CloudRecoveryPathStatus').textContent =
+                        'Staged unused mount path: ' + suggestion +
+                        '. Save settings before Mount / refresh. The old copied files are unchanged.';
+                    document.querySelector('#CloudProjectionPath').focus();
                 });
 
             document.querySelector('#CloudMigrationRefreshButton')

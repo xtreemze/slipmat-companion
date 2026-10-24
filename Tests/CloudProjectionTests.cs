@@ -203,6 +203,74 @@ public class CloudProjectionTests
     }
 
     [Fact]
+    public void SuggestRecoveryPath_LegacyMediaRemainsUntouched()
+    {
+        using var temp = new TempDirectory();
+        var oldPath = Path.Combine(temp.Path, "projection");
+        Directory.CreateDirectory(oldPath);
+        var oldMedia = Path.Combine(oldPath, "keep.flac");
+        File.WriteAllText(oldMedia, "local");
+        File.WriteAllText(
+            Path.Combine(oldPath, ".slipmat-rclone-cloud-projection.json"), "{}");
+
+        var runner = new FakeRunner();
+        var service = CreateService(
+            EnabledConfig(oldPath), runner, new FakeLibraryProjection(),
+            new SimulatedMountProbe(neverMounts: true));
+
+        var suggested = service.SuggestRecoveryPath(null);
+
+        Assert.Equal("safe-empty-recovery-path-available", suggested.Code);
+        Assert.Equal(oldPath, suggested.BlockedPath);
+        Assert.Equal(string.Concat(oldPath, "-vfs"), suggested.SuggestedPath);
+        Assert.Equal("local", File.ReadAllText(oldMedia));
+        Assert.False(Directory.Exists(suggested.SuggestedPath));
+        Assert.Empty(runner.Invocations);
+    }
+
+    [Fact]
+    public void SuggestRecoveryPath_SkipsOccupiedCandidateAndItsMountMarker()
+    {
+        using var temp = new TempDirectory();
+        var oldPath = Path.Combine(temp.Path, "projection");
+        Directory.CreateDirectory(oldPath);
+        File.WriteAllText(
+            Path.Combine(oldPath, ".slipmat-rclone-cloud-projection.json"), "{}");
+        Directory.CreateDirectory(string.Concat(oldPath, "-vfs"));
+        File.WriteAllText(
+            string.Concat(oldPath, "-vfs-2.slipmat-rclone-cloud-mount.json"), "{}");
+
+        var suggested = CreateService(
+            EnabledConfig(oldPath), new FakeRunner(), new FakeLibraryProjection(),
+            new SimulatedMountProbe(neverMounts: true)).SuggestRecoveryPath(null);
+
+        Assert.Equal(string.Concat(oldPath, "-vfs-3"), suggested.SuggestedPath);
+        Assert.True(Directory.Exists(string.Concat(oldPath, "-vfs")));
+    }
+
+    [Fact]
+    public void SuggestRecoveryPath_RejectsLiveLegacyMountAndUnmarkedPath()
+    {
+        using var temp = new TempDirectory();
+        var oldPath = Path.Combine(temp.Path, "projection");
+        Directory.CreateDirectory(oldPath);
+        var config = EnabledConfig(oldPath);
+        var noMarker = CreateService(
+            config, new FakeRunner(), new FakeLibraryProjection(),
+            new SimulatedMountProbe(neverMounts: true)).SuggestRecoveryPath(null);
+        Assert.Equal("legacy-marker-not-present", noMarker.Code);
+        Assert.Null(noMarker.SuggestedPath);
+
+        File.WriteAllText(
+            Path.Combine(oldPath, ".slipmat-rclone-cloud-projection.json"), "{}");
+        var active = CreateService(
+            config, new FakeRunner(), new FakeLibraryProjection(),
+            new SimulatedMountProbe(initiallyMounted: true)).SuggestRecoveryPath(null);
+        Assert.Equal("recovery-original-mount-not-idle", active.Code);
+        Assert.Null(active.SuggestedPath);
+    }
+
+    [Fact]
     public async Task GetStatus_UnownedProjectionPath_ReportsOwnershipFailure()
     {
         using var temp = new TempDirectory();

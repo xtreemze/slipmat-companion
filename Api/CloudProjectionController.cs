@@ -35,6 +35,12 @@ public sealed class CloudProjectionController : ControllerBase
             .GetStatusAsync(projectionId, cancellationToken)
             .ConfigureAwait(false));
 
+    [HttpGet("recovery-suggestion")]
+    [ProducesResponseType(typeof(CloudVfsRecoverySuggestion), StatusCodes.Status200OK)]
+    public ActionResult<CloudVfsRecoverySuggestion> GetRecoverySuggestion(
+        [FromQuery] string? projectionId = null)
+        => Ok(_projectionService.SuggestRecoveryPath(projectionId));
+
     [HttpGet("remotes")]
     [ProducesResponseType(typeof(CloudRemoteListResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<CloudRemoteListResponse>> GetRemotes(

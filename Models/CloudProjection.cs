@@ -29,6 +29,11 @@ public sealed record CloudCreateDirectoryRequest(
     [property: JsonPropertyName("remote")] string Remote,
     [property: JsonPropertyName("path")] string Path);
 
+public sealed record CloudVfsRecoverySuggestion(
+    [property: JsonPropertyName("code")] string Code,
+    [property: JsonPropertyName("blockedPath")] string? BlockedPath,
+    [property: JsonPropertyName("suggestedPath")] string? SuggestedPath);
+
 public sealed record CloudProjectionStatusResponse(
     [property: JsonPropertyName("configured")] bool Configured,
     [property: JsonPropertyName("enabled")] bool Enabled,
