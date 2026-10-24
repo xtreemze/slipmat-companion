@@ -94,6 +94,14 @@ public class CloudConfigurationPageTests
         Assert.Contains("legacy-materialized-projection-present", html);
         Assert.Contains("projection-path-not-owned", html);
         Assert.Contains("CloudPersistedProfileIds.has(CloudActiveProfileId)", html);
+        Assert.Contains("CloudRecoveryPathButton", html);
+        Assert.Contains("recovery-suggestion", html);
+        Assert.Contains("The original copied-media folder remains untouched", html);
+        Assert.Contains("Save settings before Mount / refresh", html);
+        Assert.Contains("Create disabled VFS profile", html);
+        Assert.Contains("Stage disabled profile", html);
+        Assert.Contains("profile-remote-required", html);
+        Assert.Contains("candidate.libraryName", html);
         Assert.Contains("Mount: verified, empty namespace", html);
         Assert.Contains("mount-foreign-filesystem", html);
         Assert.Contains("projection-path-not-empty-unmounted", html);
