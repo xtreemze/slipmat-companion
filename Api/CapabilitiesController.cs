@@ -21,7 +21,7 @@ public class CapabilitiesController : ControllerBase
 {
     public const string ProtocolVersion = "1.0.0";
     public const string ExtensionMode = "optional-acceleration";
-    public const string SupportedJellyfinVersion = "12.1.0";
+    public const string SupportedJellyfinVersion = "12.3.0";
 
     private static readonly object CacheLock = new();
     private static readonly TimeSpan CacheDuration = TimeSpan.FromSeconds(15);

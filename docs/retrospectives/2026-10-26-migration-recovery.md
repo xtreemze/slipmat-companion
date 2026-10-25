@@ -26,6 +26,10 @@ A local Music library preparation captured 66,553 files and 941,691,053,814 byte
 4. Confirm a fresh numeric observation and capture any sanitized exit code/failure classification. A queued/copying label alone is insufficient. Use paced checks and report state changes; schedule only when requested.
 5. Require exact downloaded-content verification and ready-for-cutover. Verify the mount and library after explicit cutover; retain local rollback data. Finalize remains separately authorized and certification-gated.
 
+## Host-target correction
+
+Preparation verified Audio Gateway 0.5.2.8 installed and the server dashboard reporting Jellyfin 12.3. The old source/negotiation contract still pinned 12.1. Official NuGet Controller/Model 12.3.0 packages target net10.0, so the candidate pins both host references and its advertised target to 12.3.0; Slipmat's strict negotiation and canonical examples move together. No old-server fallback is added. The prior mirror-only track-event fixture change is numeric formatting (0 to 0.0); refreshing the reviewed upstream fixture snapshot does not add a semantic contract change. Historical 12.1 Docker/PoC evidence remains historical, not proof of 12.3 runtime behavior.
+
 ## Open evidence
 
 The old command's exit code/provider error was not retained. Full upload/check, production installation, real mount/readback, cutover and rollback remain unverified for this candidate. The separate journaled unmount/handoff issue in #50/#139 is unchanged by this preparation-resume fix.

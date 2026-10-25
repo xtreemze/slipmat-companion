@@ -22,8 +22,8 @@
       types such as Plugin (BasePlugin<>) fail to load otherwise, even when a
       test passes an explicit store-root override.
     -->
-    <PackageReference Include="Jellyfin.Controller" Version="12.1.0" />
-    <PackageReference Include="Jellyfin.Model" Version="12.1.0" />
+    <PackageReference Include="Jellyfin.Controller" Version="12.3.0" />
+    <PackageReference Include="Jellyfin.Model" Version="12.3.0" />
   </ItemGroup>
 
   <ItemGroup>

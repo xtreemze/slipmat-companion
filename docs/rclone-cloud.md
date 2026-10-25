@@ -24,7 +24,7 @@ These values are configurable in the Jellyfin plugin page. The cache is disposab
 
 ## Docker recipe
 
-`docs/docker/` holds a verified `Dockerfile` and `docker-compose.yml`: Jellyfin 12.1 plus rclone 1.75.2 and FUSE, run with `SYS_ADMIN`, `/dev/fuse` and an unconfined AppArmor profile. This is the supported route on macOS (Homebrew rclone refuses `rclone mount`, and there is no native Jellyfin server). Notes learned in the macOS PoC (#82):
+`docs/docker/` holds a verified `Dockerfile` and `docker-compose.yml`: Jellyfin 12.1 plus rclone 1.75.2 and FUSE, run with `SYS_ADMIN`, `/dev/fuse` and an unconfined AppArmor profile. This records the historical 12.1 macOS PoC route (Homebrew rclone refuses `rclone mount`, and there is no native Jellyfin server). The current companion target is 12.3.0; that historical recipe is not certification or an installation target for the recovery candidate. Use a matching 12.3 host and validate its FUSE runtime separately. Notes learned in the macOS PoC (#82):
 
 - Mount the rclone config **directory**, not a copy, so one token state exists.
 - On Docker Desktop only paths under `$HOME` are shared, and bind mounts are sshfs-backed (slow cache reads, misreported free space); keep the VFS cache on a named volume.

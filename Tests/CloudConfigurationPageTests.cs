@@ -80,7 +80,7 @@ public class CloudConfigurationPageTests
         Assert.Contains("VFS setup and migration model", html);
         Assert.Contains("Automatic Audio Gateway tasks are payload-safe", html);
         Assert.Contains("does not queue a Jellyfin catalog scan", html);
-        Assert.Contains("does not expose a supported cache-residency filter", html);
+        Assert.Contains("this adapter does not filter those probes by VFS cache residency", html);
         Assert.Contains("CloudLibraryProfile", html);
         Assert.Contains("Add VFS library", html);
         Assert.Contains("Remove profile", html);
