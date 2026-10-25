@@ -33,6 +33,8 @@ public sealed class CloudMigrationQueue
         return false;
     }
 
+    public bool IsPending(string jobId) => _pending.ContainsKey(jobId);
+
     public void Complete(string jobId)
         => _pending.TryRemove(jobId, out _);
 }

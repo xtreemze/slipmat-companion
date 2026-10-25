@@ -89,6 +89,14 @@ public sealed class CloudMigrationController : ControllerBase
         }
     }
 
+    [HttpPost("{jobId}/resume")]
+    [ProducesResponseType(typeof(CloudMigrationJob), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<CloudMigrationJob>> Resume(
+        string jobId, CancellationToken cancellationToken)
+        => await Transition(() => _coordinator.RequestResumeAsync(jobId, cancellationToken))
+            .ConfigureAwait(false);
+
     [HttpPost("{jobId}/cutover")]
     [ProducesResponseType(typeof(CloudMigrationJob), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

@@ -168,7 +168,23 @@ public sealed class CloudMigrationWorker : BackgroundService
         CloudMigrationJob job,
         CancellationToken cancellationToken)
     {
-        var cli = new RcloneCliHost(runner: _runner);
+        if (job.Direction == CloudMigrationDirections.LocalToVfs)
+        {
+            var profile = FindProfile(job.ProfileId);
+            if (profile is null || profile.Enabled || profile.RemoteName != job.RemoteName
+                || profile.RemotePath != job.RemotePath || profile.LibraryName != job.LibraryName)
+            {
+                await FailAsync(job, "migration-profile-changed", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            var manifest = await CloudMigrationManifestBuilder.CaptureAsync(job.LocalPath, cancellationToken)
+                .ConfigureAwait(false);
+            if (!CloudMigrationRecovery.ManifestMatches(job, manifest))
+            {
+                await FailAsync(job, "migration-source-changed", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+        }
         var copying = await SaveAsync(
             job with
             {
@@ -177,6 +193,12 @@ public sealed class CloudMigrationWorker : BackgroundService
             },
             cancellationToken).ConfigureAwait(false);
 
+        var observed = copying;
+        var cli = new RcloneCliHost(runner: _runner, progress: async sample =>
+        {
+            observed = observed with { Progress = sample };
+            await _store.SaveAsync(observed, cancellationToken).ConfigureAwait(false);
+        });
         RcloneCommandResult copy;
         string verifyPath;
         if (job.Direction == CloudMigrationDirections.LocalToVfs)
@@ -204,17 +226,20 @@ public sealed class CloudMigrationWorker : BackgroundService
         var copyError = TransferFailure(copy, "copy");
         if (copyError is not null)
         {
-            await FailAsync(copying, copyError, cancellationToken).ConfigureAwait(false);
+            await FailAsync(observed with { LastExitCode = copy.ExitCode }, copyError, cancellationToken).ConfigureAwait(false);
             return;
         }
 
         var verifying = await SaveAsync(
-            copying with
+            observed with
             {
                 Phase = CloudMigrationPhases.Verifying,
                 Code = "verifying",
+                Progress = null,
+                LastExitCode = copy.ExitCode,
             },
             cancellationToken).ConfigureAwait(false);
+        observed = verifying;
         var check = await cli.CheckLocalAndRemoteByDownloadAsync(
                 verifyPath,
                 job.RemoteName,
@@ -224,13 +249,21 @@ public sealed class CloudMigrationWorker : BackgroundService
         var checkError = TransferFailure(check, "verification");
         if (checkError is not null)
         {
-            await FailAsync(verifying, checkError, cancellationToken).ConfigureAwait(false);
+            await FailAsync(observed with { LastExitCode = check.ExitCode }, checkError, cancellationToken).ConfigureAwait(false);
             return;
         }
 
+        if (job.Direction == CloudMigrationDirections.LocalToVfs
+            && !CloudMigrationRecovery.ManifestMatches(job,
+                await CloudMigrationManifestBuilder.CaptureAsync(job.LocalPath, cancellationToken).ConfigureAwait(false)))
+        {
+            await FailAsync(observed, "migration-source-changed", cancellationToken).ConfigureAwait(false);
+            return;
+        }
         await SaveAsync(
-            verifying with
+            observed with
             {
+                LastExitCode = check.ExitCode,
                 Phase = CloudMigrationPhases.ReadyForCutover,
                 Code = "verified-ready-for-cutover",
                 Verification = VerificationContract,
@@ -254,15 +287,22 @@ public sealed class CloudMigrationWorker : BackgroundService
             return;
         }
 
-        var cli = new RcloneCliHost(runner: _runner);
         var finalCopying = await SaveAsync(
             job with
             {
                 Phase = CloudMigrationPhases.FinalCopying,
                 Code = "final-incremental-copy",
+                Progress = null,
+                LastExitCode = null,
             },
             cancellationToken).ConfigureAwait(false);
 
+        var observedFinal = finalCopying;
+        var cli = new RcloneCliHost(runner: _runner, progress: async sample =>
+        {
+            observedFinal = observedFinal with { Progress = sample };
+            await _store.SaveAsync(observedFinal, cancellationToken).ConfigureAwait(false);
+        });
         var verifyPath = job.Direction == CloudMigrationDirections.LocalToVfs
             ? job.LocalPath
             : job.StagingPath
@@ -286,22 +326,27 @@ public sealed class CloudMigrationWorker : BackgroundService
         if (copyError is not null)
         {
             await SaveAsync(
-                finalCopying with
+                observedFinal with
                 {
                     Phase = CloudMigrationPhases.ReadyForCutover,
                     Code = copyError,
+                    LastExitCode = copy.ExitCode,
                 },
                 cancellationToken).ConfigureAwait(false);
             return;
         }
 
         var finalVerifying = await SaveAsync(
-            finalCopying with
+            observedFinal with
             {
                 Phase = CloudMigrationPhases.FinalVerifying,
                 Code = "final-verification",
+                Progress = null,
+                LastExitCode = copy.ExitCode,
+
             },
             cancellationToken).ConfigureAwait(false);
+        observedFinal = finalVerifying;
         var check = await cli.CheckLocalAndRemoteByDownloadAsync(
                 verifyPath,
                 job.RemoteName,
@@ -312,10 +357,11 @@ public sealed class CloudMigrationWorker : BackgroundService
         if (checkError is not null)
         {
             await SaveAsync(
-                finalVerifying with
+                observedFinal with
                 {
                     Phase = CloudMigrationPhases.ReadyForCutover,
                     Code = checkError,
+                    LastExitCode = check.ExitCode,
                 },
                 cancellationToken).ConfigureAwait(false);
             return;
@@ -329,7 +375,7 @@ public sealed class CloudMigrationWorker : BackgroundService
             if (!ManifestMatches(job, currentManifest))
             {
                 await SaveAsync(
-                    finalVerifying with
+                    observedFinal with
                     {
                         Phase = CloudMigrationPhases.ReadyForCutover,
                         Code = "source-changed-after-inventory",
@@ -343,7 +389,7 @@ public sealed class CloudMigrationWorker : BackgroundService
         if (_library.IsScanRunning)
         {
             await SaveAsync(
-                finalVerifying with
+                observedFinal with
                 {
                     Phase = CloudMigrationPhases.ReadyForCutover,
                     Code = "jellyfin-scan-started-retry-cutover",
@@ -356,13 +402,13 @@ public sealed class CloudMigrationWorker : BackgroundService
         if (job.Direction == CloudMigrationDirections.LocalToVfs)
         {
             await CutoverLocalToVfsAsync(
-                finalVerifying with { Verification = VerificationContract },
+                observedFinal with { Verification = VerificationContract },
                 cancellationToken).ConfigureAwait(false);
         }
         else
         {
             await CutoverVfsToLocalAsync(
-                finalVerifying with { Verification = VerificationContract },
+                observedFinal with { Verification = VerificationContract },
                 cancellationToken).ConfigureAwait(false);
         }
     }
@@ -924,40 +970,11 @@ public sealed class CloudMigrationWorker : BackgroundService
             },
             cancellationToken).ConfigureAwait(false);
 
-    private static bool ManifestMatches(
-        CloudMigrationJob job,
-        CloudMigrationManifest manifest)
-        => job.ManifestVersion == manifest.Version
-            && job.ManifestFileCount == manifest.FileCount
-            && job.ManifestTotalBytes == manifest.TotalBytes
-            && !string.IsNullOrWhiteSpace(job.ManifestDigestSha256)
-            && string.Equals(
-                job.ManifestDigestSha256,
-                manifest.DigestSha256,
-                StringComparison.OrdinalIgnoreCase);
+    private static bool ManifestMatches(CloudMigrationJob job, CloudMigrationManifest manifest)
+        => CloudMigrationRecovery.ManifestMatches(job, manifest);
 
-    private static string? TransferFailure(
-        RcloneCommandResult result,
-        string operation)
-    {
-        if (!result.StartSucceeded)
-        {
-            return "rclone-unavailable";
-        }
-
-        if (result.TimedOut)
-        {
-            return string.Concat(operation, "-timeout");
-        }
-
-        if (result.ExitCode != 0)
-        {
-            return RcloneCliHost.ClassifyRemoteFailure(result)
-                ?? string.Concat(operation, "-failed");
-        }
-
-        return null;
-    }
+    private static string? TransferFailure(RcloneCommandResult result, string operation)
+        => CloudMigrationRecovery.FailureCode(result, operation);
 
     private static bool TryDeleteEmptyDirectory(string path)
     {

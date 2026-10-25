@@ -1,7 +1,7 @@
 ---
 name: "Audio Gateway"
 guid: "d3a2b1c0-e4f5-6789-abcd-ef0123456789"
-version: "0.5.2.8"
+version: "0.5.2.9"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 overview: "Optional Jellyfin companion that accelerates and enriches Slipmat."
@@ -15,4 +15,4 @@ category: "General"
 owner: "xtreemze"
 artifacts:
 - "Jellyfin.Plugin.AudioGateway.dll"
-changelog: "Move live rclone FUSE health reads out of Jellyfin request threads into a bounded, cancellable child process. Detect stalled mounts without duplicate mount attempts or library scans, report timeout/busy/helper failures, and protect legacy recovery from blocked mounted directories. Linux readiness checks retain exact mount-source identity and safe empty-cloud behavior. No media or cache deletion."
+changelog: "Resume failed local-to-VFS preparation on its original journal after source and target custody checks. Preserve partial cloud copies with immutable transfers and fresh download verification. Expose bounded numeric progress, observation freshness and sanitized exit classifications; keep stale jobs visible and guard repeated dashboard actions. No automatic cutover, cleanup or credential exposure."
