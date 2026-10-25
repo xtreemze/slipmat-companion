@@ -39,8 +39,7 @@ public static class CloudMigrationManifestBuilder
         long count = 0;
         long bytes = 0;
 
-        foreach (var path in Directory
-            .EnumerateFiles(fullRoot, "*", SearchOption.AllDirectories)
+        foreach (var path in EnumerateSourceFiles(fullRoot)
             .OrderBy(path => path, StringComparer.Ordinal))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -71,6 +70,26 @@ public static class CloudMigrationManifestBuilder
             count,
             bytes,
             DateTimeOffset.UtcNow);
+    }
+
+    private static IEnumerable<string> EnumerateSourceFiles(string root)
+    {
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            var directory = pending.Pop();
+            if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0)
+                throw new InvalidOperationException("source-reparse-point-unsupported");
+            foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+            {
+                var attributes = File.GetAttributes(entry);
+                if ((attributes & FileAttributes.ReparsePoint) != 0)
+                    throw new InvalidOperationException("source-reparse-point-unsupported");
+                if ((attributes & FileAttributes.Directory) != 0) pending.Push(entry);
+                else yield return entry;
+            }
+        }
     }
 
     private static void Append(IncrementalHash hash, string value)

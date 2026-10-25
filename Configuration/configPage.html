@@ -348,7 +348,7 @@
                                     For VFS libraries the plugin also disables Jellyfin realtime monitoring, LUFS scans, chapter-image extraction, trickplay extraction, and media-folder derived-data writes; if that policy cannot be applied, reconciliation fails closed. Embedded cover-art extraction for tracks is also disabled for VFS libraries, because Jellyfin reads the entire audio file to extract it; folder art such as cover.jpg is still used.
                                 </p>
                                 <p>
-                                    A Jellyfin catalog refresh is an explicit namespace-discovery action. The mount bounds each probe to a few MB per track (about 2.5 MB/track measured; a 4,500-track library transferred roughly 10 GB over about 90 minutes) and the library is usable while the scan runs. The scan cannot be paused or resumed. Jellyfin may probe uncached remote media while identifying items, because Jellyfin 12.1 does not expose a supported cache-residency filter for filesystem libraries. Use explicit refresh after initial setup, migration cutover, or when you need new remote objects added to the Jellyfin catalog; routine Audio Gateway reconciliation will not trigger it in the background.
+                                    A Jellyfin catalog refresh is an explicit namespace-discovery action. The mount bounds each probe to a few MB per track (about 2.5 MB/track measured; a 4,500-track library transferred roughly 10 GB over about 90 minutes) and the library is usable while the scan runs. The scan cannot be paused or resumed. Jellyfin may probe uncached remote media while identifying items, and this adapter does not filter those probes by VFS cache residency. Use explicit refresh after initial setup, migration cutover, or when you need new remote objects added to the Jellyfin catalog; routine Audio Gateway reconciliation will not trigger it in the background.
                                 </p>
                                 <p>
                                     To migrate a conventional local Jellyfin library to VFS, copy it to an empty cloud destination, verify source versus remote, cut the same library over to its VFS profile, keep the local source as rollback, and only then explicitly finalize local cleanup.
@@ -1954,7 +1954,10 @@
                 button.setAttribute('is', 'emby-button');
                 button.className = 'raised emby-button';
                 button.textContent = label;
-                button.addEventListener('click', action);
+                button.addEventListener('click', async function() {
+                    button.disabled = true;
+                    try { await action(); } finally { button.disabled = false; }
+                });
                 return button;
             }
 
@@ -1985,6 +1988,27 @@
                     status.textContent = job.phase + ' · ' + job.code +
                         ' · ' + job.remoteName + ':' + (job.remotePath || '/');
                     row.appendChild(status);
+
+                    const observation = document.createElement('div');
+                    observation.className = 'fieldDescription';
+                    observation.textContent = 'Phase updated: ' + job.updatedAt +
+                        (Number.isInteger(job.lastExitCode) ? ' · rclone exit ' + job.lastExitCode : '');
+                    row.appendChild(observation);
+                    if (job.progress) {
+                        const progress = document.createElement('div');
+                        progress.className = 'fieldDescription';
+                        progress.textContent = 'This attempt: ' + formatCloudSize(job.progress.bytes) +
+                            ' transferred · ' + job.progress.transfers + ' files · ' +
+                            job.progress.checks + ' checks · ' + job.progress.errors +
+                            ' errors · observed ' + job.progress.observedAt +
+                            '. Counters reset for each command; they are not whole-library verification.';
+                        row.appendChild(progress);
+                    } else {
+                        const unavailable = document.createElement('div');
+                        unavailable.className = 'fieldDescription';
+                        unavailable.textContent = 'No live transfer sample available. Phase alone does not prove ongoing progress.';
+                        row.appendChild(unavailable);
+                    }
 
                     if (job.verification) {
                         const verification = document.createElement('div');
@@ -2021,15 +2045,27 @@
                     const actions = document.createElement('div');
                     actions.className = 'ag-actions ag-actions--compact';
 
+                    if (job.phase === 'failed' && job.direction === 'local-to-vfs' &&
+                        !job.backupPath && job.manifestDigestSha256) {
+                        actions.appendChild(migrationActionButton('Resume verified source', function() {
+                            return transitionMigration(job.id, 'resume');
+                        }));
+                        const recovery = document.createElement('div');
+                        recovery.className = 'fieldDescription';
+                        recovery.textContent = 'Resume reuses this job and partial destination after source/profile checks. ' +
+                            'Existing remote objects remain immutable. Changed source or target requires operator recovery.';
+                        actions.appendChild(recovery);
+                    }
+
                     if (job.phase === 'ready-for-cutover') {
                         actions.appendChild(migrationActionButton('Cut over', function() {
-                            transitionMigration(job.id, 'cutover');
+                            return transitionMigration(job.id, 'cutover');
                         }));
                     }
 
                     if (job.phase === 'ready-to-finalize') {
                         actions.appendChild(migrationActionButton('Rollback to local', function() {
-                            transitionMigration(job.id, 'rollback');
+                            return transitionMigration(job.id, 'rollback');
                         }));
 
                         if (job.backupPath) {
@@ -2073,15 +2109,18 @@
                     renderMigrationJobs(response);
                     return response;
                 } catch {
-                    renderMigrationJobs({ jobs: [] });
-                    return null;
+                    return null; // Keep the last-known jobs visible during transport failures.
                 }
             }
 
             async function refreshMigrations() {
                 const status = document.querySelector('#CloudMigrationStatus');
                 status.textContent = 'Reading migration state…';
-                await Promise.all([loadMigrationCandidates(), loadMigrationJobs()]);
+                const results = await Promise.all([loadMigrationCandidates(), loadMigrationJobs()]);
+                if (results[1] === null) {
+                    status.textContent = 'Unable to refresh migration state. Displayed jobs may be stale.';
+                    return;
+                }
                 status.textContent =
                     'Migration state refreshed. Transfers may continue in the background; refresh to see current phase.';
             }
@@ -2176,7 +2215,9 @@
 
             async function transitionMigration(jobId, action) {
                 const status = document.querySelector('#CloudMigrationStatus');
-                status.textContent = action === 'cutover'
+                status.textContent = action === 'resume'
+                    ? 'Checking original source and queuing immutable resume…'
+                    : action === 'cutover'
                     ? 'Queuing final copy/check and cutover…'
                     : 'Queuing rollback to retained local media…';
                 try {
@@ -2187,8 +2228,10 @@
                             'Plugins/AudioGateway/cloud/migrations/' + encodeURIComponent(jobId) + '/' + action)
                     });
                     await refreshMigrations();
-                } catch {
-                    status.textContent = 'Migration ' + action + ' was not accepted in the current phase.';
+                } catch (error) {
+                    const code = error && error.responseJSON && error.responseJSON.code;
+                    status.textContent = 'Migration ' + action + ' was not accepted: ' +
+                        (code || 'inspect current phase and connection') + '. Source and partial cloud copy are retained.';
                 }
             }
 

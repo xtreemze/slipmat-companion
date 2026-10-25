@@ -54,14 +54,31 @@ public interface IRcloneProcessRunner
         CancellationToken cancellationToken);
 }
 
-public sealed class RcloneProcessRunner : IRcloneProcessRunner
+public interface IRcloneProgressRunner : IRcloneProcessRunner
+{
+    Task<RcloneCommandResult> RunWithProgressAsync(string executable,
+        IReadOnlyList<string> arguments, TimeSpan timeout,
+        Func<CloudMigrationProgress, Task> progress, CancellationToken cancellationToken);
+}
+
+public sealed class RcloneProcessRunner : IRcloneProgressRunner
 {
     internal const int MaxCapturedCharacters = 2 * 1024 * 1024;
 
-    public async Task<RcloneCommandResult> RunAsync(
+    public Task<RcloneCommandResult> RunAsync(string executable,
+        IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
+        => RunCoreAsync(executable, arguments, timeout, null, cancellationToken);
+
+    public Task<RcloneCommandResult> RunWithProgressAsync(string executable,
+        IReadOnlyList<string> arguments, TimeSpan timeout,
+        Func<CloudMigrationProgress, Task> progress, CancellationToken cancellationToken)
+        => RunCoreAsync(executable, arguments, timeout, progress, cancellationToken);
+
+    private async Task<RcloneCommandResult> RunCoreAsync(
         string executable,
         IReadOnlyList<string> arguments,
         TimeSpan timeout,
+        Func<CloudMigrationProgress, Task>? progress,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executable);
@@ -101,7 +118,7 @@ public sealed class RcloneProcessRunner : IRcloneProcessRunner
         var stderrTask = ReadBoundedAsync(
             process.StandardError,
             MaxCapturedCharacters,
-            timeoutCts.Token);
+            timeoutCts.Token, progress);
 
         try
         {
@@ -144,8 +161,11 @@ public sealed class RcloneProcessRunner : IRcloneProcessRunner
     private static async Task<BoundedText> ReadBoundedAsync(
         StreamReader reader,
         int maxCharacters,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CloudMigrationProgress, Task>? progress = null)
     {
+        var line = new StringBuilder();
+        var oversizedLine = false;
         var buffer = new char[4096];
         var text = new StringBuilder(Math.Min(maxCharacters, 4096));
         var truncated = false;
@@ -160,6 +180,25 @@ public sealed class RcloneProcessRunner : IRcloneProcessRunner
                 break;
             }
 
+            if (progress is not null)
+            {
+                for (var i = 0; i < count; i++)
+                {
+                    if (buffer[i] == '\n')
+                    {
+                        if (!oversizedLine && RcloneMigrationProgress.TryParse(line.ToString(), out var sample))
+                        {
+                            try { await progress(sample!).ConfigureAwait(false); }
+                            catch (Exception) when (!cancellationToken.IsCancellationRequested)
+                            { /* Diagnostic persistence cannot become transfer authority. */ }
+                        }
+                        line.Clear();
+                        oversizedLine = false;
+                    }
+                    else if (line.Length < 65536 && !oversizedLine) line.Append(buffer[i]);
+                    else { oversizedLine = true; line.Clear(); }
+                }
+            }
             var remaining = maxCharacters - text.Length;
             if (remaining > 0)
             {
@@ -224,11 +263,13 @@ public sealed partial class RcloneCliHost
     private readonly string _executable;
     private readonly IRcloneProcessRunner _runner;
     private readonly TimeSpan _timeout;
+    private readonly Func<CloudMigrationProgress, Task>? _progress;
 
     public RcloneCliHost(
         string? executable = null,
         IRcloneProcessRunner? runner = null,
-        TimeSpan? timeout = null)
+        TimeSpan? timeout = null,
+        Func<CloudMigrationProgress, Task>? progress = null)
     {
         var configuredExecutable = executable;
         if (string.IsNullOrWhiteSpace(configuredExecutable))
@@ -242,6 +283,7 @@ public sealed partial class RcloneCliHost
             : configuredExecutable.Trim();
         _runner = runner ?? new RcloneProcessRunner();
         _timeout = timeout ?? DefaultCommandTimeout;
+        _progress = progress;
 
         if (_timeout <= TimeSpan.Zero)
         {
@@ -433,7 +475,9 @@ public sealed partial class RcloneCliHost
                     BuildRemoteSpec(remoteName, remotePath),
                     "--create-empty-src-dirs",
                     "--immutable",
-                    "--stats=0",
+                    "--stats=30s",
+                    "--stats-log-level=ERROR",
+                    "--use-json-log",
                     "--log-level=ERROR",
                 ],
                 MigrationCommandTimeout,
@@ -460,7 +504,9 @@ public sealed partial class RcloneCliHost
                     BuildRemoteSpec(remoteName, remotePath),
                     Path.GetFullPath(localPath),
                     "--create-empty-src-dirs",
-                    "--stats=0",
+                    "--stats=30s",
+                    "--stats-log-level=ERROR",
+                    "--use-json-log",
                     "--log-level=ERROR",
                 ],
                 MigrationCommandTimeout,
@@ -485,7 +531,9 @@ public sealed partial class RcloneCliHost
                     "check",
                     Path.GetFullPath(localPath),
                     BuildRemoteSpec(remoteName, remotePath),
-                    "--stats=0",
+                    "--stats=30s",
+                    "--stats-log-level=ERROR",
+                    "--use-json-log",
                     "--log-level=ERROR",
                 ],
                 MigrationCommandTimeout,
@@ -511,7 +559,9 @@ public sealed partial class RcloneCliHost
                     Path.GetFullPath(localPath),
                     BuildRemoteSpec(remoteName, remotePath),
                     "--download",
-                    "--stats=0",
+                    "--stats=30s",
+                    "--stats-log-level=ERROR",
+                    "--use-json-log",
                     "--log-level=ERROR",
                 ],
                 MigrationCommandTimeout,
@@ -838,7 +888,9 @@ public sealed partial class RcloneCliHost
         IReadOnlyList<string> arguments,
         TimeSpan timeout,
         CancellationToken cancellationToken)
-        => _runner.RunAsync(_executable, arguments, timeout, cancellationToken);
+        => _progress is not null && _runner is IRcloneProgressRunner streaming
+            ? streaming.RunWithProgressAsync(_executable, arguments, timeout, _progress, cancellationToken)
+            : _runner.RunAsync(_executable, arguments, timeout, cancellationToken);
 
     private static RcloneCliStatus Status(
         RcloneCliHealth health,

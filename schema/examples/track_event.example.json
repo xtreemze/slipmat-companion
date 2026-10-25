@@ -54,7 +54,7 @@
         5256
       ],
       "beatGrid": {
-        "startOffsetMs": 0,
+        "startOffsetMs": 0.0,
         "intervalMs": 438.9
       }
     },

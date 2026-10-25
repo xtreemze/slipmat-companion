@@ -102,7 +102,7 @@ public sealed class CloudMigrationCoordinator
             CloudLibraryScanPolicy? previousScanPolicy = null;
             if (currentJobs.Any(job =>
                     string.Equals(job.ProfileId, profile.Id, StringComparison.OrdinalIgnoreCase)
-                    && !IsTerminal(job.Phase)))
+                    && (!IsTerminal(job.Phase) || _queue.IsPending(job.Id))))
             {
                 throw new InvalidOperationException("migration-already-active");
             }
@@ -271,6 +271,60 @@ public sealed class CloudMigrationCoordinator
         }
 
         return new CloudMigrationBulkStartResponse(started, skipped);
+    }
+
+    public async Task<CloudMigrationJob> RequestResumeAsync(
+        string jobId,
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var job = await _store.GetAsync(jobId, cancellationToken).ConfigureAwait(false)
+                ?? throw new InvalidOperationException("migration-not-found");
+            if (!CloudMigrationRecovery.CanResume(job))
+                throw new InvalidOperationException("migration-not-resumable");
+            var jobs = await _store.LoadAllAsync(cancellationToken).ConfigureAwait(false);
+            if (_queue.IsPending(job.Id) || jobs.Any(other => other.Id != job.Id &&
+                (string.Equals(other.ProfileId, job.ProfileId, StringComparison.OrdinalIgnoreCase)
+                    || (other.RemoteName == job.RemoteName && other.RemotePath == job.RemotePath))))
+                throw new InvalidOperationException("migration-recovery-conflict");
+            var profile = FindProfile(_configurationSource.GetCurrent(), job.ProfileId);
+            if (profile.Enabled || profile.LibraryName != job.LibraryName
+                || profile.RemoteName != job.RemoteName || profile.RemotePath != job.RemotePath
+                || profile.ProjectionPath != job.PreviousProjectionPath)
+                throw new InvalidOperationException("migration-profile-changed");
+            var folder = _library.GetVirtualFolders(includeRefreshState: true)
+                .SingleOrDefault(folder => folder.Name == job.LibraryName);
+            if (folder is null || folder.Locations.Length != 1
+                || !PathsEqual(folder.Locations[0], job.LocalPath))
+                throw new InvalidOperationException("migration-library-changed");
+            if (!Directory.Exists(job.LocalPath))
+                throw new InvalidOperationException("local-source-missing");
+            if (ContainsReparsePoint(job.LocalPath))
+                throw new InvalidOperationException("source-reparse-point-unsupported");
+            var manifest = await CloudMigrationManifestBuilder.CaptureAsync(job.LocalPath, cancellationToken)
+                .ConfigureAwait(false);
+            if (!CloudMigrationRecovery.ManifestMatches(job, manifest))
+                throw new InvalidOperationException("migration-source-changed");
+            var queued = job with
+            {
+                Phase = CloudMigrationPhases.QueuedCopy,
+                Code = "resume-queued",
+                Verification = null,
+                Progress = null,
+                LastExitCode = null,
+                UpdatedAt = DateTimeOffset.UtcNow,
+            };
+            await _store.SaveAsync(queued, cancellationToken).ConfigureAwait(false);
+            if (!_queue.TryEnqueue(job.Id))
+            {
+                await _store.SaveAsync(job, cancellationToken).ConfigureAwait(false);
+                throw new InvalidOperationException("migration-queue-full");
+            }
+            return queued;
+        }
+        finally { _gate.Release(); }
     }
 
     public Task<CloudMigrationJob> RequestCutoverAsync(

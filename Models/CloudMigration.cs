@@ -73,7 +73,17 @@ public sealed record CloudMigrationJob(
     [property: JsonPropertyName("manifestCapturedAt")] DateTimeOffset? ManifestCapturedAt = null,
     [property: JsonPropertyName("vfsCertificationState")] string VfsCertificationState = "uncertified",
     [property: JsonPropertyName("vfsCertificationCode")] string? VfsCertificationCode = null,
-    [property: JsonPropertyName("vfsCertifiedAt")] DateTimeOffset? VfsCertifiedAt = null);
+    [property: JsonPropertyName("vfsCertifiedAt")] DateTimeOffset? VfsCertifiedAt = null,
+    [property: JsonPropertyName("lastExitCode")] int? LastExitCode = null,
+    [property: JsonPropertyName("progress")] CloudMigrationProgress? Progress = null);
+
+public sealed record CloudMigrationProgress(
+    [property: JsonPropertyName("bytes")] long Bytes,
+    [property: JsonPropertyName("totalBytes")] long TotalBytes,
+    [property: JsonPropertyName("checks")] long Checks,
+    [property: JsonPropertyName("transfers")] long Transfers,
+    [property: JsonPropertyName("errors")] long Errors,
+    [property: JsonPropertyName("observedAt")] DateTimeOffset ObservedAt);
 
 public sealed record CloudMigrationListResponse(
     [property: JsonPropertyName("jobs")] IReadOnlyList<CloudMigrationJob> Jobs);

@@ -26,7 +26,7 @@ The plugin dashboard can optionally limit the reproducible analysis sidecar and 
 
 This repository carries no legacy plugin/API compatibility surface.
 
-- Supported Jellyfin server: **12.1.0**, the current Jellyfin 12 release targeted by this plugin contract.
+- Supported Jellyfin server: **12.3.0**, the current Jellyfin 12 release targeted by this plugin contract.
 - Plugin package references must match that server release exactly.
 - `/Plugins/AudioGateway/v1` is removed; there is no v1 compatibility shim.
 - When Jellyfin support moves to a new certified release, update and certify the plugin rather than accumulating old-server compatibility code.
@@ -142,7 +142,7 @@ Jellyfin catalog metadata remains in Jellyfin's own data/database storage. Slipm
 
 The six-hour reconciliation task independently verifies/prepares every enabled VFS profile without queuing a Jellyfin namespace/catalog scan. It does not copy remote libraries and does not run Companion analysis backfill. Scheduled waveform/peak/spectral/loudness/rhythm analysis skips every VFS mount; cloud analysis remains explicit/request-driven. This makes Companion-owned automatic tasks payload-safe for VFS media.
 
-Jellyfin catalog refresh remains an explicit namespace-discovery action used for initial setup, migration cutover, or intentional catalog refresh. Jellyfin 12.1 may probe uncached filesystem media while identifying catalog items and does not expose a supported VFS-cache-residency filter, so the plugin does not claim that an explicit Jellyfin catalog scan is payload-free. rclone's directory cache/polling can make namespace changes visible at the mounted filesystem layer between explicit catalog refreshes.
+Jellyfin catalog refresh remains an explicit namespace-discovery action used for initial setup, migration cutover, or intentional catalog refresh. Jellyfin may probe uncached filesystem media while identifying catalog items and this adapter does not filter probes by VFS cache residency, so the plugin does not claim that an explicit Jellyfin catalog scan is payload-free. rclone's directory cache/polling can make namespace changes visible at the mounted filesystem layer between explicit catalog refreshes.
 
 ### VFS library migration lifecycle
 
@@ -385,7 +385,7 @@ This standalone companion repository is licensed under GNU GPL v3. Public plugin
 
 ```text
 ./
-  Jellyfin.Plugin.AudioGateway.csproj   — shipping Jellyfin 12.1.0 / net10.0 plugin boundary
+  Jellyfin.Plugin.AudioGateway.csproj   — shipping Jellyfin 12.3.0 / net10.0 plugin boundary
   Plugin.cs                              — BasePlugin<PluginConfiguration> entry point
   Configuration/                        — optional analyzer/store configuration
   Models/                               — serialized optional-extension contracts

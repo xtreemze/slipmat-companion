@@ -2,7 +2,7 @@
   "protocolVersion": "1.0.0",
   "mode": "optional-acceleration",
   "authoritative": false,
-  "supportedJellyfinVersion": "12.1.0",
+  "supportedJellyfinVersion": "12.3.0",
   "modules": {
     "analysisArtifacts": true,
     "trackMetadataBatching": true,

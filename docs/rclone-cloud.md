@@ -24,7 +24,7 @@ These values are configurable in the Jellyfin plugin page. The cache is disposab
 
 ## Docker recipe
 
-`docs/docker/` holds a verified `Dockerfile` and `docker-compose.yml`: Jellyfin 12.1 plus rclone 1.75.2 and FUSE, run with `SYS_ADMIN`, `/dev/fuse` and an unconfined AppArmor profile. This is the supported route on macOS (Homebrew rclone refuses `rclone mount`, and there is no native Jellyfin server). Notes learned in the macOS PoC (#82):
+`docs/docker/` holds a verified `Dockerfile` and `docker-compose.yml`: Jellyfin 12.1 plus rclone 1.75.2 and FUSE, run with `SYS_ADMIN`, `/dev/fuse` and an unconfined AppArmor profile. This records the historical 12.1 macOS PoC route (Homebrew rclone refuses `rclone mount`, and there is no native Jellyfin server). The current companion target is 12.3.0; that historical recipe is not certification or an installation target for the recovery candidate. Use a matching 12.3 host and validate its FUSE runtime separately. Notes learned in the macOS PoC (#82):
 
 - Mount the rclone config **directory**, not a copy, so one token state exists.
 - On Docker Desktop only paths under `$HOME` are shared, and bind mounts are sshfs-backed (slow cache reads, misreported free space); keep the VFS cache on a named volume.
@@ -192,3 +192,13 @@ For a full local-to-cloud conversion:
 5. explicitly finalize each verified job to delete only that retained local rollback backup and reclaim disk space.
 
 Local cleanup is intentionally not a bulk background action. Destructive reclamation remains separately confirmed per verified library so one bad mapping cannot erase several rollback sources at once. VFS-to-local bulk preparation follows the same independent-job rule and never deletes the cloud source.
+
+## Resume a failed local-to-VFS preparation
+
+A new migration still requires an empty remote destination. A partial destination from an existing failed job is different: use **Resume verified source** on that original job rather than preparing a new one. The elevated `POST /cloud/migrations/{jobId}/resume` operation retains its ID, original inventory, source path and remote identity. It rejects changed source/profile/library bindings, competing journals or queued work, and any job beyond initial copy/verification. Only initial local-to-VFS transfer failures with a current manifest are resumable; reverse migration and interrupted cutover need their existing recovery paths.
+
+Resume performs additive `copy --immutable` and a fresh content-download verification. Matching remote objects can be reused; differing objects are conflicts, never overwritten or removed. Source inventory is revalidated before transfer and after verification. This inventory binds paths, lengths and modification times; it is not a per-file content hash and cannot detect replacements preserving those attributes. The separate downloaded-content check remains required. A changed source requires an explicit custody/rebaseline decision, not silently accepting a new manifest. Keep the profile disabled and the local library active until verified cutover. Never clear the destination or edit a journal to make a job runnable.
+
+The dashboard shows source totals, per-command numeric bytes/checks/transfers/errors, observation time and sanitized failure class/exit code. Samples arrive every 30 seconds when rclone emits JSON statistics. Each command/retry resets counters; they are not a whole-library completion or verification percentage. A stale/missing observation or a phase timestamp alone does not prove a running transfer. Raw rclone messages, filenames, URLs and credentials are not exposed through these diagnostic fields. Older failed jobs retain an unknown exit code until a new command runs.
+
+Before retrying on a real host, install the reviewed recovery build, verify the installed version and Resume action, preserve the journal and both copies, and use the original job. Confirm progress observations update, then wait for `ready-for-cutover`. Cutover and source cleanup remain separate; this recovery does not authorize cleanup. See [the migration recovery retrospective](retrospectives/2026-10-26-migration-recovery.md) for the incident and deployment checklist.
