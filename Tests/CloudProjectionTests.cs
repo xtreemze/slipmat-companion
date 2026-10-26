@@ -141,6 +141,7 @@ public class CloudProjectionTests
         Assert.Equal(Path.GetFullPath(localPath), runner.Invocations[0].Arguments[1]);
         Assert.Equal("tele2:Media/Music", runner.Invocations[0].Arguments[2]);
         Assert.Contains("--immutable", runner.Invocations[0].Arguments);
+        Assert.Contains("--checksum", runner.Invocations[0].Arguments);
 
         Assert.Equal("check", runner.Invocations[1].Arguments[0]);
         Assert.Contains("--download", runner.Invocations[1].Arguments);

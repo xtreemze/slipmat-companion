@@ -284,23 +284,7 @@ public sealed class CloudMigrationCoordinator
                 ?? throw new InvalidOperationException("migration-not-found");
             if (!CloudMigrationRecovery.CanResume(job))
                 throw new InvalidOperationException("migration-not-resumable");
-            var jobs = await _store.LoadAllAsync(cancellationToken).ConfigureAwait(false);
-            if (_queue.IsPending(job.Id) || jobs.Any(other => other.Id != job.Id &&
-                (string.Equals(other.ProfileId, job.ProfileId, StringComparison.OrdinalIgnoreCase)
-                    || (other.RemoteName == job.RemoteName && other.RemotePath == job.RemotePath))))
-                throw new InvalidOperationException("migration-recovery-conflict");
-            var profile = FindProfile(_configurationSource.GetCurrent(), job.ProfileId);
-            if (profile.Enabled || profile.LibraryName != job.LibraryName
-                || profile.RemoteName != job.RemoteName || profile.RemotePath != job.RemotePath
-                || profile.ProjectionPath != job.PreviousProjectionPath)
-                throw new InvalidOperationException("migration-profile-changed");
-            var folder = _library.GetVirtualFolders(includeRefreshState: true)
-                .SingleOrDefault(folder => folder.Name == job.LibraryName);
-            if (folder is null || folder.Locations.Length != 1
-                || !PathsEqual(folder.Locations[0], job.LocalPath))
-                throw new InvalidOperationException("migration-library-changed");
-            if (!Directory.Exists(job.LocalPath))
-                throw new InvalidOperationException("local-source-missing");
+            await ValidateRecoveryBindingsAsync(job, cancellationToken).ConfigureAwait(false);
             if (ContainsReparsePoint(job.LocalPath))
                 throw new InvalidOperationException("source-reparse-point-unsupported");
             var manifest = await CloudMigrationManifestBuilder.CaptureAsync(job.LocalPath, cancellationToken)
@@ -325,6 +309,66 @@ public sealed class CloudMigrationCoordinator
             return queued;
         }
         finally { _gate.Release(); }
+    }
+
+    public async Task<CloudMigrationJob> RequestRebaselineAsync(
+        string jobId, CloudMigrationRebaselineRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var job = await _store.GetAsync(jobId, cancellationToken).ConfigureAwait(false)
+                ?? throw new InvalidOperationException("migration-not-found");
+            if (!CloudMigrationRecovery.CanRebaseline(job))
+                throw new InvalidOperationException("migration-not-rebaselineable");
+            if (!string.Equals(request.ExpectedManifestDigestSha256, job.ManifestDigestSha256,
+                StringComparison.Ordinal))
+                throw new InvalidOperationException("migration-baseline-confirmation-stale");
+            if ((job.BaselineHistory?.Count ?? 0) >= CloudMigrationRecovery.MaxBaselineRevisions)
+                throw new InvalidOperationException("migration-baseline-history-limit");
+            await ValidateRecoveryBindingsAsync(job, cancellationToken).ConfigureAwait(false);
+            // All large inventories and content reads stay in the serialized worker.
+            var queued = job with
+            {
+                Phase = CloudMigrationPhases.QueuedRebaseline,
+                Code = "baseline-review-queued",
+                Progress = null,
+                LastExitCode = null,
+                Verification = null,
+                UpdatedAt = DateTimeOffset.UtcNow,
+            };
+            await _store.SaveAsync(queued, cancellationToken).ConfigureAwait(false);
+            if (!_queue.TryEnqueue(job.Id))
+            {
+                await _store.SaveAsync(job, cancellationToken).ConfigureAwait(false);
+                throw new InvalidOperationException("migration-queue-full");
+            }
+            return queued;
+        }
+        finally { _gate.Release(); }
+    }
+
+    private async Task ValidateRecoveryBindingsAsync(CloudMigrationJob job, CancellationToken cancellationToken)
+    {
+        var jobs = await _store.LoadAllAsync(cancellationToken).ConfigureAwait(false);
+        if (_queue.IsPending(job.Id) || jobs.Any(other => other.Id != job.Id &&
+            (string.Equals(other.ProfileId, job.ProfileId, StringComparison.OrdinalIgnoreCase)
+                || (other.RemoteName == job.RemoteName && other.RemotePath == job.RemotePath))))
+            throw new InvalidOperationException("migration-recovery-conflict");
+        var profile = FindProfile(_configurationSource.GetCurrent(), job.ProfileId);
+        if (profile.Enabled || profile.LibraryName != job.LibraryName
+            || profile.RemoteName != job.RemoteName || profile.RemotePath != job.RemotePath
+            || profile.ProjectionPath != job.PreviousProjectionPath)
+            throw new InvalidOperationException("migration-profile-changed");
+        var folder = _library.GetVirtualFolders(includeRefreshState: true)
+            .SingleOrDefault(folder => folder.Name == job.LibraryName);
+        if (folder is null || folder.Locations.Length != 1
+            || !PathsEqual(folder.Locations[0], job.LocalPath))
+            throw new InvalidOperationException("migration-library-changed");
+        if (!Directory.Exists(job.LocalPath))
+            throw new InvalidOperationException("local-source-missing");
     }
 
     public Task<CloudMigrationJob> RequestCutoverAsync(

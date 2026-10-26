@@ -88,6 +88,7 @@ Presence of experimental source code does not grant product authority. The capab
 | GET | `/Plugins/AudioGateway/cloud/migrations` | Elevated durable migration job status |
 | POST | `/Plugins/AudioGateway/cloud/migrations` | Elevated start of one additive copy + exact verification job |
 | POST | `/Plugins/AudioGateway/cloud/migrations/bulk` | Elevated preparation of all eligible mapped libraries; no automatic cutover or cleanup |
+| POST | `/Plugins/AudioGateway/cloud/migrations/{jobId}/rebaseline` | Elevated explicit current-source recovery: read-only cloud subset check before adopting a new baseline and resuming the same job |
 | POST | `/Plugins/AudioGateway/cloud/migrations/{jobId}/cutover` | Elevated final copy/check and explicit storage-authority cutover |
 | POST | `/Plugins/AudioGateway/cloud/migrations/{jobId}/rollback` | Elevated rollback from VFS to the retained local source |
 | POST | `/Plugins/AudioGateway/cloud/migrations/{jobId}/finalize` | Elevated explicit deletion of the retained local rollback backup after exact-path confirmation |

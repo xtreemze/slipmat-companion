@@ -12,6 +12,8 @@ public static class CloudMigrationDirections
 
 public static class CloudMigrationPhases
 {
+    public const string QueuedRebaseline = "queued-rebaseline";
+    public const string CheckingBaseline = "checking-baseline";
     public const string QueuedCopy = "queued-copy";
     public const string Copying = "copying";
     public const string Verifying = "verifying";
@@ -45,6 +47,19 @@ public sealed record CloudMigrationStartRequest(
 public sealed record CloudMigrationBulkStartRequest(
     [property: JsonPropertyName("direction")] string Direction);
 
+public sealed record CloudMigrationRebaselineRequest(
+    [property: JsonPropertyName("expectedManifestDigestSha256")] string ExpectedManifestDigestSha256);
+
+public sealed record CloudMigrationBaselineRevision(
+    [property: JsonPropertyName("version")] int Version,
+    [property: JsonPropertyName("digestSha256")] string DigestSha256,
+    [property: JsonPropertyName("fileCount")] long FileCount,
+    [property: JsonPropertyName("totalBytes")] long TotalBytes,
+    [property: JsonPropertyName("capturedAt")] DateTimeOffset? CapturedAt,
+    [property: JsonPropertyName("replacedAt")] DateTimeOffset ReplacedAt,
+    [property: JsonPropertyName("replacementDigestSha256")] string ReplacementDigestSha256,
+    [property: JsonPropertyName("evidence")] string Evidence);
+
 public sealed record CloudMigrationFinalizeRequest(
     [property: JsonPropertyName("confirmationPath")] string ConfirmationPath);
 
@@ -75,7 +90,8 @@ public sealed record CloudMigrationJob(
     [property: JsonPropertyName("vfsCertificationCode")] string? VfsCertificationCode = null,
     [property: JsonPropertyName("vfsCertifiedAt")] DateTimeOffset? VfsCertifiedAt = null,
     [property: JsonPropertyName("lastExitCode")] int? LastExitCode = null,
-    [property: JsonPropertyName("progress")] CloudMigrationProgress? Progress = null);
+    [property: JsonPropertyName("progress")] CloudMigrationProgress? Progress = null,
+    [property: JsonPropertyName("baselineHistory")] IReadOnlyList<CloudMigrationBaselineRevision>? BaselineHistory = null);
 
 public sealed record CloudMigrationProgress(
     [property: JsonPropertyName("bytes")] long Bytes,

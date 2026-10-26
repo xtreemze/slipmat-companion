@@ -33,3 +33,11 @@ Preparation verified Audio Gateway 0.5.2.8 installed and the server dashboard re
 ## Open evidence
 
 The old command's exit code/provider error was not retained. Full upload/check, production installation, real mount/readback, cutover and rollback remain unverified for this candidate. The separate journaled unmount/handoff issue in #50/#139 is unchanged by this preparation-resume fix.
+
+## Changed-source follow-through
+
+After installation and restart, 0.5.2.9 was active and a cache-bypassed workbench exposed Resume. The original job was rejected with `migration-source-changed`; no transfer began. The operator then explicitly chose the current Music tree as the intended baseline, preserving the old record and all media.
+
+This exposed the missing per-file v1 history and a separate metadata trap: actual rclone local tests show `copy --immutable` rejects timestamp drift even for identical content. The next candidate adds an explicit queued current-source recovery, downloaded-content verification of REMOTE as a subset of LOCAL, source/binding revalidation, and baseline revision history before normal copying. Forward copy keeps immutable protection and uses checksum comparison; matching-content timestamps stay untouched. Full two-way download verification is unchanged. Actual local rclone checks verified matching-content reuse and rejection/preservation of remote extras and content conflicts. This does not prove a production cloud transfer or establish the initiating old copy error.
+
+The long review uses the existing durable queue and worker rather than a request-thread scan or a manually edited journal. UI error parsing covers native Fetch Responses as well as legacy response shapes, and tests exercise these shipped functions. Release and installation are separate from candidate validation.
