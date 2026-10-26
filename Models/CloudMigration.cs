@@ -12,6 +12,8 @@ public static class CloudMigrationDirections
 
 public static class CloudMigrationPhases
 {
+    public const string QueuedDiagnostics = "queued-diagnostics";
+    public const string Diagnosing = "diagnosing";
     public const string QueuedRebaseline = "queued-rebaseline";
     public const string CheckingBaseline = "checking-baseline";
     public const string QueuedCopy = "queued-copy";
@@ -91,7 +93,8 @@ public sealed record CloudMigrationJob(
     [property: JsonPropertyName("vfsCertifiedAt")] DateTimeOffset? VfsCertifiedAt = null,
     [property: JsonPropertyName("lastExitCode")] int? LastExitCode = null,
     [property: JsonPropertyName("progress")] CloudMigrationProgress? Progress = null,
-    [property: JsonPropertyName("baselineHistory")] IReadOnlyList<CloudMigrationBaselineRevision>? BaselineHistory = null);
+    [property: JsonPropertyName("baselineHistory")] IReadOnlyList<CloudMigrationBaselineRevision>? BaselineHistory = null,
+    [property: JsonPropertyName("diagnostics")] CloudMigrationDiagnostics? Diagnostics = null);
 
 public sealed record CloudMigrationProgress(
     [property: JsonPropertyName("bytes")] long Bytes,
@@ -107,3 +110,16 @@ public sealed record CloudMigrationListResponse(
 public sealed record CloudMigrationBulkStartResponse(
     [property: JsonPropertyName("started")] IReadOnlyList<CloudMigrationJob> Started,
     [property: JsonPropertyName("skipped")] IReadOnlyList<CloudMigrationCandidate> Skipped);
+
+public sealed record CloudMigrationDiagnosticEntry(
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("path")] string Path);
+
+public sealed record CloudMigrationDiagnostics(
+    [property: JsonPropertyName("method")] string Method,
+    [property: JsonPropertyName("observedAt")] DateTimeOffset ObservedAt,
+    [property: JsonPropertyName("startSucceeded")] bool StartSucceeded,
+    [property: JsonPropertyName("exitCode")] int? ExitCode,
+    [property: JsonPropertyName("timedOut")] bool TimedOut,
+    [property: JsonPropertyName("truncated")] bool Truncated,
+    [property: JsonPropertyName("entries")] IReadOnlyList<CloudMigrationDiagnosticEntry> Entries);

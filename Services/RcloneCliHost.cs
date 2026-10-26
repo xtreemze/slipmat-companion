@@ -542,6 +542,21 @@ public sealed partial class RcloneCliHost
             .ConfigureAwait(false);
     }
 
+    /// <summary>Bounded hash-based report only; cannot authorize baseline adoption or cutover.</summary>
+    public Task<RcloneCommandResult> DiagnoseRemoteSubsetAsync(
+        string remoteName, string remotePath, string localPath,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(localPath);
+        if (!Path.IsPathFullyQualified(localPath))
+            throw new ArgumentException("Diagnostic path must be absolute.", nameof(localPath));
+        return RunAsync([
+            "check", BuildRemoteSpec(remoteName, remotePath), Path.GetFullPath(localPath),
+            "--one-way", "--combined", "-", "--max-duration=2m", "--cutoff-mode=HARD",
+            "--use-json-log", "--log-level=ERROR",
+        ], TimeSpan.FromMinutes(3), cancellationToken);
+    }
+
     /// <summary>Read-only preflight: every partial remote object must match the current local tree.</summary>
     public Task<RcloneCommandResult> CheckRemoteSubsetByDownloadAsync(
         string remoteName, string remotePath, string localPath,

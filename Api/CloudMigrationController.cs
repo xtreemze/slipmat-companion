@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Jellyfin.Plugin.AudioGateway.Api;
 
 [ApiController]
+[ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 [Route("Plugins/AudioGateway/cloud/migrations")]
 [Authorize(Policy = Policies.RequiresElevation)]
 public sealed class CloudMigrationController : ControllerBase
@@ -95,6 +96,14 @@ public sealed class CloudMigrationController : ControllerBase
     public async Task<ActionResult<CloudMigrationJob>> Resume(
         string jobId, CancellationToken cancellationToken)
         => await Transition(() => _coordinator.RequestResumeAsync(jobId, cancellationToken))
+            .ConfigureAwait(false);
+
+    [HttpPost("{jobId}/diagnose")]
+    [ProducesResponseType(typeof(CloudMigrationJob), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<CloudMigrationJob>> Diagnose(
+        string jobId, CancellationToken cancellationToken)
+        => await Transition(() => _coordinator.RequestDiagnosticsAsync(jobId, cancellationToken))
             .ConfigureAwait(false);
 
     [HttpPost("{jobId}/rebaseline")]

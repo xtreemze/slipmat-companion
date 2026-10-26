@@ -58,6 +58,13 @@ public sealed class CloudMigrationWorker : BackgroundService
             cancellationToken.ThrowIfCancellationRequested();
             switch (job.Phase)
             {
+                case CloudMigrationPhases.QueuedDiagnostics:
+                    _queue.TryEnqueue(job.Id);
+                    break;
+                case CloudMigrationPhases.Diagnosing:
+                    // Do not silently repeat potentially expensive diagnostics after restart.
+                    await SaveAsync(job with { Phase = CloudMigrationPhases.Failed }, cancellationToken).ConfigureAwait(false);
+                    break;
                 case CloudMigrationPhases.QueuedRebaseline:
                     _queue.TryEnqueue(job.Id);
                     break;
@@ -136,6 +143,9 @@ public sealed class CloudMigrationWorker : BackgroundService
 
                 switch (job.Phase)
                 {
+                    case CloudMigrationPhases.QueuedDiagnostics:
+                        await ExecuteDiagnosticsAsync(job, stoppingToken).ConfigureAwait(false);
+                        break;
                     case CloudMigrationPhases.QueuedRebaseline:
                         await ExecuteRebaselineAsync(job, stoppingToken).ConfigureAwait(false);
                         break;
@@ -177,6 +187,33 @@ public sealed class CloudMigrationWorker : BackgroundService
                 _queue.Complete(jobId);
             }
         }
+    }
+
+    private async Task ExecuteDiagnosticsAsync(CloudMigrationJob job, CancellationToken cancellationToken)
+    {
+        var observing = await SaveAsync(job with { Phase = CloudMigrationPhases.Diagnosing }, cancellationToken).ConfigureAwait(false);
+        var result = new RcloneCommandResult(false, null, "", "", false, false);
+        try
+        {
+            if (CloudMigrationRecovery.CanRebaseline(job with { Phase = CloudMigrationPhases.Failed })
+                && RebaselineBindingsMatch(job))
+            {
+                // Validate custody without adopting any inventory. Reject unsupported source entries.
+                await CloudMigrationManifestBuilder.CaptureAsync(job.LocalPath, cancellationToken).ConfigureAwait(false);
+                var cli = new RcloneCliHost(runner: _runner);
+                result = await cli.DiagnoseRemoteSubsetAsync(job.RemoteName, job.RemotePath, job.LocalPath, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            // Preserve the initiating failure; do not persist raw exception/provider text.
+        }
+        await SaveAsync(observing with
+        {
+            Phase = CloudMigrationPhases.Failed,
+            Diagnostics = CloudMigrationDiagnosticReport.Parse(result),
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task ExecuteRebaselineAsync(CloudMigrationJob job, CancellationToken cancellationToken)
