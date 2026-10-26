@@ -475,6 +475,7 @@ public sealed partial class RcloneCliHost
                     BuildRemoteSpec(remoteName, remotePath),
                     "--create-empty-src-dirs",
                     "--immutable",
+                    "--checksum",
                     "--stats=30s",
                     "--stats-log-level=ERROR",
                     "--use-json-log",
@@ -539,6 +540,21 @@ public sealed partial class RcloneCliHost
                 MigrationCommandTimeout,
                 cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>Read-only preflight: every partial remote object must match the current local tree.</summary>
+    public Task<RcloneCommandResult> CheckRemoteSubsetByDownloadAsync(
+        string remoteName, string remotePath, string localPath,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(localPath);
+        if (!Path.IsPathFullyQualified(localPath))
+            throw new ArgumentException("Verification path must be absolute.", nameof(localPath));
+        return RunAsync([
+            "check", BuildRemoteSpec(remoteName, remotePath), Path.GetFullPath(localPath),
+            "--one-way", "--download", "--stats=30s", "--stats-log-level=ERROR",
+            "--use-json-log", "--log-level=ERROR",
+        ], MigrationCommandTimeout, cancellationToken);
     }
 
     public async Task<RcloneCommandResult> CheckLocalAndRemoteByDownloadAsync(

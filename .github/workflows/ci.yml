@@ -60,6 +60,9 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Test migration error projection
+        run: node --test scripts/tests/migration_error_code.test.mjs
+
       - name: Build companion site
         run: |
           npm install --prefix site --no-audit --no-fund

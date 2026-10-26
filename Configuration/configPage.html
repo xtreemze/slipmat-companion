@@ -2010,6 +2010,23 @@
                         row.appendChild(unavailable);
                     }
 
+                    if (job.phase === 'queued-rebaseline' || job.phase === 'checking-baseline') {
+                        const review = document.createElement('div');
+                        review.className = 'fieldDescription';
+                        review.textContent = 'Checking existing cloud objects against the current local source. ' +
+                            'This is read-only and may download the partial cloud copy. ' +
+                            'The old baseline remains in force until the check succeeds; conflicts stop recovery.';
+                        row.appendChild(review);
+                    }
+                    if (Array.isArray(job.baselineHistory) && job.baselineHistory.length) {
+                        const history = document.createElement('div');
+                        history.className = 'fieldDescription';
+                        history.textContent = job.baselineHistory.length +
+                            ' previous source baseline(s) retained in this job. ' +
+                            'Final whole-library verification is still required.';
+                        row.appendChild(history);
+                    }
+
                     if (job.verification) {
                         const verification = document.createElement('div');
                         verification.className = 'fieldDescription';
@@ -2047,8 +2064,11 @@
 
                     if (job.phase === 'failed' && job.direction === 'local-to-vfs' &&
                         !job.backupPath && job.manifestDigestSha256) {
-                        actions.appendChild(migrationActionButton('Resume verified source', function() {
+                        actions.appendChild(migrationActionButton('Resume original baseline', function() {
                             return transitionMigration(job.id, 'resume');
+                        }));
+                        actions.appendChild(migrationActionButton('Use current source and resume', function() {
+                            return rebaselineMigration(job);
                         }));
                         const recovery = document.createElement('div');
                         recovery.className = 'fieldDescription';
@@ -2178,7 +2198,7 @@
                         'Migration preparation queued. No local media will be deleted during copy or verification.';
                     await refreshMigrations();
                 } catch (error) {
-                    const code = error && error.responseJSON && error.responseJSON.code;
+                    const code = await migrationErrorCode(error);
                     status.textContent = code
                         ? 'Migration not accepted: ' + code + '. Local and cloud media remain unchanged.'
                         : 'Unable to start migration; inspect eligibility, cloud permissions and destination state.';
@@ -2213,6 +2233,38 @@
                 }
             }
 
+            async function migrationErrorCode(error) {
+                let payload = error && (error.responseJSON || error.data);
+                const response = error && (typeof error.json === 'function' ? error : error.response);
+                if (!payload && response && typeof response.json === 'function') {
+                    try { payload = await response.json(); } catch { return null; }
+                }
+                if (!payload && response && response.data) payload = response.data;
+                const code = payload && payload.code;
+                return typeof code === 'string' && /^[a-z][a-z0-9-]{0,99}$/.test(code) ? code : null;
+            }
+
+            async function rebaselineMigration(job) {
+                if (!window.confirm('Use the current files at ' + job.localPath + ' as the new source? ' +
+                    'The original baseline and all local/cloud files are retained. Every existing cloud object ' +
+                    'must match the local source before the new baseline is adopted. Conflicts stop recovery.')) return;
+                const status = document.querySelector('#CloudMigrationStatus');
+                status.textContent = 'Queuing read-only cloud-content checks before adopting the current source…';
+                try {
+                    await ApiClient.ajax({
+                        type: 'POST', contentType: 'application/json', dataType: 'json',
+                        data: JSON.stringify({ expectedManifestDigestSha256: job.manifestDigestSha256 }),
+                        url: ApiClient.getUrl('Plugins/AudioGateway/cloud/migrations/' +
+                            encodeURIComponent(job.id) + '/rebaseline')
+                    });
+                    await refreshMigrations();
+                } catch (error) {
+                    const code = await migrationErrorCode(error);
+                    status.textContent = 'Current-source recovery was not accepted: ' +
+                        (code || 'inspect current phase and connection') + '. Both copies remain retained.';
+                }
+            }
+
             async function transitionMigration(jobId, action) {
                 const status = document.querySelector('#CloudMigrationStatus');
                 status.textContent = action === 'resume'
@@ -2229,7 +2281,7 @@
                     });
                     await refreshMigrations();
                 } catch (error) {
-                    const code = error && error.responseJSON && error.responseJSON.code;
+                    const code = await migrationErrorCode(error);
                     status.textContent = 'Migration ' + action + ' was not accepted: ' +
                         (code || 'inspect current phase and connection') + '. Source and partial cloud copy are retained.';
                 }

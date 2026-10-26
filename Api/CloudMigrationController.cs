@@ -97,6 +97,15 @@ public sealed class CloudMigrationController : ControllerBase
         => await Transition(() => _coordinator.RequestResumeAsync(jobId, cancellationToken))
             .ConfigureAwait(false);
 
+    [HttpPost("{jobId}/rebaseline")]
+    [ProducesResponseType(typeof(CloudMigrationJob), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<CloudMigrationJob>> Rebaseline(
+        string jobId, [FromBody] CloudMigrationRebaselineRequest request,
+        CancellationToken cancellationToken)
+        => await Transition(() => _coordinator.RequestRebaselineAsync(jobId, request, cancellationToken))
+            .ConfigureAwait(false);
+
     [HttpPost("{jobId}/cutover")]
     [ProducesResponseType(typeof(CloudMigrationJob), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

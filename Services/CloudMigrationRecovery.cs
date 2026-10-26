@@ -6,13 +6,23 @@ namespace Jellyfin.Plugin.AudioGateway.Services;
 /// <summary>Custody checks shared by explicit resume and the transfer worker.</summary>
 public static class CloudMigrationRecovery
 {
-    public static bool CanResume(CloudMigrationJob job)
+    public const int MaxBaselineRevisions = 32;
+
+    public static bool CanRebaseline(CloudMigrationJob job)
+        => CanResume(job) || (IsPrecutoverFailure(job)
+            && (job.Code == "migration-source-changed"
+                || job.Code.StartsWith("baseline-", StringComparison.Ordinal)));
+
+    private static bool IsPrecutoverFailure(CloudMigrationJob job)
         => job.Phase == CloudMigrationPhases.Failed
             && job.Direction == CloudMigrationDirections.LocalToVfs
             && job.BackupPath is null && job.StagingPath is null
             && job.ManifestVersion == CloudMigrationManifestBuilder.CurrentVersion
             && job.ManifestFileCount is >= 0 && job.ManifestTotalBytes is >= 0
-            && job.ManifestDigestSha256?.Length == 64
+            && job.ManifestDigestSha256?.Length == 64;
+
+    public static bool CanResume(CloudMigrationJob job)
+        => IsPrecutoverFailure(job)
             && job.Code is "copy-failed" or "copy-timeout" or "verification-failed"
                 or "verification-timeout" or "rclone-unavailable"
                 or "remote-authentication-required" or "remote-permission-denied"

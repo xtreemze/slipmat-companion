@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Threading;
@@ -212,6 +213,209 @@ public class CloudMigrationRecoveryTests
         Assert.Null(job.Verification);
     }
 
+    [Fact]
+    public async Task Rebaseline_QueuesPromptlyWithoutChangingTheOriginalInventory()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await File.AppendAllTextAsync(Path.Combine(fixture.Root, "track.flac"), "current");
+        var queued = await fixture.Coordinator.RequestRebaselineAsync(fixture.Job.Id,
+            new CloudMigrationRebaselineRequest(fixture.Job.ManifestDigestSha256!));
+        Assert.Equal(CloudMigrationPhases.QueuedRebaseline, queued.Phase);
+        Assert.Equal(fixture.Job.ManifestDigestSha256, queued.ManifestDigestSha256);
+        Assert.Empty(queued.BaselineHistory ?? []);
+        Assert.Equal(fixture.Job.Id, await fixture.Queue.Reader.ReadAsync());
+    }
+
+    [Fact]
+    public async Task Rebaseline_RejectsStaleOperatorConfirmation()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Coordinator.RequestRebaselineAsync(fixture.Job.Id,
+                new CloudMigrationRebaselineRequest(new string('0', 64))));
+        Assert.Equal("migration-baseline-confirmation-stale", error.Message);
+        Assert.False(fixture.Queue.Reader.TryRead(out _));
+    }
+
+    [Theory]
+    [InlineData("success")]
+    [InlineData("remote-conflict")]
+    [InlineData("source-drift")]
+    [InlineData("profile-drift")]
+    [InlineData("library-drift")]
+    [InlineData("enabled-drift")]
+    public async Task Rebaseline_ValidatesRemoteSubsetBeforeAdoptingSourceAndNeverWeakensFinalCheck(string mode)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await File.AppendAllTextAsync(Path.Combine(fixture.Root, "track.flac"), "current");
+        var current = await CloudMigrationManifestBuilder.CaptureAsync(fixture.Root);
+        var runner = new ProgressRunner
+        {
+            BeforeCommand = async args =>
+            {
+                if (args.Contains("--one-way"))
+                {
+                    var reviewing = await fixture.Store.GetAsync(fixture.Job.Id);
+                    Assert.Equal(fixture.Job.ManifestDigestSha256, reviewing!.ManifestDigestSha256);
+                    if (mode == "source-drift") await File.AppendAllTextAsync(Path.Combine(fixture.Root, "track.flac"), "late");
+                    if (mode == "profile-drift") fixture.Config.CloudLibraries[0].RemotePath = "another";
+                    if (mode == "library-drift") fixture.Library.Folder.Locations = [fixture.Root + "-another"];
+                    if (mode == "enabled-drift") fixture.Config.CloudLibraries[0].Enabled = true;
+                }
+            },
+            ExitFor = args => mode == "remote-conflict" && args.Contains("--one-way") ? 1 : 0,
+        };
+        await fixture.Coordinator.RequestRebaselineAsync(fixture.Job.Id,
+            new CloudMigrationRebaselineRequest(fixture.Job.ManifestDigestSha256!));
+        using var worker = new CloudMigrationWorker(fixture.Store, fixture.Queue, runner,
+            fixture.Source, null!, null!, fixture.LibraryManager, NullLogger<CloudMigrationWorker>.Instance);
+        await worker.StartAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        CloudMigrationJob? job;
+        do
+        {
+            await Task.Delay(10, timeout.Token);
+            job = await fixture.Store.GetAsync(fixture.Job.Id, timeout.Token);
+        } while (job!.Phase != CloudMigrationPhases.Failed && job.Phase != CloudMigrationPhases.ReadyForCutover);
+        await worker.StopAsync(CancellationToken.None);
+        Assert.Equal("check", runner.Commands[0][0]);
+        Assert.Equal("tele2:Slipmat", runner.Commands[0][1]);
+        Assert.Equal(fixture.Root, runner.Commands[0][2]);
+        Assert.Contains("--one-way", runner.Commands[0]);
+        Assert.Contains("--download", runner.Commands[0]);
+        if (mode == "success")
+        {
+            Assert.Equal(CloudMigrationPhases.ReadyForCutover, job.Phase);
+            Assert.Equal(current.DigestSha256, job.ManifestDigestSha256);
+            var old = Assert.Single(job.BaselineHistory!);
+            Assert.Equal(fixture.Job.ManifestDigestSha256, old.DigestSha256);
+            Assert.Equal(current.DigestSha256, old.ReplacementDigestSha256);
+            Assert.Equal(3, runner.Commands.Count);
+            Assert.Equal("copy", runner.Commands[1][0]);
+            Assert.Contains("--immutable", runner.Commands[1]);
+            Assert.Contains("--checksum", runner.Commands[1]);
+            Assert.Equal("check", runner.Commands[2][0]);
+            Assert.Contains("--download", runner.Commands[2]);
+            Assert.DoesNotContain("--one-way", runner.Commands[2]);
+            Assert.Equal("rclone-check-download-content", job.Verification);
+        }
+        else
+        {
+            Assert.Equal(CloudMigrationPhases.Failed, job.Phase);
+            Assert.Equal(fixture.Job.ManifestDigestSha256, job.ManifestDigestSha256);
+            Assert.Empty(job.BaselineHistory ?? []);
+            Assert.Single(runner.Commands);
+            Assert.Null(job.Verification);
+        }
+        Assert.DoesNotContain(runner.Commands.SelectMany(args => args),
+            arg => arg is "sync" or "move" or "delete" or "purge" or "rc" or "rcd");
+    }
+
+    [Fact]
+    public async Task Rebaseline_QueueFullRetainsTheEntireOriginalJournal()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        for (var i = 0; i < 32; i++) Assert.True(fixture.Queue.TryEnqueue(Guid.NewGuid().ToString("N")));
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Coordinator.RequestRebaselineAsync(fixture.Job.Id,
+                new CloudMigrationRebaselineRequest(fixture.Job.ManifestDigestSha256!)));
+        Assert.Equal("migration-queue-full", error.Message);
+        Assert.Equal(fixture.Job, await fixture.Store.GetAsync(fixture.Job.Id));
+    }
+
+    [Fact]
+    public async Task Rebaseline_RestartRepeatsReadOnlyVerificationBeforeAdoption()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await File.AppendAllTextAsync(Path.Combine(fixture.Root, "track.flac"), "current");
+        await fixture.Store.SaveAsync(fixture.Job with
+        {
+            Phase = CloudMigrationPhases.CheckingBaseline,
+            Code = "baseline-checking-existing-cloud-content",
+        });
+        var runner = new ProgressRunner();
+        using var worker = new CloudMigrationWorker(fixture.Store, fixture.Queue, runner,
+            fixture.Source, null!, null!, fixture.LibraryManager, NullLogger<CloudMigrationWorker>.Instance);
+        await worker.StartAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        CloudMigrationJob? job;
+        do
+        {
+            await Task.Delay(10, timeout.Token);
+            job = await fixture.Store.GetAsync(fixture.Job.Id, timeout.Token);
+        } while (job!.Phase != CloudMigrationPhases.Failed && job.Phase != CloudMigrationPhases.ReadyForCutover);
+        await worker.StopAsync(CancellationToken.None);
+        Assert.Equal(CloudMigrationPhases.ReadyForCutover, job.Phase);
+        Assert.Contains("--one-way", runner.Commands[0]);
+        Assert.Single(job.BaselineHistory!);
+    }
+
+    [Fact]
+    public async Task Rebaseline_LaterCopyExceptionCannotRestoreTheSupersededManifest()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await File.AppendAllTextAsync(Path.Combine(fixture.Root, "track.flac"), "current");
+        var current = await CloudMigrationManifestBuilder.CaptureAsync(fixture.Root);
+        var runner = new ProgressRunner
+        {
+            BeforeCommand = args => args[0] == "copy"
+            ? throw new IOException("simulated copy-start failure") : Task.CompletedTask
+        };
+        await fixture.Coordinator.RequestRebaselineAsync(fixture.Job.Id,
+            new CloudMigrationRebaselineRequest(fixture.Job.ManifestDigestSha256!));
+        using var worker = new CloudMigrationWorker(fixture.Store, fixture.Queue, runner,
+            fixture.Source, null!, null!, fixture.LibraryManager, NullLogger<CloudMigrationWorker>.Instance);
+        await worker.StartAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        CloudMigrationJob? job;
+        do
+        {
+            await Task.Delay(10, timeout.Token);
+            job = await fixture.Store.GetAsync(fixture.Job.Id, timeout.Token);
+        } while (job!.Phase != CloudMigrationPhases.Failed);
+        await worker.StopAsync(CancellationToken.None);
+        Assert.Equal(current.DigestSha256, job.ManifestDigestSha256);
+        Assert.Equal(fixture.Job.ManifestDigestSha256, Assert.Single(job.BaselineHistory!).DigestSha256);
+        Assert.Null(job.Verification);
+    }
+
+    [Fact]
+    public async Task Rebaseline_BoundsHistoryAndRetainsFailedJournalAtTheLimit()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var revision = new CloudMigrationBaselineRevision(1, fixture.Job.ManifestDigestSha256!,
+            1, 5, null, DateTimeOffset.UtcNow, new string('1', 64), "test-evidence");
+        var job = fixture.Job with
+        {
+            BaselineHistory = Enumerable.Repeat(revision,
+            CloudMigrationRecovery.MaxBaselineRevisions).ToArray()
+        };
+        await fixture.Store.SaveAsync(job);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Coordinator.RequestRebaselineAsync(job.Id,
+                new CloudMigrationRebaselineRequest(job.ManifestDigestSha256!)));
+        Assert.Equal("migration-baseline-history-limit", error.Message);
+        Assert.Equal(job.ManifestDigestSha256, (await fixture.Store.GetAsync(job.Id))!.ManifestDigestSha256);
+        Assert.False(fixture.Queue.Reader.TryRead(out _));
+    }
+
+    [Fact]
+    public async Task Rebaseline_StillRequiresExactProfileAndNoCompetingJob()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Config.CloudLibraries[0].RemotePath = "unrelated";
+        var changed = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Coordinator.RequestRebaselineAsync(fixture.Job.Id,
+                new CloudMigrationRebaselineRequest(fixture.Job.ManifestDigestSha256!)));
+        Assert.Equal("migration-profile-changed", changed.Message);
+        fixture.Config.CloudLibraries[0].RemotePath = "Slipmat";
+        fixture.Queue.TryEnqueue(fixture.Job.Id);
+        var active = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Coordinator.RequestRebaselineAsync(fixture.Job.Id,
+                new CloudMigrationRebaselineRequest(fixture.Job.ManifestDigestSha256!)));
+        Assert.Equal("migration-recovery-conflict", active.Message);
+    }
+
     public class LibraryProxy : DispatchProxy
     {
         public VirtualFolderInfo Folder { get; set; } = null!;
@@ -230,6 +434,8 @@ public class CloudMigrationRecoveryTests
     {
         public List<IReadOnlyList<string>> Commands { get; } = [];
         public int CopyExitCode { get; init; }
+        public Func<IReadOnlyList<string>, Task>? BeforeCommand { get; init; }
+        public Func<IReadOnlyList<string>, int>? ExitFor { get; init; }
         public Task<RcloneCommandResult> RunAsync(string executable, IReadOnlyList<string> args,
             TimeSpan timeout, CancellationToken token) => throw new InvalidOperationException("Progress path required");
         public async Task<RcloneCommandResult> RunWithProgressAsync(string executable,
@@ -237,8 +443,9 @@ public class CloudMigrationRecoveryTests
             CancellationToken token)
         {
             Commands.Add(args);
+            if (BeforeCommand is not null) await BeforeCommand(args);
             await progress(new(5, 5, 1, 1, 0, DateTimeOffset.UtcNow));
-            return new(true, args[0] == "copy" ? CopyExitCode : 0, "", "", false, false);
+            return new(true, ExitFor?.Invoke(args) ?? (args[0] == "copy" ? CopyExitCode : 0), "", "", false, false);
         }
     }
 

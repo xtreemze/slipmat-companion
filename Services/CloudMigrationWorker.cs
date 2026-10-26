@@ -58,6 +58,18 @@ public sealed class CloudMigrationWorker : BackgroundService
             cancellationToken.ThrowIfCancellationRequested();
             switch (job.Phase)
             {
+                case CloudMigrationPhases.QueuedRebaseline:
+                    _queue.TryEnqueue(job.Id);
+                    break;
+                case CloudMigrationPhases.CheckingBaseline:
+                    await SaveAsync(job with
+                    {
+                        Phase = CloudMigrationPhases.QueuedRebaseline,
+                        Code = "baseline-review-resuming-after-restart",
+                        Progress = null,
+                    }, cancellationToken).ConfigureAwait(false);
+                    _queue.TryEnqueue(job.Id);
+                    break;
                 case CloudMigrationPhases.QueuedCopy:
                     _queue.TryEnqueue(job.Id);
                     break;
@@ -124,6 +136,9 @@ public sealed class CloudMigrationWorker : BackgroundService
 
                 switch (job.Phase)
                 {
+                    case CloudMigrationPhases.QueuedRebaseline:
+                        await ExecuteRebaselineAsync(job, stoppingToken).ConfigureAwait(false);
+                        break;
                     case CloudMigrationPhases.QueuedCopy:
                         await ExecuteInitialCopyAsync(job, stoppingToken).ConfigureAwait(false);
                         break;
@@ -162,6 +177,120 @@ public sealed class CloudMigrationWorker : BackgroundService
                 _queue.Complete(jobId);
             }
         }
+    }
+
+    private async Task ExecuteRebaselineAsync(CloudMigrationJob job, CancellationToken cancellationToken)
+    {
+        if (job.Direction != CloudMigrationDirections.LocalToVfs || job.BackupPath is not null
+            || job.StagingPath is not null || job.ManifestVersion != CloudMigrationManifestBuilder.CurrentVersion
+            || job.ManifestDigestSha256?.Length != 64
+            || job.ManifestFileCount is not >= 0 || job.ManifestTotalBytes is not >= 0
+            || (job.BaselineHistory?.Count ?? 0) >= CloudMigrationRecovery.MaxBaselineRevisions)
+        {
+            await FailAsync(job, "baseline-invalid-custody", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        var observed = await SaveAsync(job with
+        {
+            Phase = CloudMigrationPhases.CheckingBaseline,
+            Code = "baseline-checking-existing-cloud-content",
+            Progress = null,
+            Verification = null,
+        }, cancellationToken).ConfigureAwait(false);
+        CloudMigrationJob? accepted = null;
+        try
+        {
+            if (!RebaselineBindingsMatch(job))
+            {
+                await FailAsync(observed, "baseline-binding-changed", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            var current = await CloudMigrationManifestBuilder.CaptureAsync(job.LocalPath, cancellationToken)
+                .ConfigureAwait(false);
+            var cli = new RcloneCliHost(runner: _runner, progress: async sample =>
+            {
+                observed = observed with { Progress = sample };
+                await _store.SaveAsync(observed, cancellationToken).ConfigureAwait(false);
+            });
+            var check = await cli.CheckRemoteSubsetByDownloadAsync(
+                job.RemoteName, job.RemotePath, job.LocalPath, cancellationToken).ConfigureAwait(false);
+            var failure = TransferFailure(check, "verification");
+            if (failure is not null)
+            {
+                await FailAsync(observed with { LastExitCode = check.ExitCode },
+                    "baseline-" + failure, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            if (!RebaselineBindingsMatch(job))
+            {
+                await FailAsync(observed, "baseline-binding-changed", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            var after = await CloudMigrationManifestBuilder.CaptureAsync(job.LocalPath, cancellationToken)
+                .ConfigureAwait(false);
+            if (current.DigestSha256 != after.DigestSha256 || current.FileCount != after.FileCount
+                || current.TotalBytes != after.TotalBytes || current.Version != after.Version)
+            {
+                await FailAsync(observed, "baseline-source-unstable", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            var revision = new CloudMigrationBaselineRevision(job.ManifestVersion!.Value,
+                job.ManifestDigestSha256!, job.ManifestFileCount!.Value, job.ManifestTotalBytes!.Value,
+                job.ManifestCapturedAt, DateTimeOffset.UtcNow, current.DigestSha256,
+                "remote-subset-check-download-content");
+            accepted = await SaveAsync(observed with
+            {
+                Phase = CloudMigrationPhases.QueuedCopy,
+                Code = "baseline-current-source-accepted",
+                ManifestVersion = current.Version,
+                ManifestDigestSha256 = current.DigestSha256,
+                ManifestFileCount = current.FileCount,
+                ManifestTotalBytes = current.TotalBytes,
+                ManifestCapturedAt = current.CapturedAt,
+                BaselineHistory = (job.BaselineHistory ?? []).Append(revision).ToArray(),
+                LastExitCode = check.ExitCode,
+                Progress = null,
+                Verification = null,
+                VfsCertificationState = "uncertified",
+                VfsCertificationCode = null,
+                VfsCertifiedAt = null,
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (IOException)
+        {
+            await FailAsync(observed, "baseline-source-unavailable", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            await FailAsync(observed, "baseline-source-unavailable", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "source-reparse-point-unsupported")
+        {
+            await FailAsync(observed, "baseline-source-unsupported", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        // Once adoption is journaled, later failures must preserve that revision.
+        if (accepted is not null)
+            await ExecuteInitialCopyAsync(accepted, cancellationToken).ConfigureAwait(false);
+    }
+
+    private bool RebaselineBindingsMatch(CloudMigrationJob job)
+    {
+        var profiles = RuntimeSettings.GetCloudLibraries(_configurationStore.GetCurrent())
+            .Where(profile => string.Equals(profile.Id, job.ProfileId, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (profiles.Length != 1) return false;
+        var profile = profiles[0];
+        if (profile.Enabled || profile.LibraryName != job.LibraryName
+            || profile.RemoteName != job.RemoteName || profile.RemotePath != job.RemotePath
+            || profile.ProjectionPath != job.PreviousProjectionPath) return false;
+        var folders = _library.GetVirtualFolders(includeRefreshState: true)
+            .Where(folder => folder.Name == job.LibraryName).ToArray();
+        return folders.Length == 1 && folders[0].Locations.Length == 1
+            && string.Equals(Path.GetFullPath(folders[0].Locations[0]), Path.GetFullPath(job.LocalPath),
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
     }
 
     private async Task ExecuteInitialCopyAsync(
