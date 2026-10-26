@@ -1998,7 +1998,10 @@
                     if (job.progress) {
                         const progress = document.createElement('div');
                         progress.className = 'fieldDescription';
-                        progress.textContent = 'This attempt: ' + formatCloudSize(job.progress.bytes) +
+                        const retainedSample = job.phase === 'queued-diagnostics' || job.phase === 'diagnosing' ||
+                            (job.phase === 'failed' && job.diagnostics);
+                        progress.textContent = (retainedSample ? 'Retained copy/verification sample: ' : 'This attempt: ') +
+                            formatCloudSize(job.progress.bytes) +
                             ' transferred · ' + job.progress.transfers + ' files · ' +
                             job.progress.checks + ' checks · ' + job.progress.errors +
                             ' errors · observed ' + job.progress.observedAt +
