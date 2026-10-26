@@ -311,6 +311,29 @@ public sealed class CloudMigrationCoordinator
         finally { _gate.Release(); }
     }
 
+    public async Task<CloudMigrationJob> RequestDiagnosticsAsync(
+        string jobId, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var job = await _store.GetAsync(jobId, cancellationToken).ConfigureAwait(false)
+                ?? throw new InvalidOperationException("migration-not-found");
+            if (!CloudMigrationRecovery.CanRebaseline(job))
+                throw new InvalidOperationException("migration-not-diagnosable");
+            await ValidateRecoveryBindingsAsync(job, cancellationToken).ConfigureAwait(false);
+            var queued = job with { Phase = CloudMigrationPhases.QueuedDiagnostics, UpdatedAt = DateTimeOffset.UtcNow };
+            await _store.SaveAsync(queued, cancellationToken).ConfigureAwait(false);
+            if (!_queue.TryEnqueue(job.Id))
+            {
+                await _store.SaveAsync(job, cancellationToken).ConfigureAwait(false);
+                throw new InvalidOperationException("migration-queue-full");
+            }
+            return queued;
+        }
+        finally { _gate.Release(); }
+    }
+
     public async Task<CloudMigrationJob> RequestRebaselineAsync(
         string jobId, CloudMigrationRebaselineRequest request,
         CancellationToken cancellationToken = default)

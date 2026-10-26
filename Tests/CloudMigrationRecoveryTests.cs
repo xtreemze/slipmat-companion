@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System;
 using System.IO;
 using System.Linq;
@@ -416,6 +417,119 @@ public class CloudMigrationRecoveryTests
         Assert.Equal("migration-recovery-conflict", active.Message);
     }
 
+    [Fact]
+    public async Task Diagnostics_RetainsOriginalFailureAndNeverCopiesOrAdopts()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var original = fixture.Job with { Code = "baseline-verification-failed", LastExitCode = 1 };
+        await fixture.Store.SaveAsync(original);
+        var queued = await fixture.Coordinator.RequestDiagnosticsAsync(original.Id);
+        Assert.Equal(CloudMigrationPhases.QueuedDiagnostics, queued.Phase);
+        var runner = new ProgressRunner { StandardOutput = "* Artist/track.flac\n+ Artist/missing.flac\n! Artist/unreadable.flac\n", CopyExitCode = 0 };
+        using var worker = new CloudMigrationWorker(fixture.Store, fixture.Queue, runner,
+            fixture.Source, null!, null!, fixture.LibraryManager, NullLogger<CloudMigrationWorker>.Instance);
+        await worker.StartAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        CloudMigrationJob? job;
+        do { await Task.Delay(10, timeout.Token); job = await fixture.Store.GetAsync(original.Id); }
+        while (job!.Phase != CloudMigrationPhases.Failed);
+        await worker.StopAsync(CancellationToken.None);
+        Assert.Equal(original.Code, job.Code);
+        Assert.Equal(original.LastExitCode, job.LastExitCode);
+        Assert.Equal(original.ManifestDigestSha256, job.ManifestDigestSha256);
+        Assert.Null(job.BaselineHistory);
+        Assert.Null(job.Verification);
+        Assert.Equal(3, job.Diagnostics!.Entries.Count);
+        var args = Assert.Single(runner.Commands);
+        Assert.Equal("check", args[0]);
+        Assert.Contains("--one-way", args);
+        Assert.Contains("--combined", args);
+        Assert.Contains("--max-duration=2m", args);
+        Assert.DoesNotContain("--download", args);
+        Assert.DoesNotContain("--size-only", args);
+    }
+
+    [Fact]
+    public void Diagnostics_ReportIsBoundedAndDoesNotPersistMessagesOrUnsafePaths()
+    {
+        var output = "= match.flac\n* Artist/track.flac\n+ remote-only.flac\n! unreadable.flac\n* ../escape\n* /absolute\n* https://private?token=secret\nRAW token=secret\n";
+        var report = CloudMigrationDiagnosticReport.Parse(new(true, 1, output,
+            "private provider message token=secret", false, false));
+        Assert.Equal(3, report.Entries.Count);
+        Assert.Equal("different", report.Entries[0].Kind);
+        Assert.Equal("missing-local", report.Entries[1].Kind);
+        Assert.Equal("read-error", report.Entries[2].Kind);
+        var json = JsonSerializer.Serialize(report);
+        Assert.DoesNotContain("secret", json);
+        Assert.DoesNotContain("escape", json);
+        var bounded = CloudMigrationDiagnosticReport.Parse(new(true, 1,
+            string.Concat(Enumerable.Repeat("* track.flac\n", 150)), "", false, true));
+        Assert.Equal(100, bounded.Entries.Count);
+        Assert.True(bounded.Truncated);
+    }
+
+    [Fact]
+    public async Task Diagnostics_QueueFullRestoresOriginalJobAndRejectsChangedBindings()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Config.CloudLibraries[0].Enabled = true;
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Coordinator.RequestDiagnosticsAsync(fixture.Job.Id));
+        Assert.Equal("migration-profile-changed", error.Message);
+        fixture.Config.CloudLibraries[0].Enabled = false;
+        for (var i = 0; i < 32; i++) Assert.True(fixture.Queue.TryEnqueue("unrelated-" + i));
+        error = await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Coordinator.RequestDiagnosticsAsync(fixture.Job.Id));
+        Assert.Equal("migration-queue-full", error.Message);
+        Assert.Equal(fixture.Job, await fixture.Store.GetAsync(fixture.Job.Id));
+    }
+
+    [Fact]
+    public async Task Diagnostics_InterruptedRunReturnsToFailedWithoutRepeating()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.Store.SaveAsync(fixture.Job with { Phase = CloudMigrationPhases.Diagnosing });
+        var runner = new ProgressRunner();
+        using var worker = new CloudMigrationWorker(fixture.Store, fixture.Queue, runner,
+            fixture.Source, null!, null!, fixture.LibraryManager, NullLogger<CloudMigrationWorker>.Instance);
+        await worker.StartAsync(CancellationToken.None);
+        await worker.StopAsync(CancellationToken.None);
+        var job = await fixture.Store.GetAsync(fixture.Job.Id);
+        Assert.Equal(CloudMigrationPhases.Failed, job!.Phase);
+        Assert.Equal(fixture.Job.Code, job.Code);
+        Assert.Empty(runner.Commands);
+    }
+
+    [Fact]
+    public async Task Diagnostics_ProcessFailurePreservesTheInitiatingError()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var runner = new ProgressRunner { BeforeCommand = _ => throw new IOException("private provider detail") };
+        await fixture.Coordinator.RequestDiagnosticsAsync(fixture.Job.Id);
+        using var worker = new CloudMigrationWorker(fixture.Store, fixture.Queue, runner,
+            fixture.Source, null!, null!, fixture.LibraryManager, NullLogger<CloudMigrationWorker>.Instance);
+        await worker.StartAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        CloudMigrationJob? job;
+        do { await Task.Delay(10, timeout.Token); job = await fixture.Store.GetAsync(fixture.Job.Id); }
+        while (job!.Phase != CloudMigrationPhases.Failed);
+        await worker.StopAsync(CancellationToken.None);
+        Assert.Equal(fixture.Job.Code, job.Code);
+        Assert.False(job.Diagnostics!.StartSucceeded);
+        Assert.DoesNotContain("private", JsonSerializer.Serialize(job));
+    }
+
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(10, false)]
+    [InlineData(null, true)]
+    public void Diagnostics_EmptySuccessOrDurationLimitIsStillOnlyAdvisory(int? exitCode, bool timedOut)
+    {
+        var report = CloudMigrationDiagnosticReport.Parse(new(true, exitCode, "", "private", timedOut, false));
+        Assert.Equal("remote-subset-hash-diagnostic-only", report.Method);
+        Assert.Equal(exitCode, report.ExitCode);
+        Assert.Equal(timedOut, report.TimedOut);
+        Assert.Empty(report.Entries);
+    }
+
     public class LibraryProxy : DispatchProxy
     {
         public VirtualFolderInfo Folder { get; set; } = null!;
@@ -434,10 +548,11 @@ public class CloudMigrationRecoveryTests
     {
         public List<IReadOnlyList<string>> Commands { get; } = [];
         public int CopyExitCode { get; init; }
+        public string StandardOutput { get; init; } = "";
         public Func<IReadOnlyList<string>, Task>? BeforeCommand { get; init; }
         public Func<IReadOnlyList<string>, int>? ExitFor { get; init; }
         public Task<RcloneCommandResult> RunAsync(string executable, IReadOnlyList<string> args,
-            TimeSpan timeout, CancellationToken token) => throw new InvalidOperationException("Progress path required");
+            TimeSpan timeout, CancellationToken token) => RunWithProgressAsync(executable, args, timeout, _ => Task.CompletedTask, token);
         public async Task<RcloneCommandResult> RunWithProgressAsync(string executable,
             IReadOnlyList<string> args, TimeSpan timeout, Func<CloudMigrationProgress, Task> progress,
             CancellationToken token)
@@ -445,7 +560,7 @@ public class CloudMigrationRecoveryTests
             Commands.Add(args);
             if (BeforeCommand is not null) await BeforeCommand(args);
             await progress(new(5, 5, 1, 1, 0, DateTimeOffset.UtcNow));
-            return new(true, ExitFor?.Invoke(args) ?? (args[0] == "copy" ? CopyExitCode : 0), "", "", false, false);
+            return new(true, ExitFor?.Invoke(args) ?? (args[0] == "copy" ? CopyExitCode : 0), StandardOutput, "", false, false);
         }
     }
 

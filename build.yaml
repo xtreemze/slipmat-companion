@@ -1,7 +1,7 @@
 ---
 name: "Audio Gateway"
 guid: "d3a2b1c0-e4f5-6789-abcd-ef0123456789"
-version: "0.5.2.10"
+version: "0.5.2.11"
 targetAbi: "12.3.0.0"
 framework: "net10.0"
 overview: "Optional Jellyfin companion that accelerates and enriches Slipmat."
@@ -15,4 +15,4 @@ category: "General"
 owner: "xtreemze"
 artifacts:
 - "Jellyfin.Plugin.AudioGateway.dll"
-changelog: "Add operator-approved current-source recovery for interrupted local-to-VFS jobs. Read-only downloaded-content verification must prove the existing partial cloud copy matches the current local source before adopting a fresh inventory. Retain prior baselines in the same durable job, reject drift and conflicts, and continue with immutable copy plus exact full verification. Queue long preflight work with restart recovery and show native Fetch error codes. No automatic cutover or media deletion."
+changelog: "Add bounded read-only migration failure diagnosis with retained relative-path samples and command outcome. Preserve the failed job, baseline and all media; reports never authorize recovery or cutover. Prevent cached migration status and eligibility from masquerading as live progress."

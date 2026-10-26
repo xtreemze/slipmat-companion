@@ -1828,7 +1828,8 @@
                 try {
                     const candidates = await ApiClient.getJSON(
                         ApiClient.getUrl('Plugins/AudioGateway/cloud/migrations/candidates', {
-                            direction: migrationDirection()
+                            direction: migrationDirection(),
+                            _: Date.now()
                         })
                     );
                     (Array.isArray(candidates) ? candidates : []).forEach(function(candidate) {
@@ -1997,7 +1998,10 @@
                     if (job.progress) {
                         const progress = document.createElement('div');
                         progress.className = 'fieldDescription';
-                        progress.textContent = 'This attempt: ' + formatCloudSize(job.progress.bytes) +
+                        const retainedSample = job.phase === 'queued-diagnostics' || job.phase === 'diagnosing' ||
+                            (job.phase === 'failed' && job.diagnostics);
+                        progress.textContent = (retainedSample ? 'Retained copy/verification sample: ' : 'This attempt: ') +
+                            formatCloudSize(job.progress.bytes) +
                             ' transferred · ' + job.progress.transfers + ' files · ' +
                             job.progress.checks + ' checks · ' + job.progress.errors +
                             ' errors · observed ' + job.progress.observedAt +
@@ -2025,6 +2029,35 @@
                             ' previous source baseline(s) retained in this job. ' +
                             'Final whole-library verification is still required.';
                         row.appendChild(history);
+                    }
+
+                    if (job.phase === 'queued-diagnostics' || job.phase === 'diagnosing') {
+                        const pending = document.createElement('div');
+                        pending.className = 'fieldDescription';
+                        pending.textContent = 'Read-only diagnosis queued/running. The rclone command is limited to two minutes. ' +
+                            'This report cannot adopt a baseline, copy files, or authorize cutover.';
+                        row.appendChild(pending);
+                    }
+                    if (job.diagnostics) {
+                        const report = document.createElement('div');
+                        report.className = 'fieldDescription';
+                        const d = job.diagnostics;
+                        report.textContent = 'Diagnostic sample from ' + d.observedAt +
+                            ' · command started: ' + Boolean(d.startSucceeded) +
+                            ' · exit ' + (Number.isInteger(d.exitCode) ? d.exitCode : 'unavailable') +
+                            (d.timedOut ? ' · process timeout' : '') +
+                            (d.truncated ? ' · bounded/truncated sample' : '') +
+                            '. Hash-based diagnosis only; not downloaded-content verification. ' +
+                            'A duration limit or empty sample does not prove the trees match. ' +
+                            'Backends without common hashes may compare sizes only.';
+                        row.appendChild(report);
+                        const entries = Array.isArray(d.entries) ? d.entries.slice(0, 100) : [];
+                        entries.forEach(function(entry) {
+                            const item = document.createElement('div');
+                            item.className = 'fieldDescription';
+                            item.textContent = entry.kind + ': ' + entry.path;
+                            row.appendChild(item);
+                        });
                     }
 
                     if (job.verification) {
@@ -2064,6 +2097,9 @@
 
                     if (job.phase === 'failed' && job.direction === 'local-to-vfs' &&
                         !job.backupPath && job.manifestDigestSha256) {
+                        actions.appendChild(migrationActionButton('Diagnose failure (read-only, 2 min)', function() {
+                            return transitionMigration(job.id, 'diagnose');
+                        }));
                         actions.appendChild(migrationActionButton('Resume original baseline', function() {
                             return transitionMigration(job.id, 'resume');
                         }));
@@ -2124,7 +2160,7 @@
             async function loadMigrationJobs() {
                 try {
                     const response = await ApiClient.getJSON(
-                        ApiClient.getUrl('Plugins/AudioGateway/cloud/migrations')
+                        ApiClient.getUrl('Plugins/AudioGateway/cloud/migrations', { _: Date.now() })
                     );
                     renderMigrationJobs(response);
                     return response;
@@ -2267,7 +2303,9 @@
 
             async function transitionMigration(jobId, action) {
                 const status = document.querySelector('#CloudMigrationStatus');
-                status.textContent = action === 'resume'
+                status.textContent = action === 'diagnose'
+                    ? 'Queuing bounded read-only diagnostics; recovery remains failed…'
+                    : action === 'resume'
                     ? 'Checking original source and queuing immutable resume…'
                     : action === 'cutover'
                     ? 'Queuing final copy/check and cutover…'
