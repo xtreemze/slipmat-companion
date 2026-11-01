@@ -45,6 +45,7 @@ jobs:
         env:
           VERSION: ${{ steps.metadata.outputs.version }}
         run: |
+          echo "Selected .NET SDK: $(dotnet --version); required: $DOTNET_SDK_VERSION"
           test "$(dotnet --version)" = "$DOTNET_SDK_VERSION"
           python3 scripts/verify_distribution_policy.py
           python3 scripts/verify_release_metadata.py --expected-version "$VERSION"
