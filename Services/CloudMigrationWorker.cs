@@ -29,6 +29,9 @@ public sealed class CloudMigrationWorker : BackgroundService
     private readonly ICloudLibraryProjection _libraryProjection;
     private readonly ILibraryManager _library;
     private readonly ILogger<CloudMigrationWorker> _logger;
+    // Startup may recover more durable jobs than the bounded channel can hold.
+    // Only the single migration worker drains this overflow as capacity becomes free.
+    private readonly Queue<string> _startupOverflow = new();
 
     public CloudMigrationWorker(
         CloudMigrationStore store,
@@ -59,14 +62,14 @@ public sealed class CloudMigrationWorker : BackgroundService
             switch (job.Phase)
             {
                 case CloudMigrationPhases.QueuedDiagnostics:
-                    _queue.TryEnqueue(job.Id);
+                    QueueRestoredJob(job.Id);
                     break;
                 case CloudMigrationPhases.Diagnosing:
                     // Do not silently repeat potentially expensive diagnostics after restart.
                     await SaveAsync(job with { Phase = CloudMigrationPhases.Failed }, cancellationToken).ConfigureAwait(false);
                     break;
                 case CloudMigrationPhases.QueuedRebaseline:
-                    _queue.TryEnqueue(job.Id);
+                    QueueRestoredJob(job.Id);
                     break;
                 case CloudMigrationPhases.CheckingBaseline:
                     await SaveAsync(job with
@@ -75,10 +78,10 @@ public sealed class CloudMigrationWorker : BackgroundService
                         Code = "baseline-review-resuming-after-restart",
                         Progress = null,
                     }, cancellationToken).ConfigureAwait(false);
-                    _queue.TryEnqueue(job.Id);
+                    QueueRestoredJob(job.Id);
                     break;
                 case CloudMigrationPhases.QueuedCopy:
-                    _queue.TryEnqueue(job.Id);
+                    QueueRestoredJob(job.Id);
                     break;
                 case CloudMigrationPhases.Copying:
                 case CloudMigrationPhases.Verifying:
@@ -89,10 +92,10 @@ public sealed class CloudMigrationWorker : BackgroundService
                             Code = "resuming-copy-after-restart",
                         },
                         cancellationToken).ConfigureAwait(false);
-                    _queue.TryEnqueue(job.Id);
+                    QueueRestoredJob(job.Id);
                     break;
                 case CloudMigrationPhases.QueuedCutover:
-                    _queue.TryEnqueue(job.Id);
+                    QueueRestoredJob(job.Id);
                     break;
                 case CloudMigrationPhases.FinalCopying:
                 case CloudMigrationPhases.FinalVerifying:
@@ -103,7 +106,7 @@ public sealed class CloudMigrationWorker : BackgroundService
                             Code = "resuming-final-verification-after-restart",
                         },
                         cancellationToken).ConfigureAwait(false);
-                    _queue.TryEnqueue(job.Id);
+                    QueueRestoredJob(job.Id);
                     break;
                 case CloudMigrationPhases.CuttingOver:
                     await RecoverInterruptedCutoverAsync(job, cancellationToken)
@@ -118,10 +121,10 @@ public sealed class CloudMigrationWorker : BackgroundService
                             Code = "resuming-rollback-after-restart",
                         },
                         cancellationToken).ConfigureAwait(false);
-                    _queue.TryEnqueue(job.Id);
+                    QueueRestoredJob(job.Id);
                     break;
                 case CloudMigrationPhases.Finalizing:
-                    _queue.TryEnqueue(job.Id);
+                    QueueRestoredJob(job.Id);
                     break;
             }
         }
@@ -185,8 +188,21 @@ public sealed class CloudMigrationWorker : BackgroundService
             finally
             {
                 _queue.Complete(jobId);
+                DrainStartupOverflow();
             }
         }
+    }
+
+    private void QueueRestoredJob(string jobId)
+    {
+        if (!_queue.TryEnqueue(jobId))
+            _startupOverflow.Enqueue(jobId);
+    }
+
+    private void DrainStartupOverflow()
+    {
+        while (_startupOverflow.Count > 0 && _queue.TryEnqueue(_startupOverflow.Peek()))
+            _startupOverflow.Dequeue();
     }
 
     private async Task ExecuteDiagnosticsAsync(CloudMigrationJob job, CancellationToken cancellationToken)
@@ -343,6 +359,11 @@ public sealed class CloudMigrationWorker : BackgroundService
                 await FailAsync(job, "migration-profile-changed", cancellationToken).ConfigureAwait(false);
                 return;
             }
+            if (!RebaselineBindingsMatch(job))
+            {
+                await FailAsync(job, "migration-binding-changed", cancellationToken).ConfigureAwait(false);
+                return;
+            }
             var manifest = await CloudMigrationManifestBuilder.CaptureAsync(job.LocalPath, cancellationToken)
                 .ConfigureAwait(false);
             if (!CloudMigrationRecovery.ManifestMatches(job, manifest))
@@ -416,6 +437,13 @@ public sealed class CloudMigrationWorker : BackgroundService
         if (checkError is not null)
         {
             await FailAsync(observed with { LastExitCode = check.ExitCode }, checkError, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (job.Direction == CloudMigrationDirections.LocalToVfs
+            && !RebaselineBindingsMatch(job))
+        {
+            await FailAsync(observed, "migration-binding-changed", cancellationToken).ConfigureAwait(false);
             return;
         }
 

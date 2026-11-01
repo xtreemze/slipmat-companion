@@ -41,6 +41,95 @@ public class CloudMigrationRecoveryTests
         finally { Directory.Delete(root, true); }
     }
 
+    [Fact]
+    public async Task Startup_DrainsRestoredMigrationAfterTheBoundedQueueFills()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        // These IDs are already queued before the worker starts. They consume the
+        // 32 bounded slots but have no journal and are harmless to process.
+        for (var i = 0; i < 32; i++)
+            Assert.True(fixture.Queue.TryEnqueue(Guid.NewGuid().ToString("N")));
+
+        await fixture.Store.SaveAsync(fixture.Job with
+        {
+            Phase = CloudMigrationPhases.QueuedCopy,
+            Code = "resume-queued",
+        });
+
+        var runner = new ProgressRunner();
+        using var worker = new CloudMigrationWorker(fixture.Store, fixture.Queue, runner,
+            fixture.Source, null!, null!, fixture.LibraryManager, NullLogger<CloudMigrationWorker>.Instance);
+        await worker.StartAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        CloudMigrationJob? result;
+        do
+        {
+            await Task.Delay(10, timeout.Token);
+            result = await fixture.Store.GetAsync(fixture.Job.Id, timeout.Token);
+        } while (result!.Phase is CloudMigrationPhases.QueuedCopy
+            or CloudMigrationPhases.Copying or CloudMigrationPhases.Verifying);
+        await worker.StopAsync(CancellationToken.None);
+        Assert.Equal(CloudMigrationPhases.ReadyForCutover, result.Phase);
+        Assert.Equal(2, runner.Commands.Count);
+    }
+
+    [Fact]
+    public async Task Worker_RejectsLibraryBindingChangedAfterResumeWasQueued()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.Coordinator.RequestResumeAsync(fixture.Job.Id);
+        fixture.Library.Folder.Locations = [fixture.Root + "-different"];
+
+        var runner = new ProgressRunner();
+        using var worker = new CloudMigrationWorker(fixture.Store, fixture.Queue, runner,
+            fixture.Source, null!, null!, fixture.LibraryManager, NullLogger<CloudMigrationWorker>.Instance);
+        await worker.StartAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        CloudMigrationJob? result;
+        do
+        {
+            await Task.Delay(10, timeout.Token);
+            result = await fixture.Store.GetAsync(fixture.Job.Id, timeout.Token);
+        } while (result!.Phase is CloudMigrationPhases.QueuedCopy
+            or CloudMigrationPhases.Copying or CloudMigrationPhases.Verifying);
+        await worker.StopAsync(CancellationToken.None);
+        Assert.Equal(CloudMigrationPhases.Failed, result.Phase);
+        Assert.Equal("migration-binding-changed", result.Code);
+        Assert.Empty(runner.Commands);
+    }
+
+    [Fact]
+    public async Task Worker_RejectsProfileChangedDuringResumedContentVerification()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.Coordinator.RequestResumeAsync(fixture.Job.Id);
+        var runner = new ProgressRunner
+        {
+            BeforeCommand = args =>
+            {
+                if (args[0] == "check")
+                    fixture.Config.CloudLibraries[0].ProjectionPath = fixture.Root + "-different-vfs";
+                return Task.CompletedTask;
+            },
+        };
+        using var worker = new CloudMigrationWorker(fixture.Store, fixture.Queue, runner,
+            fixture.Source, null!, null!, fixture.LibraryManager, NullLogger<CloudMigrationWorker>.Instance);
+        await worker.StartAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        CloudMigrationJob? result;
+        do
+        {
+            await Task.Delay(10, timeout.Token);
+            result = await fixture.Store.GetAsync(fixture.Job.Id, timeout.Token);
+        } while (result!.Phase is CloudMigrationPhases.QueuedCopy
+            or CloudMigrationPhases.Copying or CloudMigrationPhases.Verifying);
+        await worker.StopAsync(CancellationToken.None);
+        Assert.Equal(CloudMigrationPhases.Failed, result.Phase);
+        Assert.Equal("migration-binding-changed", result.Code);
+        Assert.Equal(2, runner.Commands.Count);
+        Assert.Null(result.Verification);
+    }
+
     [Theory]
     [InlineData(5, "rclone-temporary-error")]
     [InlineData(7, "rclone-fatal-error")]
