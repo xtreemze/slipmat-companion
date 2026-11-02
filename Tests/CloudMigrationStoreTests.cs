@@ -135,6 +135,102 @@ public class CloudMigrationStoreTests
         Assert.Equal("vfs-certification-required", error.Message);
     }
 
+    [Theory]
+    [InlineData("cutover")]
+    [InlineData("rollback")]
+    public async Task Transition_QueueFullRestoresOriginalJournal(string action)
+    {
+        using var temp = new TemporaryDirectory();
+        var source = new FakeConfigurationSource(new PluginConfiguration { StoreRoot = temp.Path });
+        var store = new CloudMigrationStore(source);
+        var queue = new CloudMigrationQueue();
+        var now = DateTimeOffset.UtcNow;
+        var phase = action == "cutover" ? CloudMigrationPhases.ReadyForCutover
+            : CloudMigrationPhases.ReadyToFinalize;
+        var job = new CloudMigrationJob(
+            Guid.NewGuid().ToString("N"), "music", "Music",
+            CloudMigrationDirections.LocalToVfs, phase, "original-code",
+            Path.Combine(temp.Path, "Music"), null,
+            action == "rollback" ? Path.Combine(temp.Path, "backup") : null,
+            "tele2", "Media/Music", string.Empty, false,
+            "rclone-check-download-content", now, now);
+        await store.SaveAsync(job);
+        for (var i = 0; i < 32; i++)
+            Assert.True(queue.TryEnqueue(Guid.NewGuid().ToString("N")));
+
+        var coordinator = new CloudMigrationCoordinator(store, queue, source, null!, null!, null!);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            if (action == "cutover") await coordinator.RequestCutoverAsync(job.Id);
+            else await coordinator.RequestRollbackAsync(job.Id);
+        });
+
+        Assert.Equal("migration-queue-full", error.Message);
+        Assert.Equal(job, await store.GetAsync(job.Id));
+        Assert.False(queue.IsPending(job.Id));
+    }
+
+    [Fact]
+    public async Task Finalize_QueueFullRetainsCertifiedJournalAndRejectsUnscheduledDeletion()
+    {
+        using var temp = new TemporaryDirectory();
+        var source = new FakeConfigurationSource(new PluginConfiguration { StoreRoot = temp.Path });
+        var store = new CloudMigrationStore(source);
+        var queue = new CloudMigrationQueue();
+        var now = DateTimeOffset.UtcNow;
+        var backup = Path.Combine(temp.Path, "Music.slipmat-rollback");
+        var job = new CloudMigrationJob(
+            Guid.NewGuid().ToString("N"), "music", "Music",
+            CloudMigrationDirections.LocalToVfs, CloudMigrationPhases.ReadyToFinalize,
+            "vfs-active-local-backup-retained",
+            Path.Combine(temp.Path, "Music"), null, backup,
+            "tele2", "Media/Music", string.Empty, false,
+            "rclone-check-download-content", now, now,
+            VfsCertificationState: "passed", VfsCertifiedAt: now);
+        await store.SaveAsync(job);
+        for (var i = 0; i < 32; i++)
+            Assert.True(queue.TryEnqueue(Guid.NewGuid().ToString("N")));
+
+        var coordinator = new CloudMigrationCoordinator(store, queue, source, null!, null!, null!);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            coordinator.RequestFinalizeAsync(job.Id, new CloudMigrationFinalizeRequest(backup)));
+
+        Assert.Equal("migration-queue-full", error.Message);
+        Assert.Equal(job, await store.GetAsync(job.Id));
+        Assert.False(queue.IsPending(job.Id));
+    }
+
+    [Fact]
+    public async Task Finalize_DuplicateRequestCannotBeQueuedTwice()
+    {
+        using var temp = new TemporaryDirectory();
+        var source = new FakeConfigurationSource(new PluginConfiguration { StoreRoot = temp.Path });
+        var store = new CloudMigrationStore(source);
+        var queue = new CloudMigrationQueue();
+        var now = DateTimeOffset.UtcNow;
+        var backup = Path.Combine(temp.Path, "Music.slipmat-rollback");
+        var job = new CloudMigrationJob(
+            Guid.NewGuid().ToString("N"), "music", "Music",
+            CloudMigrationDirections.LocalToVfs, CloudMigrationPhases.ReadyToFinalize,
+            "vfs-active-local-backup-retained",
+            Path.Combine(temp.Path, "Music"), null, backup,
+            "tele2", "Media/Music", string.Empty, false,
+            "rclone-check-download-content", now, now,
+            VfsCertificationState: "passed", VfsCertifiedAt: now);
+        await store.SaveAsync(job);
+        var coordinator = new CloudMigrationCoordinator(store, queue, source, null!, null!, null!);
+
+        var queued = await coordinator.RequestFinalizeAsync(
+            job.Id, new CloudMigrationFinalizeRequest(backup));
+        var duplicate = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            coordinator.RequestFinalizeAsync(job.Id, new CloudMigrationFinalizeRequest(backup)));
+
+        Assert.Equal("migration-not-ready-to-finalize", duplicate.Message);
+        Assert.Equal(queued, await store.GetAsync(job.Id));
+        Assert.Equal(job.Id, await queue.Reader.ReadAsync());
+        Assert.False(queue.Reader.TryRead(out _));
+    }
+
     private sealed class FakeConfigurationSource : ICloudProjectionConfigurationSource
     {
         private readonly PluginConfiguration _configuration;
