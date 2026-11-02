@@ -420,39 +420,55 @@ public sealed class CloudMigrationCoordinator
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var job = await _store.GetAsync(jobId, cancellationToken).ConfigureAwait(false)
-            ?? throw new InvalidOperationException("migration-not-found");
-
-        if (job.Phase != CloudMigrationPhases.ReadyToFinalize)
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            throw new InvalidOperationException("migration-not-ready-to-finalize");
+            var job = await _store.GetAsync(jobId, cancellationToken).ConfigureAwait(false)
+                ?? throw new InvalidOperationException("migration-not-found");
+
+            if (job.Phase != CloudMigrationPhases.ReadyToFinalize)
+            {
+                throw new InvalidOperationException("migration-not-ready-to-finalize");
+            }
+
+            if (string.IsNullOrWhiteSpace(job.BackupPath)
+                || !PathsEqual(job.BackupPath, request.ConfirmationPath))
+            {
+                throw new InvalidOperationException("finalize-confirmation-mismatch");
+            }
+
+            if (job.Direction == CloudMigrationDirections.LocalToVfs
+                && !string.Equals(job.VfsCertificationState, "passed", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("vfs-certification-required");
+            }
+
+            if (_queue.IsPending(job.Id))
+            {
+                throw new InvalidOperationException("migration-recovery-conflict");
+            }
+
+            var queued = job with
+            {
+                Phase = CloudMigrationPhases.Finalizing,
+                Code = "finalize-queued",
+                UpdatedAt = DateTimeOffset.UtcNow,
+            };
+            await _store.SaveAsync(queued, cancellationToken).ConfigureAwait(false);
+            if (!_queue.TryEnqueue(queued.Id))
+            {
+                // An admission failure must not leave a runnable finalization in the
+                // journal. Startup recovery would otherwise execute a rejected request.
+                await _store.SaveAsync(job, cancellationToken).ConfigureAwait(false);
+                throw new InvalidOperationException("migration-queue-full");
+            }
+
+            return queued;
         }
-
-        if (string.IsNullOrWhiteSpace(job.BackupPath)
-            || !PathsEqual(job.BackupPath, request.ConfirmationPath))
+        finally
         {
-            throw new InvalidOperationException("finalize-confirmation-mismatch");
+            _gate.Release();
         }
-
-        if (job.Direction == CloudMigrationDirections.LocalToVfs
-            && !string.Equals(job.VfsCertificationState, "passed", StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException("vfs-certification-required");
-        }
-
-        var queued = job with
-        {
-            Phase = CloudMigrationPhases.Finalizing,
-            Code = "finalize-queued",
-            UpdatedAt = DateTimeOffset.UtcNow,
-        };
-        await _store.SaveAsync(queued, cancellationToken).ConfigureAwait(false);
-        if (!_queue.TryEnqueue(queued.Id))
-        {
-            throw new InvalidOperationException("migration-queue-full");
-        }
-
-        return queued;
     }
 
     private async Task<CloudMigrationJob> QueueTransitionAsync(
@@ -462,26 +478,42 @@ public sealed class CloudMigrationCoordinator
         string code,
         CancellationToken cancellationToken)
     {
-        var job = await _store.GetAsync(jobId, cancellationToken).ConfigureAwait(false)
-            ?? throw new InvalidOperationException("migration-not-found");
-        if (job.Phase != expectedPhase)
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            throw new InvalidOperationException("migration-invalid-phase");
-        }
+            var job = await _store.GetAsync(jobId, cancellationToken).ConfigureAwait(false)
+                ?? throw new InvalidOperationException("migration-not-found");
+            if (job.Phase != expectedPhase)
+            {
+                throw new InvalidOperationException("migration-invalid-phase");
+            }
 
-        var queued = job with
-        {
-            Phase = nextPhase,
-            Code = code,
-            UpdatedAt = DateTimeOffset.UtcNow,
-        };
-        await _store.SaveAsync(queued, cancellationToken).ConfigureAwait(false);
-        if (!_queue.TryEnqueue(queued.Id))
-        {
-            throw new InvalidOperationException("migration-queue-full");
-        }
+            if (_queue.IsPending(job.Id))
+            {
+                throw new InvalidOperationException("migration-recovery-conflict");
+            }
 
-        return queued;
+            var queued = job with
+            {
+                Phase = nextPhase,
+                Code = code,
+                UpdatedAt = DateTimeOffset.UtcNow,
+            };
+            await _store.SaveAsync(queued, cancellationToken).ConfigureAwait(false);
+            if (!_queue.TryEnqueue(queued.Id))
+            {
+                // Preserve the previous authoritative phase when the bounded
+                // worker cannot accept the transition.
+                await _store.SaveAsync(job, cancellationToken).ConfigureAwait(false);
+                throw new InvalidOperationException("migration-queue-full");
+            }
+
+            return queued;
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     private static CloudMigrationCandidate CandidateFor(
