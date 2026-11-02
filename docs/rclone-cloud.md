@@ -191,7 +191,7 @@ For a full local-to-cloud conversion:
 4. validate the VFS-backed Jellyfin library while the original local directory remains as its rollback backup;
 5. explicitly finalize each verified job to delete only that retained local rollback backup and reclaim disk space.
 
-Local cleanup is intentionally not a bulk background action. Destructive reclamation remains separately confirmed per verified library so one bad mapping cannot erase several rollback sources at once. VFS-to-local bulk preparation follows the same independent-job rule and never deletes the cloud source.
+Local cleanup is intentionally not a bulk background action. Destructive reclamation remains separately confirmed per verified library so one bad mapping cannot erase several rollback sources at once. Cutover, rollback and finalization requests are serialized and require admission to the bounded migration worker. A full queue rejects the request and restores its prior durable journal phase, so a rejected transition is not silently replayed after a restart. VFS-to-local bulk preparation follows the same independent-job rule and never deletes the cloud source.
 
 ## Resume a failed local-to-VFS preparation
 
