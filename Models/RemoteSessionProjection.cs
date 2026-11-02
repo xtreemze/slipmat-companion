@@ -40,12 +40,14 @@ public static class RemoteSessionProjection
     /// <param name="Kind">The provider namespace for this session.</param>
     /// <param name="Commands">Baseline Jellyfin transport actions for remote-capable sessions.</param>
     /// <param name="ObservedAt">The source session's last activity time.</param>
+    /// <param name="ExpiresAt">Observation freshness deadline, not an authorization lease.</param>
     public sealed record Session(
         [property: JsonPropertyName("id")] string Id,
         [property: JsonPropertyName("name")] string Name,
         [property: JsonPropertyName("kind")] string Kind,
         [property: JsonPropertyName("commands")] IReadOnlyList<string> Commands,
-        [property: JsonPropertyName("observedAt")] DateTimeOffset ObservedAt);
+        [property: JsonPropertyName("observedAt")] DateTimeOffset ObservedAt,
+        [property: JsonPropertyName("expiresAt")] DateTimeOffset ExpiresAt);
 
     /// <summary>A versioned, non-authoritative snapshot of the authenticated user's sessions.</summary>
     /// <param name="SchemaVersion">Snapshot contract version.</param>
@@ -97,7 +99,8 @@ public static class RemoteSessionProjection
             var id = "jellyfin-session:" + observation.SessionId;
             var name = SanitizeName(observation.DisplayName);
             var session = new Session(id, name, "jellyfin-session",
-                TransportCommands, observation.ObservedAt);
+                TransportCommands, observation.ObservedAt,
+                observation.ObservedAt + MaximumAge);
             if (selected.TryGetValue(id, out var existing))
             {
                 if (existing.ObservedAt < session.ObservedAt)
