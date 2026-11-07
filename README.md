@@ -26,7 +26,7 @@ The plugin dashboard can optionally limit the reproducible analysis sidecar and 
 
 This repository carries no legacy plugin/API compatibility surface.
 
-- Supported Jellyfin server: **12.3.0**, the current Jellyfin 12 release targeted by this plugin contract.
+- Supported Jellyfin server: **12.4.0**, the current Jellyfin 12 release targeted by this plugin contract.
 - Plugin package references must match that server release exactly.
 - `/Plugins/AudioGateway/v1` is removed; there is no v1 compatibility shim.
 - When Jellyfin support moves to a new certified release, update and certify the plugin rather than accumulating old-server compatibility code.
@@ -387,7 +387,7 @@ This standalone companion repository is licensed under GNU GPL v3. Public plugin
 
 ```text
 ./
-  Jellyfin.Plugin.AudioGateway.csproj   — shipping Jellyfin 12.3.0 / net10.0 plugin boundary
+  Jellyfin.Plugin.AudioGateway.csproj   — shipping Jellyfin 12.4.0 / net10.0 plugin boundary
   Plugin.cs                              — BasePlugin<PluginConfiguration> entry point
   Configuration/                        — optional analyzer/store configuration
   Models/                               — serialized optional-extension contracts

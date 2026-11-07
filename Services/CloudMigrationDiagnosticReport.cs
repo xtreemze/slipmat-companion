@@ -13,7 +13,14 @@ public static class CloudMigrationDiagnosticReport
     {
         var entries = new List<CloudMigrationDiagnosticEntry>();
         var truncated = result.OutputTruncated || result.StandardOutput.Length > 2 * 1024 * 1024;
-        using var reader = new StringReader(result.StandardOutput[..Math.Min(result.StandardOutput.Length, 2 * 1024 * 1024)]);
+        var output = result.StandardOutput[..Math.Min(result.StandardOutput.Length, 2 * 1024 * 1024)];
+        // A killed or bounded process may leave a partial path; never report it as an object.
+        if ((result.TimedOut || truncated) && !output.EndsWith('\n'))
+        {
+            var lastNewline = output.LastIndexOf('\n');
+            output = lastNewline < 0 ? string.Empty : output[..(lastNewline + 1)];
+        }
+        using var reader = new StringReader(output);
         while (reader.ReadLine() is { } line)
         {
             if (line.Length < 3 || line[1] != ' ') continue;

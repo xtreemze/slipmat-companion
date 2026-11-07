@@ -223,6 +223,53 @@ public class CloudMigrationRecoveryTests
     }
 
     [Fact]
+    public async Task ProcessRunner_DiagnosticMatchesDoNotCrowdOutDifferences()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var script = "i=0; while [ $i -lt 10000 ]; do printf '= %0250d\\n' $i; i=$((i+1)); done; printf '* mismatch.flac\\n'";
+        var result = await new RcloneProcessRunner().RunDiagnosticAsync("/bin/sh",
+            ["-c", script], TimeSpan.FromSeconds(10), null, CancellationToken.None);
+        Assert.Equal(0, result.ExitCode);
+        Assert.False(result.OutputTruncated);
+        Assert.Equal("mismatch.flac", Assert.Single(CloudMigrationDiagnosticReport.Parse(result).Entries).Path);
+    }
+
+    [Fact]
+    public async Task ProcessRunner_OrdinaryCommandsRetainMatchRows()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var result = await new RcloneProcessRunner().RunAsync("/bin/sh", ["-c", "printf '= ordinary\\n'"],
+            TimeSpan.FromSeconds(5), CancellationToken.None);
+        Assert.Equal("= ordinary\n", result.StandardOutput);
+    }
+
+    [Fact]
+    public async Task ProcessRunner_DiagnosticOutputRemainsBounded()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var script = "i=0; while [ $i -lt 10000 ]; do printf '* %0250d\\n' $i; i=$((i+1)); done";
+        var result = await new RcloneProcessRunner().RunDiagnosticAsync("/bin/sh", ["-c", script],
+            TimeSpan.FromSeconds(10), null, CancellationToken.None);
+        Assert.True(result.OutputTruncated);
+        Assert.True(result.StandardOutput.Length <= 2 * 1024 * 1024);
+        Assert.True(CloudMigrationDiagnosticReport.Parse(result).Truncated);
+    }
+
+    [Fact]
+    public async Task ProcessRunner_TimeoutRetainsBoundedDiagnosticOutput()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var result = await new RcloneProcessRunner().RunAsync("/bin/sh",
+            ["-c", "printf '* Artist/track.flac\\n'; printf 'private error\\n' >&2; exec sleep 10"],
+            TimeSpan.FromMilliseconds(500), CancellationToken.None);
+        Assert.True(result.TimedOut);
+        Assert.Null(result.ExitCode);
+        Assert.Equal("* Artist/track.flac\n", result.StandardOutput);
+        Assert.Equal("private error\n", result.StandardError);
+        Assert.Equal("Artist/track.flac", Assert.Single(CloudMigrationDiagnosticReport.Parse(result).Entries).Path);
+    }
+
+    [Fact]
     public async Task ProcessRunner_StreamsNumericStatsFromStderrWithoutReturningLogTextAsProgress()
     {
         if (OperatingSystem.IsWindows()) return;
@@ -529,13 +576,26 @@ public class CloudMigrationRecoveryTests
         Assert.Null(job.BaselineHistory);
         Assert.Null(job.Verification);
         Assert.Equal(3, job.Diagnostics!.Entries.Count);
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(job));
+        Assert.Equal(1, json.RootElement.GetProperty("diagnosticProgress").GetProperty("checks").GetInt64());
+        Assert.NotEqual(default, json.RootElement.GetProperty("diagnosticProgress").GetProperty("observedAt").GetDateTimeOffset());
         var args = Assert.Single(runner.Commands);
         Assert.Equal("check", args[0]);
         Assert.Contains("--one-way", args);
         Assert.Contains("--combined", args);
-        Assert.Contains("--max-duration=2m", args);
+        Assert.DoesNotContain("--max-duration=2m", args);
+        Assert.DoesNotContain("--cutoff-mode=HARD", args);
         Assert.DoesNotContain("--download", args);
         Assert.DoesNotContain("--size-only", args);
+        Assert.Contains("--stats=30s", args);
+    }
+
+    [Fact]
+    public void Diagnostics_IgnoreIncompleteFinalLineOnTimeout()
+    {
+        var report = CloudMigrationDiagnosticReport.Parse(new(true, null,
+            "* complete.flac\n* partial", "", true, false));
+        Assert.Equal("complete.flac", Assert.Single(report.Entries).Path);
     }
 
     [Fact]

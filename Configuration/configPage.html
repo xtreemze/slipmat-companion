@@ -2034,9 +2034,18 @@
                     if (job.phase === 'queued-diagnostics' || job.phase === 'diagnosing') {
                         const pending = document.createElement('div');
                         pending.className = 'fieldDescription';
-                        pending.textContent = 'Read-only diagnosis queued/running. The rclone command is limited to two minutes. ' +
+                        pending.textContent = 'Read-only diagnosis queued/running. The process watchdog is three minutes, after source inventory. ' +
                             'This report cannot adopt a baseline, copy files, or authorize cutover.';
                         row.appendChild(pending);
+                    }
+                    if (job.diagnosticProgress) {
+                        const diagnosticProgress = document.createElement('div');
+                        diagnosticProgress.className = 'fieldDescription';
+                        const sample = job.diagnosticProgress;
+                        diagnosticProgress.textContent = 'Diagnostic command: ' + sample.checks +
+                            ' checks · ' + sample.errors + ' errors · observed ' + sample.observedAt +
+                            '. A statistics observation does not prove forward progress; listing can take time.';
+                        row.appendChild(diagnosticProgress);
                     }
                     if (job.diagnostics) {
                         const report = document.createElement('div');
@@ -2097,18 +2106,27 @@
 
                     if (job.phase === 'failed' && job.direction === 'local-to-vfs' &&
                         !job.backupPath && job.manifestDigestSha256) {
-                        actions.appendChild(migrationActionButton('Diagnose failure (read-only, 2 min)', function() {
-                            return transitionMigration(job.id, 'diagnose');
-                        }));
-                        actions.appendChild(migrationActionButton('Resume original baseline', function() {
-                            return transitionMigration(job.id, 'resume');
-                        }));
-                        actions.appendChild(migrationActionButton('Use current source and resume', function() {
-                            return rebaselineMigration(job);
-                        }));
+                        const allowed = response && response.actions && response.actions[job.id] || {};
+                        if (allowed.diagnose) {
+                            actions.appendChild(migrationActionButton('Diagnose failure (read-only, 3 min)', function() {
+                                return transitionMigration(job.id, 'diagnose');
+                            }));
+                        }
+                        if (allowed.resume) {
+                            actions.appendChild(migrationActionButton('Resume original baseline', function() {
+                                return transitionMigration(job.id, 'resume');
+                            }));
+                        }
+                        if (allowed.rebaseline) {
+                            actions.appendChild(migrationActionButton('Use current source and resume', function() {
+                                return rebaselineMigration(job);
+                            }));
+                        }
                         const recovery = document.createElement('div');
                         recovery.className = 'fieldDescription';
-                        recovery.textContent = 'Resume reuses this job and partial destination after source/profile checks. ' +
+                        recovery.textContent = (!allowed.resume && allowed.rebaseline
+                            ? 'Original-baseline resume is unavailable after the failed recovery check. Inspect the diagnostic report before another current-source review. '
+                            : 'Resume reuses this job and partial destination after source/profile checks. ') +
                             'Existing remote objects remain immutable. Changed source or target requires operator recovery.';
                         actions.appendChild(recovery);
                     }

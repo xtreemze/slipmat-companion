@@ -61,24 +61,39 @@ public interface IRcloneProgressRunner : IRcloneProcessRunner
         Func<CloudMigrationProgress, Task> progress, CancellationToken cancellationToken);
 }
 
-public sealed class RcloneProcessRunner : IRcloneProgressRunner
+/// <summary>Runs a bounded advisory check while omitting matching rows from captured output.</summary>
+public interface IRcloneDiagnosticRunner : IRcloneProcessRunner
+{
+    /// <summary>Runs the diagnostic process and observes allowlisted numeric progress.</summary>
+    Task<RcloneCommandResult> RunDiagnosticAsync(string executable, IReadOnlyList<string> arguments,
+        TimeSpan timeout, Func<CloudMigrationProgress, Task>? progress, CancellationToken cancellationToken);
+}
+
+public sealed class RcloneProcessRunner : IRcloneProgressRunner, IRcloneDiagnosticRunner
 {
     internal const int MaxCapturedCharacters = 2 * 1024 * 1024;
 
     public Task<RcloneCommandResult> RunAsync(string executable,
         IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
-        => RunCoreAsync(executable, arguments, timeout, null, cancellationToken);
+        => RunCoreAsync(executable, arguments, timeout, null, false, cancellationToken);
 
     public Task<RcloneCommandResult> RunWithProgressAsync(string executable,
         IReadOnlyList<string> arguments, TimeSpan timeout,
         Func<CloudMigrationProgress, Task> progress, CancellationToken cancellationToken)
-        => RunCoreAsync(executable, arguments, timeout, progress, cancellationToken);
+        => RunCoreAsync(executable, arguments, timeout, progress, false, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<RcloneCommandResult> RunDiagnosticAsync(string executable,
+        IReadOnlyList<string> arguments, TimeSpan timeout,
+        Func<CloudMigrationProgress, Task>? progress, CancellationToken cancellationToken)
+        => RunCoreAsync(executable, arguments, timeout, progress, true, cancellationToken);
 
     private async Task<RcloneCommandResult> RunCoreAsync(
         string executable,
         IReadOnlyList<string> arguments,
         TimeSpan timeout,
         Func<CloudMigrationProgress, Task>? progress,
+        bool diagnostic,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executable);
@@ -114,7 +129,7 @@ public sealed class RcloneProcessRunner : IRcloneProgressRunner
         var stdoutTask = ReadBoundedAsync(
             process.StandardOutput,
             MaxCapturedCharacters,
-            timeoutCts.Token);
+            timeoutCts.Token, diagnostic: diagnostic);
         var stderrTask = ReadBoundedAsync(
             process.StandardError,
             MaxCapturedCharacters,
@@ -128,13 +143,15 @@ public sealed class RcloneProcessRunner : IRcloneProgressRunner
         {
             TryKill(process);
             await ObserveReadersAsync(stdoutTask, stderrTask).ConfigureAwait(false);
+            var partialStdout = await stdoutTask.ConfigureAwait(false);
+            var partialStderr = await stderrTask.ConfigureAwait(false);
             return new RcloneCommandResult(
                 true,
                 null,
-                string.Empty,
-                string.Empty,
+                partialStdout.Text,
+                partialStderr.Text,
                 true,
-                false);
+                partialStdout.Truncated || partialStderr.Truncated);
         }
         catch (OperationCanceledException)
         {
@@ -162,7 +179,8 @@ public sealed class RcloneProcessRunner : IRcloneProgressRunner
         StreamReader reader,
         int maxCharacters,
         CancellationToken cancellationToken,
-        Func<CloudMigrationProgress, Task>? progress = null)
+        Func<CloudMigrationProgress, Task>? progress = null,
+        bool diagnostic = false)
     {
         var line = new StringBuilder();
         var oversizedLine = false;
@@ -172,9 +190,17 @@ public sealed class RcloneProcessRunner : IRcloneProgressRunner
 
         while (true)
         {
-            var count = await reader
-                .ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)
-                .ConfigureAwait(false);
+            int count;
+            try
+            {
+                count = await reader
+                    .ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
             if (count == 0)
             {
                 break;
@@ -198,6 +224,27 @@ public sealed class RcloneProcessRunner : IRcloneProgressRunner
                     else if (line.Length < 65536 && !oversizedLine) line.Append(buffer[i]);
                     else { oversizedLine = true; line.Clear(); }
                 }
+            }
+            if (diagnostic)
+            {
+                for (var i = 0; i < count; i++)
+                {
+                    if (buffer[i] == '\n')
+                    {
+                        if (!oversizedLine && line.Length >= 2 && line[1] == ' '
+                            && (line[0] == '*' || line[0] == '+' || line[0] == '!'))
+                        {
+                            if (line.Length + 1 <= maxCharacters - text.Length)
+                                text.Append(line).Append('\n');
+                            else truncated = true;
+                        }
+                        line.Clear();
+                        oversizedLine = false;
+                    }
+                    else if (line.Length < 65536 && !oversizedLine) line.Append(buffer[i]);
+                    else { oversizedLine = true; line.Clear(); truncated = true; }
+                }
+                continue;
             }
             var remaining = maxCharacters - text.Length;
             if (remaining > 0)
@@ -550,11 +597,14 @@ public sealed partial class RcloneCliHost
         ArgumentException.ThrowIfNullOrWhiteSpace(localPath);
         if (!Path.IsPathFullyQualified(localPath))
             throw new ArgumentException("Diagnostic path must be absolute.", nameof(localPath));
-        return RunAsync([
+        var args = new string[] {
             "check", BuildRemoteSpec(remoteName, remotePath), Path.GetFullPath(localPath),
-            "--one-way", "--combined", "-", "--max-duration=2m", "--cutoff-mode=HARD",
-            "--use-json-log", "--log-level=ERROR",
-        ], TimeSpan.FromMinutes(3), cancellationToken);
+            "--one-way", "--combined", "-",
+            "--stats=30s", "--stats-log-level=ERROR", "--use-json-log", "--log-level=ERROR",
+        };
+        return _runner is IRcloneDiagnosticRunner diagnosticRunner
+            ? diagnosticRunner.RunDiagnosticAsync(_executable, args, TimeSpan.FromMinutes(3), _progress, cancellationToken)
+            : RunAsync(args, TimeSpan.FromMinutes(3), cancellationToken);
     }
 
     /// <summary>Read-only preflight: every partial remote object must match the current local tree.</summary>
