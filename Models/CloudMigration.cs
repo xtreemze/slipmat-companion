@@ -94,7 +94,8 @@ public sealed record CloudMigrationJob(
     [property: JsonPropertyName("lastExitCode")] int? LastExitCode = null,
     [property: JsonPropertyName("progress")] CloudMigrationProgress? Progress = null,
     [property: JsonPropertyName("baselineHistory")] IReadOnlyList<CloudMigrationBaselineRevision>? BaselineHistory = null,
-    [property: JsonPropertyName("diagnostics")] CloudMigrationDiagnostics? Diagnostics = null);
+    [property: JsonPropertyName("diagnostics")] CloudMigrationDiagnostics? Diagnostics = null,
+    [property: JsonPropertyName("diagnosticProgress")] CloudMigrationProgress? DiagnosticProgress = null);
 
 public sealed record CloudMigrationProgress(
     [property: JsonPropertyName("bytes")] long Bytes,
@@ -105,7 +106,8 @@ public sealed record CloudMigrationProgress(
     [property: JsonPropertyName("observedAt")] DateTimeOffset ObservedAt);
 
 public sealed record CloudMigrationListResponse(
-    [property: JsonPropertyName("jobs")] IReadOnlyList<CloudMigrationJob> Jobs);
+    [property: JsonPropertyName("jobs")] IReadOnlyList<CloudMigrationJob> Jobs,
+    [property: JsonPropertyName("actions")] IReadOnlyDictionary<string, CloudMigrationRecoveryActions>? Actions = null);
 
 public sealed record CloudMigrationBulkStartResponse(
     [property: JsonPropertyName("started")] IReadOnlyList<CloudMigrationJob> Started,
@@ -123,3 +125,8 @@ public sealed record CloudMigrationDiagnostics(
     [property: JsonPropertyName("timedOut")] bool TimedOut,
     [property: JsonPropertyName("truncated")] bool Truncated,
     [property: JsonPropertyName("entries")] IReadOnlyList<CloudMigrationDiagnosticEntry> Entries);
+
+public sealed record CloudMigrationRecoveryActions(
+    [property: JsonPropertyName("resume")] bool Resume,
+    [property: JsonPropertyName("rebaseline")] bool Rebaseline,
+    [property: JsonPropertyName("diagnose")] bool Diagnose);

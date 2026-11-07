@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.AudioGateway.Models;
@@ -44,8 +45,13 @@ public sealed class CloudMigrationController : ControllerBase
     [ProducesResponseType(typeof(CloudMigrationListResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<CloudMigrationListResponse>> List(
         CancellationToken cancellationToken)
-        => Ok(new CloudMigrationListResponse(
-            await _coordinator.ListAsync(cancellationToken).ConfigureAwait(false)));
+    {
+        var jobs = await _coordinator.ListAsync(cancellationToken).ConfigureAwait(false);
+        var actions = jobs.ToDictionary(job => job.Id, job => new CloudMigrationRecoveryActions(
+            CloudMigrationRecovery.CanResume(job), CloudMigrationRecovery.CanRebaseline(job),
+            CloudMigrationRecovery.CanRebaseline(job)));
+        return Ok(new CloudMigrationListResponse(jobs, actions));
+    }
 
     [HttpPost]
     [ProducesResponseType(typeof(CloudMigrationJob), StatusCodes.Status200OK)]

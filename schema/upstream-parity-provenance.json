@@ -1,6 +1,6 @@
 {
   "upstreamRepository": "xtreemze/slipmat",
-  "upstreamCommit": "9f78ac63dd1e894750cd465809d14cabb0679f15",
+  "upstreamCommit": "b4f33cf30d458513722c30e2378420b560d9d356",
   "files": {
     "schema/analysis.schema.json": "17b617c848e30b4a3d231d7227793f8a375329d3",
     "schema/server-extension-analysis-artifact-v1.schema.json": "d89ef09e3c3c994dbc9b722069994f9e6fa36d45",
@@ -12,8 +12,8 @@
     "schema/examples/analysis_sidecar_v2.example.json": "07f39e99b20328a20ccba802b32caee71a705236",
     "schema/examples/analysis_subject_v1_vectors.json": "7398e611a4a1bcdeca301f0446f95db810cac0e8",
     "schema/examples/artist_event.example.json": "6644f3b57e847b4c40bad4f8ed8d6f4448c0f298",
-    "schema/examples/capabilities.degraded.example.json": "7430f3a6b9c988b5022fcf6f34b27f6b7c3af4db",
-    "schema/examples/capabilities.example.json": "33bfbb129052f502c79bc0f1218a91ca56c1f360",
+    "schema/examples/capabilities.degraded.example.json": "013a284485dffeed26c4e871414e5026483d38fd",
+    "schema/examples/capabilities.example.json": "1d1b95aaf2f677d4e639b23cc2835ddd2dfb3083",
     "schema/examples/server_extension_analysis_artifact.example.json": "279974444ece3cdf4e6530ee2691d85eec428005",
     "schema/examples/server_extension_analysis_coverage_request.example.json": "a590696de5a0d22324231b7be3377f75d3ab61ca",
     "schema/examples/server_extension_analysis_coverage_response.example.json": "156919fb8364dd56be4053455eac20745c8e132a",

@@ -207,7 +207,7 @@ public sealed class CloudMigrationWorker : BackgroundService
 
     private async Task ExecuteDiagnosticsAsync(CloudMigrationJob job, CancellationToken cancellationToken)
     {
-        var observing = await SaveAsync(job with { Phase = CloudMigrationPhases.Diagnosing }, cancellationToken).ConfigureAwait(false);
+        var observing = await SaveAsync(job with { Phase = CloudMigrationPhases.Diagnosing, DiagnosticProgress = null }, cancellationToken).ConfigureAwait(false);
         var result = new RcloneCommandResult(false, null, "", "", false, false);
         try
         {
@@ -216,7 +216,11 @@ public sealed class CloudMigrationWorker : BackgroundService
             {
                 // Validate custody without adopting any inventory. Reject unsupported source entries.
                 await CloudMigrationManifestBuilder.CaptureAsync(job.LocalPath, cancellationToken).ConfigureAwait(false);
-                var cli = new RcloneCliHost(runner: _runner);
+                var cli = new RcloneCliHost(runner: _runner, progress: async sample =>
+                {
+                    observing = observing with { DiagnosticProgress = sample };
+                    await _store.SaveAsync(observing, cancellationToken).ConfigureAwait(false);
+                });
                 result = await cli.DiagnoseRemoteSubsetAsync(job.RemoteName, job.RemotePath, job.LocalPath, cancellationToken)
                     .ConfigureAwait(false);
             }
