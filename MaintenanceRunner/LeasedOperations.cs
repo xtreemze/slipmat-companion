@@ -148,7 +148,12 @@ public sealed class LeasedOperations(IMaintenanceLease lease, IMaintenanceHost h
             && string.Equals(custody.ManifestDigest, admission.ManifestDigestSha256, StringComparison.OrdinalIgnoreCase)
             && custody.Verification == admission.Verification
             && job.Direction == CloudMigrationDirections.LocalToVfs
-            && job.Phase == CloudMigrationPhases.ReadyForCutover
+            && ((job.Phase == CloudMigrationPhases.ReadyForCutover && intent.Direction == CloudMaintenanceDirection.Promote && job.BackupPath is null)
+                || (job.Phase == CloudMigrationPhases.ReadyToFinalize && job.BackupPath == custody.BackupPath
+                    && (intent.Direction == CloudMaintenanceDirection.Rollback
+                        || (intent.Direction == CloudMaintenanceDirection.Promote && intent.Phase == CloudMaintenancePhase.Stable)))
+                || (job.Phase == CloudMigrationPhases.RolledBack && job.BackupPath is null
+                    && intent.Direction == CloudMaintenanceDirection.Rollback && intent.Phase == CloudMaintenancePhase.Stable))
             && job.ProfileId == admission.ProfileId
             && job.LibraryName == admission.LibraryName
             && job.LocalPath == admission.LocalPath

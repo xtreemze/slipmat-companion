@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Jellyfin.Plugin.AudioGateway.Services;
 
@@ -8,13 +9,17 @@ internal static class Program
 {
     public static async Task<int> Main(string[] args)
     {
+        var prepare = args.Length == 5 && args[0] == "prepare" && Path.IsPathFullyQualified(args[3]) && Path.IsPathFullyQualified(args[4]);
         var inspect = args.Length == 3 && args[0] == "inspect";
         var startup = args.Length == 4 && args[0] == "startup" && Path.IsPathFullyQualified(args[3]);
+        var rollback = args.Length == 4 && args[0] == "rollback" && Path.IsPathFullyQualified(args[3]);
         var run = args.Length == 4 && args[0] == "run" && Path.IsPathFullyQualified(args[3]);
-        if ((!inspect && !run && !startup) || !Path.IsPathFullyQualified(args[1]) || !Guid.TryParseExact(args[2], "N", out _))
+        if ((!inspect && !run && !startup && !prepare && !rollback) || !Path.IsPathFullyQualified(args[1]) || !Guid.TryParseExact(args[2], "N", out _))
         {
             Console.Error.WriteLine("Usage: Slipmat.MaintenanceRunner inspect ABSOLUTE_JOURNAL_DIRECTORY JOB_ID");
+            Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner rollback ABSOLUTE_JOURNAL_DIRECTORY JOB_ID ABSOLUTE_SPEC_PATH");
             Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner run ABSOLUTE_JOURNAL_DIRECTORY JOB_ID ABSOLUTE_SPEC_PATH");
+            Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner prepare ABSOLUTE_JOURNAL_DIRECTORY JOB_ID ABSOLUTE_DRAFT_SPEC ABSOLUTE_OUTPUT_SPEC");
             Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner startup ABSOLUTE_JOURNAL_DIRECTORY JOB_ID ABSOLUTE_SPEC_PATH");
             return 2;
         }
@@ -59,11 +64,26 @@ internal static class Program
 
                 var barrier = new LinuxMaintenanceBarrier(
                     new LinuxSystemdBarrierQuery(), startup ? Environment.ProcessId : 0);
+                if (prepare)
+                {
+                    var current = await lease.ReadAsync(args[2], cancellation.Token)
+                        ?? throw new InvalidOperationException("maintenance-job-missing");
+                    if (current.Job.Id != args[2]) throw new InvalidOperationException("maintenance-job-binding-mismatch");
+                    var draft = PreparationRunner.ReadDraft(args[3]);
+                    var preparation = new LinuxPreparationHost(barrier, CustodyProcess.ProbeNoReplaceAsync);
+                    var prepared = await PreparationRunner.PrepareAsync(current, draft, args[4], preparation,
+                        (expected, replacement, ct) => lease.CompareExchangeAsync(expected, replacement, ct), cancellation.Token);
+                    Console.WriteLine(JsonSerializer.Serialize(new { status = "prepared", jobId = prepared.Job.Id, journalRevision = prepared.Revision }));
+                    return 0;
+                }
                 var specifications = new LinuxHostSpecificationProvider(args[3]);
+                var mountSystem = new LinuxSystemdMountBackend();
+                var mountSafety = new LinuxMountSafetyBoundary(barrier);
+                var host = new LinuxMaintenanceHost(specifications, barrier, mountSafety, mountSystem);
                 if (startup)
                 {
                     var current = await lease.ReadAsync(args[2], cancellation.Token);
-                    if (current is null)
+                    if (current is null || current.Job.Id != args[2])
                     {
                         Console.Error.WriteLine("Configured maintenance job is missing.");
                         return 2;
@@ -73,25 +93,31 @@ internal static class Program
                         ? specifications.ReadForStartup(snapshot)
                         : specifications.Read(snapshot);
                     await barrier.VerifyCurrentAsync(startupSpec, cancellation.Token).ConfigureAwait(false);
-                    if (current.Job.Maintenance is null)
+                    var digest = Convert.ToHexString(SHA256.HashData(LinuxTrustedFile.Read(args[3])));
+                    var stableAtStartup = await StartupGuard.IsStableAsync(snapshot, startupSpec, digest, host, cancellation.Token);
+                    Console.WriteLine(JsonSerializer.Serialize(new
                     {
-                        Console.WriteLine(JsonSerializer.Serialize(new
-                        {
-                            status = "no-recovery-required",
-                            jobId = current.Job.Id,
-                            journalRevision = current.Revision,
-                        }));
-                        return 0;
-                    }
+                        status = stableAtStartup ? "stable" : "blocked",
+                        jobId = current.Job.Id,
+                        journalRevision = current.Revision,
+                    }));
+                    return stableAtStartup ? 0 : 1;
                 }
-                var mountSystem = new LinuxSystemdMountBackend();
-                var mountSafety = new LinuxMountSafetyBoundary(barrier);
-                var host = new LinuxMaintenanceHost(
-                    specifications, barrier, mountSafety, mountSystem);
+                if (rollback)
+                {
+                    var current = await lease.ReadAsync(args[2], cancellation.Token)
+                        ?? throw new InvalidOperationException("maintenance-job-missing");
+                    if (current.Job.Id != args[2]) throw new InvalidOperationException("maintenance-job-binding-mismatch");
+                    await MaintenanceCompletion.BeginRollbackAsync(current, host,
+                        (expected, replacement, ct) => lease.CompareExchangeAsync(expected, replacement, ct), cancellation.Token);
+                }
                 var operations = new LeasedOperations(new JournalLeaseAdapter(lease), host);
                 var decision = await CloudMaintenanceTransaction.RunAsync(args[2], operations, cancellation.Token);
                 var final = await lease.ReadAsync(args[2], cancellation.Token);
                 var stable = decision.Action == Jellyfin.Plugin.AudioGateway.Models.CloudMaintenanceAction.Complete;
+                if (stable && final is not null)
+                    final = await MaintenanceCompletion.CompleteAsync(final, host,
+                        (expected, replacement, ct) => lease.CompareExchangeAsync(expected, replacement, ct), cancellation.Token);
                 Console.WriteLine(JsonSerializer.Serialize(new
                 {
                     status = stable ? "stable" : "blocked",

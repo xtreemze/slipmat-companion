@@ -44,7 +44,13 @@ public sealed class LinuxMountSupervisor(IMountSafetyBoundary safety, IMountSyst
             || await system.InspectAsync(spec, cancellationToken).ConfigureAwait(false) is not null)
             throw new InvalidOperationException("mount-state-changed");
         await safety.VerifyEmptyMountpointAsync(spec, mountpoint, cancellationToken).ConfigureAwait(false);
-        await system.StartAsync(spec, unit, remoteSpec, cancellationToken).ConfigureAwait(false);
+        // Once submitted to PID 1, caller cancellation cannot revoke the start job. Let the
+        // bounded helper finish, then inspect under the barrier before releasing the lease.
+        cancellationToken.ThrowIfCancellationRequested();
+        await system.StartAsync(spec, unit, remoteSpec, CancellationToken.None).ConfigureAwait(false);
+        await safety.VerifyAsync(spec, CancellationToken.None).ConfigureAwait(false);
+        _ = await system.InspectAsync(spec, CancellationToken.None).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
         for (var attempt = 0; attempt < 200; attempt++)
         {
             await safety.VerifyAsync(spec, cancellationToken).ConfigureAwait(false);
@@ -219,11 +225,24 @@ public sealed class LinuxSystemdMountBackend : IMountSystemBackend
         using var process = new Process { StartInfo = new ProcessStartInfo { FileName = executable, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true } };
         foreach (var arg in args) process.StartInfo.ArgumentList.Add(arg);
         if (!process.Start()) throw new InvalidOperationException("mount-helper-unavailable");
-        var output = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var error = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        await error.ConfigureAwait(false);
-        return (process.ExitCode, await output.ConfigureAwait(false));
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(20));
+        try
+        {
+            var output = process.StandardOutput.ReadToEndAsync(timeout.Token);
+            var error = process.StandardError.ReadToEndAsync(timeout.Token);
+            await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+            await error.ConfigureAwait(false);
+            return (process.ExitCode, await output.ConfigureAwait(false));
+        }
+        catch (OperationCanceledException)
+        {
+            // Reap the helper; PID 1 may already have accepted its job, so the
+            // caller must still treat a timed-out start as ambiguous custody.
+            try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+            await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
     }
 
     private static string Decode(string value) => value.Replace("\\040", " ", StringComparison.Ordinal).Replace("\\011", "\t", StringComparison.Ordinal).Replace("\\012", "\n", StringComparison.Ordinal).Replace("\\134", "\\", StringComparison.Ordinal);

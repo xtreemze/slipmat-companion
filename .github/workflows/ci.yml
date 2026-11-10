@@ -107,9 +107,12 @@ jobs:
 
       - name: Test maintenance runner journal and host boundaries
         run: |
-          dotnet run --project MaintenanceRunner/Tests/Slipmat.MaintenanceRunner.Tests.csproj --configuration Release --no-build --no-restore
+          sudo "$(command -v dotnet)" MaintenanceRunner/Tests/bin/Release/net10.0/Slipmat.MaintenanceRunner.Tests.dll
           sudo python3 -m unittest discover -s scripts/tests -p 'test_maintenance_*.py' -v
           python3 -m unittest scripts.tests.test_package_maintenance_runner -v
+          dotnet build scripts/maintenance-vm-fixture/Fixture.csproj --configuration Release
+          sh -n scripts/prove_maintenance_runner_vm.sh
+          sh -n scripts/prove_ntfs3_custody_vm.sh
 
       - name: Package and exercise manifest tooling
         env:
