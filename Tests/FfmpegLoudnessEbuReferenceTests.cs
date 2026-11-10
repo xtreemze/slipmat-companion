@@ -113,6 +113,34 @@ public class FfmpegLoudnessEbuReferenceTests
         }
     }
 
+    [Fact]
+    public async Task JellyfinFfmpeg_MeasuresMonoAlbumSequence()
+    {
+        var ffmpeg = RequireFfmpeg();
+        var directory = Path.Combine(Path.GetTempPath(), $"slipmat-mono-album-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var trackPath = Path.Combine(directory, "mono.wav");
+            await RunFfmpegAsync(ffmpeg, new[]
+            {
+                "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "lavfi", "-i", "aevalsrc=0.1*sin(2*PI*1000*t):s=48000:d=20:c=mono",
+                "-c:a", "pcm_f32le", trackPath,
+            });
+
+            var result = await MeasureAlbumSequenceAsync(ffmpeg, [trackPath], "mono");
+
+            Assert.NotNull(result);
+            Assert.InRange(result!.IntegratedLufs, -23.1d, -22.9d);
+            Assert.InRange(result.TruePeak, -20.1d, -19.9d);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private static string RequireFfmpeg()
     {
         var ffmpeg = Environment.GetEnvironmentVariable("SLIPMAT_PARITY_FFMPEG");
@@ -196,7 +224,8 @@ public class FfmpegLoudnessEbuReferenceTests
 
     private static async Task<LoudnessAnalysis?> MeasureAlbumSequenceAsync(
         string ffmpeg,
-        IReadOnlyList<string> trackPaths)
+        IReadOnlyList<string> trackPaths,
+        string channelLayout = "stereo")
     {
         var startInfo = new ProcessStartInfo
         {
@@ -220,7 +249,7 @@ public class FfmpegLoudnessEbuReferenceTests
         startInfo.ArgumentList.Add("-filter_complex");
         startInfo.ArgumentList.Add(IntegratedAudioAnalyzer.BuildAlbumLoudnessFilterGraph(
             Enumerable.Repeat(0, trackPaths.Count).ToArray(),
-            "stereo"));
+            channelLayout));
         startInfo.ArgumentList.Add("-map");
         startInfo.ArgumentList.Add("[measured]");
         startInfo.ArgumentList.Add("-vn");
