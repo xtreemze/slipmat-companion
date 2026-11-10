@@ -146,3 +146,7 @@ The procedure does not authorize a storage cutover, unmount or local deletion. I
 - Exact candidate build and release checks, actual installed DLL/server version and ABI compatibility, source/remote whole-library verification, and production namespace/mount/readback evidence. Synthetic adapters and CI do not prove host behavior. Companion 0.5.2.12 targets Jellyfin 12.4.0; this does not certify the proposed unimplemented transaction.
 
 Only after these gates may a specific host execution be considered. The maintenance window and cross-domain host contract require coordination with the operator; local deletion remains separately unauthorized.
+
+### Cache custody constraint
+
+The offline runner requires the cache directory to exist before preparation. Every component must be a root-owned directory without group or other write permission and without symlinks. The cache must be on a different filesystem device from the source and retained backup; this intentionally blocks even otherwise safe cache directories on the same filesystem. The runner rechecks this boundary before mount operations. Select a dedicated cache filesystem and verify its availability before considering maintenance.

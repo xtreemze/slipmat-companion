@@ -9,6 +9,7 @@ public sealed class LinuxMountSafetyBoundary(LinuxMaintenanceBarrier barrier) : 
     public Task VerifyAsync(HostSpecification spec, CancellationToken cancellationToken)
     {
         if (!OperatingSystem.IsLinux()) throw new InvalidOperationException("linux-required");
+        LinuxCacheCustody.Verify(spec.CachePath, spec.Source.Device);
         return barrier.VerifyCurrentAsync(spec, cancellationToken);
     }
 

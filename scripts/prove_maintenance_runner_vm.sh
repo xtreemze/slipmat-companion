@@ -18,6 +18,9 @@ done
 job=$("$fixture" init "$root" "$rclone" "$helper")
 case "$job" in *[!0-9a-f]*|'') echo 'Invalid job ID' >&2; exit 2;; esac
 [ "${#job}" -eq 32 ] || exit 2
+# A separate, root-owned filesystem prevents cache writes from reaching source custody.
+mount -t tmpfs -o size=32m,mode=0755 "slipmat-cache-$job" "$root/cache"
+[ "$(stat -c %d "$root/cache")" != "$(stat -c %d "$root/music")" ]
 "$runner" prepare "$root/journal" "$job" "$root/draft.json" "$root/bundle/spec.json"
 "$runner" run "$root/journal" "$job" "$root/bundle/spec.json"
 "$fixture" inspect "$root" "$job" ready-to-finalize
@@ -46,4 +49,7 @@ cmp "$root/music/track.flac" "$root/remote/track.flac"
 [ ! -e "$root/music.backup" ]
 ! findmnt -rn --mountpoint "$root/music"
 [ "$(readlink /etc/systemd/system/jellyfin.service)" = /dev/null ]
+[ "$(findmnt -rn --mountpoint "$root/cache" -o SOURCE,FSTYPE)" = "slipmat-cache-$job tmpfs" ]
+umount "$root/cache"
+! findmnt -rn --mountpoint "$root/cache"
 printf 'VM fixture passed: %s %s\n' "$root" "$job"

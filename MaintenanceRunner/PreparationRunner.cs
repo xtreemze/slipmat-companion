@@ -83,6 +83,7 @@ public sealed class LinuxPreparationHost(LinuxMaintenanceBarrier barrier, Func<H
             || !Matches(spec.Profile.Path, job.MaintenanceAdmission!.PluginConfigurationSha256)
             || !Matches(spec.Policy.Path, job.MaintenanceAdmission.OptionsSha256))
             throw new InvalidOperationException("maintenance-local-state-changed");
+        LinuxCacheCustody.Verify(spec.CachePath, spec.Source.Device);
         LinuxProtectedSourceTree.Verify(spec.Source, ct);
         await BarrierAsync(spec, ct).ConfigureAwait(false);
     }

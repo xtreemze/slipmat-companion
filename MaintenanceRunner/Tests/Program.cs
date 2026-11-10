@@ -75,6 +75,7 @@ var hostSpec = new HostSpecification(1, jobId, boot, "mnt:[42]", "jellyfin.servi
     new("/etc/profile.xml", "/root/bundle/profile.xml", new string('b', 64), new string('c', 64)),
     new("/etc/policy.xml", "/root/bundle/policy.xml", new string('d', 64), new string('e', 64)));
 LinuxProtectedSourceTreeTests.Run();
+LinuxCacheCustodyTests.Run();
 await LinuxMaintenanceBarrierTests.Run(hostSpec);
 await LinuxMountSupervisorTests.Run(hostSpec);
 var specBytes = JsonSerializer.SerializeToUtf8Bytes(hostSpec, new JsonSerializerOptions(JsonSerializerDefaults.Web));
