@@ -59,6 +59,9 @@ public sealed class CloudMigrationWorker : BackgroundService
         foreach (var job in jobs)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            // Offline transactions are owned by the supervised runner. A plugin
+            // restart must never replay their path effects through the online worker.
+            if (job.Maintenance is not null) continue;
             switch (job.Phase)
             {
                 case CloudMigrationPhases.QueuedDiagnostics:
@@ -139,7 +142,7 @@ public sealed class CloudMigrationWorker : BackgroundService
             try
             {
                 var job = await _store.GetAsync(jobId, stoppingToken).ConfigureAwait(false);
-                if (job is null)
+                if (job is null || job.Maintenance is not null)
                 {
                     continue;
                 }
