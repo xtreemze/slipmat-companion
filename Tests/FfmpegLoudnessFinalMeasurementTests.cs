@@ -6,6 +6,30 @@ namespace Jellyfin.Plugin.AudioGateway.Tests;
 public class FfmpegLoudnessFinalMeasurementTests
 {
     [Fact]
+    public void Parse_MapsEbuTech3341StereoCalibrationReport()
+    {
+        // EBU Tech 3341:2023 Test 1 is a 20-second, in-phase stereo 1 kHz
+        // sine with a -23 dBFS peak on each channel. Its integrated result is
+        // -23.0 LUFS +/- 0.1 LU. This report was captured with Jellyfin FFmpeg
+        // 8.1.3-1 and loudnorm=print_format=json.
+        const string output = """
+            {
+                "input_i":"-23.05",
+                "input_tp":"-23.00",
+                "input_lra":"0.00",
+                "input_thresh":"-33.05"
+            }
+            """;
+
+        var result = FfmpegLoudnessParser.Parse(output);
+
+        Assert.NotNull(result);
+        Assert.InRange(result!.IntegratedLufs, -23.1d, -22.9d);
+        Assert.Equal(-23.0d, result.TruePeak, 2);
+        Assert.Equal(0.0d, result.DynamicRange, 2);
+    }
+
+    [Fact]
     public void Parse_AcceptsLatestCompleteLoudnormReport()
     {
         const string output = """
