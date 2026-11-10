@@ -139,11 +139,12 @@ if (OperatingSystem.IsLinux() && Environment.UserName == "root")
     }
     finally { Directory.Delete(privateRoot, recursive: true); }
 }
-var lease = new FakeLease(new(intent, "rev1"));
+var leasedJob = new CloudMigrationJob(jobId, "profile", "Music", "local-to-vfs", "failed", "error", "/music", null, null, "remote", "path", "/previous", false, "rclone-check-download-content", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, Maintenance: intent, MaintenanceAdmission: admission);
+var lease = new FakeLease(new(leasedJob, "rev1"));
 var host = new FakeHost();
 var adapter = new LeasedOperations(lease, host);
 await adapter.ReadAsync(jobId, default);
-lease.Current = new(intent, "rev2");
+lease.Current = lease.Current with { Revision = "rev2" };
 try { await adapter.ExecuteAsync(intent, CloudMaintenanceAction.MoveSourceToBackup, default); throw new Exception("stale revision accepted"); }
 catch (InvalidOperationException ex) when (ex.Message == "journal-changed") { }
 if (host.Effects != 0) throw new Exception("effect on stale journal");
@@ -153,6 +154,7 @@ catch (InvalidOperationException ex) when (ex.Message == "maintenance-action-rej
 if (host.Effects != 0) throw new Exception("unauthorized effect");
 await adapter.ExecuteAsync(intent, CloudMaintenanceAction.MoveSourceToBackup, default);
 if (host.Effects != 1) throw new Exception("valid guarded action did not reach host");
+if (host.LastJob != leasedJob || host.LastAdmission != admission) throw new Exception("host did not receive the complete admitted job snapshot");
 var changed = intent with { Custody = custody with { RemotePath = "another" } };
 if (await adapter.CompareExchangeAsync(intent, changed, default)) throw new Exception("custody change accepted");
 var root = Path.Combine(Path.GetTempPath(), "maintenance-journal-" + Guid.NewGuid().ToString("N"));
@@ -185,6 +187,13 @@ sealed class FakeLease(MaintenanceSnapshot initial) : IMaintenanceLease
 sealed class FakeHost : IMaintenanceHost
 {
     public int Effects;
-    public Task<CloudMaintenanceObservation> ObserveAsync(CloudMaintenanceIntent intent, CancellationToken ct) => Task.FromResult(new CloudMaintenanceObservation(true, true, CloudMaintenancePathState.Expected, CloudMaintenancePathState.Missing, CloudMaintenanceMountState.Missing, false, false));
-    public Task<string?> ExecuteGuardedAsync(CloudMaintenanceIntent intent, CloudMaintenanceAction action, CancellationToken ct) { Effects++; return Task.FromResult<string?>(null); }
+    public CloudMigrationJob? LastJob;
+    public CloudMaintenanceAdmission? LastAdmission;
+    public Task<CloudMaintenanceObservation> ObserveAsync(MaintenanceSnapshot snapshot, CancellationToken ct)
+    {
+        LastJob = snapshot.Job;
+        LastAdmission = snapshot.Job.MaintenanceAdmission;
+        return Task.FromResult(new CloudMaintenanceObservation(true, true, CloudMaintenancePathState.Expected, CloudMaintenancePathState.Missing, CloudMaintenanceMountState.Missing, false, false));
+    }
+    public Task<string?> ExecuteGuardedAsync(MaintenanceSnapshot snapshot, CloudMaintenanceAction action, CancellationToken ct) { Effects++; return Task.FromResult<string?>(null); }
 }
