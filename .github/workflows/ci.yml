@@ -109,12 +109,13 @@ jobs:
         run: |
           dotnet run --project MaintenanceRunner/Tests/Slipmat.MaintenanceRunner.Tests.csproj --configuration Release --no-build --no-restore
           sudo python3 -m unittest discover -s scripts/tests -p 'test_maintenance_*.py' -v
+          python3 -m unittest scripts.tests.test_package_maintenance_runner -v
 
       - name: Package and exercise manifest tooling
         env:
           VERSION: ${{ steps.metadata.outputs.version }}
         run: |
-          mkdir -p dist/publish site
+          mkdir -p dist/publish dist/maintenance site
           dotnet publish Jellyfin.Plugin.AudioGateway.csproj \
             --configuration Release \
             --no-restore \
@@ -148,13 +149,29 @@ jobs:
             --output site/manifest.json
           python3 -m json.tool site/manifest.json >/dev/null
 
-      - name: Upload tested release candidate
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+          for rid in linux-x64 linux-arm64; do
+            publish_dir="dist/maintenance/$rid/publish"
+            dotnet publish MaintenanceRunner/Slipmat.MaintenanceRunner.csproj \
+              --configuration Release \
+              --runtime "$rid" \
+              --self-contained false \
+              --output "$publish_dir" \
+              -p:Version="$VERSION"
+            python3 scripts/package_maintenance_runner.py \
+              --publish-dir "$publish_dir" \
+              --output "dist/SlipmatMaintenanceRunner_${VERSION}_${rid}.tar.gz" \
+              --version "$VERSION" \
+              --rid "$rid"
+          done
+
+      - name: Upload candidate packages for review
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: companion-release-candidate-${{ steps.metadata.outputs.version }}
           path: |
             dist/AudioGateway_${{ steps.metadata.outputs.version }}.zip
             dist/changelog.md
+            dist/SlipmatMaintenanceRunner_${{ steps.metadata.outputs.version }}_linux-x64.tar.gz
+            dist/SlipmatMaintenanceRunner_${{ steps.metadata.outputs.version }}_linux-arm64.tar.gz
           if-no-files-found: error
           retention-days: 7
