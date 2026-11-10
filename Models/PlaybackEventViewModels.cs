@@ -20,7 +20,8 @@ public record TrackPlaybackAvailability(
     [property: JsonPropertyName("hasWaveform")] bool HasWaveform,
     [property: JsonPropertyName("hasSidecar")] bool HasSidecar,
     [property: JsonPropertyName("hasDerivedAnalysis")] bool HasDerivedAnalysis,
-    [property: JsonPropertyName("hasArtworkPalette")] bool HasArtworkPalette = false
+    [property: JsonPropertyName("hasArtworkPalette")] bool HasArtworkPalette = false,
+    [property: JsonPropertyName("hasAlbumLoudnessMeasurement")] bool HasAlbumLoudnessMeasurement = false
 );
 
 /// <summary>
@@ -32,7 +33,8 @@ public record TrackPlaybackEvent(
     [property: JsonPropertyName("sidecar")] AnalysisSidecarSummary? Sidecar,
     [property: JsonPropertyName("analysis")] AnalysisBlocks? Analysis,
     [property: JsonPropertyName("availability")] TrackPlaybackAvailability Availability,
-    [property: JsonPropertyName("artworkPalette")] ArtworkPaletteV1? ArtworkPalette = null
+    [property: JsonPropertyName("artworkPalette")] ArtworkPaletteV1? ArtworkPalette = null,
+    [property: JsonPropertyName("albumLoudnessMeasurement")] LoudnessMeasurementEvidenceV1? AlbumLoudnessMeasurement = null
 );
 
 /// <summary>

@@ -51,6 +51,12 @@ public static class StorePaths
         return Path.Combine(storeRoot, "analysis", $"{storeKey}.json");
     }
 
+    public static string AlbumLoudnessSidecarPath(string storeRoot, string storeKey)
+    {
+        ValidateStoreKey(storeKey);
+        return Path.Combine(storeRoot, "analysis-albums", $"{storeKey}.json");
+    }
+
     public static string AnalysisSourceStampPath(string storeRoot, string storeKey)
     {
         ValidateStoreKey(storeKey);

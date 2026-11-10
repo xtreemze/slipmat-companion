@@ -23,6 +23,8 @@ public enum IntegratedAnalysisStatus
 {
     Generated,
     Skipped,
+    Deferred,
+    CloudExcluded,
     Unsupported,
     Failed,
 }
@@ -203,6 +205,308 @@ public sealed class IntegratedAudioAnalyzer
         {
             _analysisGate.Release();
         }
+    }
+
+    /// <summary>Measures one complete, local album sequence using EBU R128 gating.</summary>
+    public async Task<IntegratedAnalysisResult> AnalyzeAlbumAsync(
+        Guid albumId,
+        CancellationToken cancellationToken,
+        bool onDemand = true)
+    {
+        var acquired = onDemand
+            ? await _analysisGate.WaitAsync(Timeout.Infinite, cancellationToken).ConfigureAwait(false)
+            : await _analysisGate.WaitAsync(0, cancellationToken).ConfigureAwait(false);
+        if (!acquired)
+        {
+            return new IntegratedAnalysisResult(
+                IntegratedAnalysisStatus.Deferred,
+                "Background album analysis yielded to active on-demand work.");
+        }
+
+        try
+        {
+            if (_library.GetItemById(albumId) is not MusicAlbum album)
+            {
+                return new IntegratedAnalysisResult(IntegratedAnalysisStatus.Unsupported);
+            }
+
+            var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+            var buildStatus = JellyfinAlbumLoudnessManifestFactory.TryBuild(
+                album,
+                config,
+                cancellationToken,
+                out var inputs,
+                out var manifest,
+                out var invalidReason);
+            if (buildStatus != AlbumManifestBuildStatus.Ready)
+            {
+                return new IntegratedAnalysisResult(
+                    buildStatus == AlbumManifestBuildStatus.CloudExcluded
+                        ? IntegratedAnalysisStatus.CloudExcluded
+                        : IntegratedAnalysisStatus.Unsupported,
+                    invalidReason);
+            }
+
+            return await AnalyzeAlbumSequenceAsync(
+                album,
+                inputs,
+                manifest!,
+                RuntimeSettings.ResolveStoreRoot(config),
+                _subjectFactory.ForItem(album.Id).StoreKey(),
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _analysisGate.Release();
+        }
+    }
+
+    private async Task<IntegratedAnalysisResult> AnalyzeAlbumSequenceAsync(
+        MusicAlbum album,
+        IReadOnlyList<AlbumLoudnessSourceInput> inputs,
+        AlbumLoudnessManifestV1 manifest,
+        string storeRoot,
+        string storeKey,
+        CancellationToken cancellationToken)
+    {
+        if (!IsAvailable)
+        {
+            return new IntegratedAnalysisResult(
+                IntegratedAnalysisStatus.Failed,
+                "Jellyfin FFmpeg or loudnorm support is unavailable.");
+        }
+
+        using var lease = await _artifactRetention
+            .AcquireAsync(storeRoot, storeKey, cancellationToken)
+            .ConfigureAwait(false);
+        var existing = _sidecarLoader.LoadAlbumLoudnessSidecarFromStore(storeRoot, storeKey);
+        var currentRecipe = existing?.Measurement.Analyzer.ConfigurationDigest
+            == FfmpegLoudnessParser.AlbumAnalyzerConfigurationDigest;
+        if (currentRecipe
+            && existing!.Manifest.MembershipFingerprint == manifest.MembershipFingerprint)
+        {
+            return new IntegratedAnalysisResult(IntegratedAnalysisStatus.Skipped);
+        }
+
+        try
+        {
+            var priorMembers = existing?.Manifest.Members.ToDictionary(member => member.ItemId);
+            var membersWithFingerprints = new List<AlbumLoudnessMemberV1>(manifest.Members.Count);
+            foreach (var member in manifest.Members)
+            {
+                var input = inputs.Single(value => value.Audio.Id.ToString("N") == member.ItemId);
+                string? fingerprint = null;
+                if (priorMembers is not null
+                    && priorMembers.TryGetValue(member.ItemId, out var prior)
+                    && SameAlbumSourceStamp(prior, member)
+                    && prior.SourceFingerprint is not null)
+                {
+                    fingerprint = prior.SourceFingerprint;
+                }
+
+                fingerprint ??= await FingerprintAsync(input.Audio.Path, cancellationToken).ConfigureAwait(false);
+                membersWithFingerprints.Add(member with { SourceFingerprint = fingerprint });
+            }
+
+            var fingerprintedManifest = manifest with { Members = membersWithFingerprints };
+            var sourceFingerprint = AlbumLoudnessManifestV1.ComputeSourceFingerprint(membersWithFingerprints);
+            if (existing is not null
+                && currentRecipe
+                && string.Equals(existing.SourceFingerprint, sourceFingerprint, StringComparison.Ordinal))
+            {
+                var refreshed = existing with
+                {
+                    Manifest = fingerprintedManifest,
+                    GeneratedAt = DateTimeOffset.UtcNow.ToString("O"),
+                };
+                await WriteAlbumLoudnessSidecarAsync(storeRoot, storeKey, refreshed, cancellationToken)
+                    .ConfigureAwait(false);
+                return new IntegratedAnalysisResult(IntegratedAnalysisStatus.Skipped);
+            }
+
+            var beforeMeasure = BuildCurrentAlbumManifest(album.Id, cancellationToken);
+            if (beforeMeasure?.MembershipFingerprint != manifest.MembershipFingerprint)
+            {
+                return new IntegratedAnalysisResult(
+                    IntegratedAnalysisStatus.Failed,
+                    "Album membership or a source changed while fingerprinting.");
+            }
+
+            var loudness = await MeasureAlbumSequenceAsync(inputs, cancellationToken).ConfigureAwait(false);
+            var afterMeasure = BuildCurrentAlbumManifest(album.Id, cancellationToken);
+            if (afterMeasure?.MembershipFingerprint != manifest.MembershipFingerprint)
+            {
+                return new IntegratedAnalysisResult(
+                    IntegratedAnalysisStatus.Failed,
+                    "Album membership or a source changed while analysis was running.");
+            }
+
+            var durationMs = inputs.Sum(input => Math.Max(0L, input.Audio.RunTimeTicks ?? 0L))
+                / TimeSpan.TicksPerMillisecond;
+            var sidecar = new AlbumLoudnessSidecarV1(
+                Version: AlbumLoudnessSidecarV1.CurrentVersion,
+                SubjectStoreKey: storeKey,
+                SourceFingerprint: sourceFingerprint,
+                Manifest: fingerprintedManifest,
+                DurationMs: durationMs,
+                Measurement: FfmpegLoudnessParser.ToAlbumMeasurementEvidence(loudness),
+                GeneratedAt: DateTimeOffset.UtcNow.ToString("O"));
+            await WriteAlbumLoudnessSidecarAsync(storeRoot, storeKey, sidecar, cancellationToken)
+                .ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "Generated album-sequence loudness evidence for Jellyfin album {AlbumId} ({TrackCount} local tracks, {DurationMs} ms)",
+                album.Id,
+                inputs.Count,
+                durationMs);
+            return new IntegratedAnalysisResult(IntegratedAnalysisStatus.Generated);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Album-sequence loudness analysis failed for Jellyfin album {AlbumId}", album.Id);
+            return new IntegratedAnalysisResult(IntegratedAnalysisStatus.Failed, ex.GetType().Name);
+        }
+    }
+
+    private AlbumLoudnessManifestV1? BuildCurrentAlbumManifest(
+        Guid albumId,
+        CancellationToken cancellationToken)
+    {
+        if (_library.GetItemById(albumId) is not MusicAlbum album) return null;
+        var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+        cancellationToken.ThrowIfCancellationRequested();
+        return JellyfinAlbumLoudnessManifestFactory.TryBuild(
+            album,
+            config,
+            cancellationToken,
+            out _,
+            out var manifest,
+            out _) == AlbumManifestBuildStatus.Ready
+                ? manifest
+                : null;
+    }
+
+    private async Task<LoudnessAnalysis> MeasureAlbumSequenceAsync(
+        IReadOnlyList<AlbumLoudnessSourceInput> inputs,
+        CancellationToken cancellationToken)
+    {
+        var layout = inputs[0].ChannelLayout.Trim().ToLowerInvariant();
+        var filter = BuildAlbumLoudnessFilterGraph(
+            inputs.Select(input => input.StreamIndex).ToArray(),
+            layout);
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = _mediaEncoder.EncoderPath,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+        startInfo.ArgumentList.Add("-nostdin");
+        startInfo.ArgumentList.Add("-hide_banner");
+        startInfo.ArgumentList.Add("-nostats");
+        startInfo.ArgumentList.Add("-loglevel");
+        startInfo.ArgumentList.Add("info");
+        startInfo.ArgumentList.Add("-filter_complex_threads");
+        startInfo.ArgumentList.Add("1");
+        foreach (var input in inputs)
+        {
+            startInfo.ArgumentList.Add("-i");
+            startInfo.ArgumentList.Add(input.Audio.Path);
+        }
+        startInfo.ArgumentList.Add("-filter_complex");
+        startInfo.ArgumentList.Add(filter);
+        startInfo.ArgumentList.Add("-map");
+        startInfo.ArgumentList.Add("[measured]");
+        startInfo.ArgumentList.Add("-vn");
+        startInfo.ArgumentList.Add("-sn");
+        startInfo.ArgumentList.Add("-dn");
+        startInfo.ArgumentList.Add("-threads");
+        startInfo.ArgumentList.Add("1");
+        startInfo.ArgumentList.Add("-f");
+        startInfo.ArgumentList.Add("null");
+        startInfo.ArgumentList.Add("-");
+
+        using var process = new Process { StartInfo = startInfo };
+        if (!process.Start()) throw new InvalidOperationException("Unable to start Jellyfin FFmpeg.");
+        try
+        {
+            process.PriorityClass = ProcessPriorityClass.BelowNormal;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Unable to lower album loudness FFmpeg priority.");
+        }
+
+        using var cancellationRegistration = cancellationToken.Register(
+            static state =>
+            {
+                var child = (Process)state!;
+                try
+                {
+                    if (!child.HasExited) child.Kill(entireProcessTree: true);
+                }
+                catch { }
+            },
+            process);
+
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        await stdoutTask.ConfigureAwait(false);
+        var stderr = await stderrTask.ConfigureAwait(false);
+        if (process.ExitCode != 0)
+        {
+            _logger.LogDebug(
+                "Album loudness FFmpeg exited with code {ExitCode}; diagnostic bytes={DiagnosticLength}",
+                process.ExitCode,
+                stderr.Length);
+            throw new InvalidOperationException($"FFmpeg exited with code {process.ExitCode}.");
+        }
+
+        return FfmpegLoudnessParser.Parse(stderr)
+            ?? throw new InvalidDataException("FFmpeg completed without parseable album loudnorm input statistics.");
+    }
+
+    internal static string BuildAlbumLoudnessFilterGraph(
+        IReadOnlyList<int> streamIndices,
+        string channelLayout)
+    {
+        if (streamIndices.Count == 0) throw new ArgumentException("Album sequence has no tracks.", nameof(streamIndices));
+        if (streamIndices.Any(streamIndex => streamIndex < 0))
+            throw new ArgumentOutOfRangeException(nameof(streamIndices), "Audio stream indices must be non-negative.");
+        var graph = streamIndices.Select((streamIndex, index) =>
+                $"[{index}:{streamIndex}]aresample=48000:async=0:first_pts=0," +
+                $"aformat=sample_fmts=fltp:channel_layouts={channelLayout}," +
+                $"asetpts=PTS-STARTPTS[a{index}]")
+            .ToList();
+        var concatInputs = string.Concat(Enumerable.Range(0, streamIndices.Count).Select(index => $"[a{index}]"));
+        graph.Add($"{concatInputs}concat=n={streamIndices.Count}:v=0:a=1[album]");
+        graph.Add("[album]loudnorm=I=-23:TP=-2:LRA=7:print_format=json[measured]");
+        return string.Join(';', graph);
+    }
+
+    private static bool SameAlbumSourceStamp(
+        AlbumLoudnessMemberV1 left,
+        AlbumLoudnessMemberV1 right)
+        => left.ItemId == right.ItemId
+            && left.SourceLength == right.SourceLength
+            && left.SourceLastWriteUtcTicks == right.SourceLastWriteUtcTicks
+            && left.SourceLocatorFingerprint == right.SourceLocatorFingerprint;
+
+    private static async Task WriteAlbumLoudnessSidecarAsync(
+        string storeRoot,
+        string storeKey,
+        AlbumLoudnessSidecarV1 sidecar,
+        CancellationToken cancellationToken)
+    {
+        var path = StorePaths.AlbumLoudnessSidecarPath(storeRoot, storeKey);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(sidecar, SidecarJsonOptions);
+        await AtomicWriteAsync(path, bytes, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<IntegratedAnalysisResult> AnalyzeLocalAudioAsync(

@@ -75,7 +75,11 @@ public class TrackPlaybackEventService
             sidecar = null;
         }
 
-        if (sidecar is null)
+        var albumLoudnessMeasurement = include.HasFlag(IncludeFlags.Analysis)
+            ? LoadCurrentAlbumLoudnessMeasurement(audio, storeRoot)
+            : null;
+        if (sidecar is null
+            || (include.HasFlag(IncludeFlags.Analysis) && albumLoudnessMeasurement is null))
         {
             _analysisWorker.TryEnqueue(itemGuid);
         }
@@ -88,7 +92,8 @@ public class TrackPlaybackEventService
             sidecar,
             include,
             waveformPps,
-            artworkPalette);
+            artworkPalette,
+            albumLoudnessMeasurement);
     }
 
     /// <summary>Composes events for the valid Jellyfin items in the supplied ID list.</summary>
@@ -115,5 +120,36 @@ public class TrackPlaybackEventService
         }
 
         return results;
+    }
+
+    private LoudnessMeasurementEvidenceV1? LoadCurrentAlbumLoudnessMeasurement(
+        Audio audio,
+        string storeRoot)
+    {
+        if (_library.GetItemById(audio.ParentId) is not MusicAlbum album)
+        {
+            return null;
+        }
+
+        var subjectStoreKey = _subjectFactory.ForItem(album.Id).StoreKey();
+        using var lease = _artifactRetention.TryAcquire(storeRoot, subjectStoreKey);
+        if (lease is null) return null;
+        var sidecar = _sidecarLoader.LoadAlbumLoudnessSidecarFromStore(storeRoot, subjectStoreKey);
+        if (sidecar is null) return null;
+
+        var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+        if (JellyfinAlbumLoudnessManifestFactory.TryBuild(
+                album,
+                config,
+                System.Threading.CancellationToken.None,
+                out _,
+                out var currentManifest,
+                out _) != AlbumManifestBuildStatus.Ready
+            || currentManifest?.MembershipFingerprint != sidecar.Manifest.MembershipFingerprint)
+        {
+            return null;
+        }
+
+        return sidecar.Measurement;
     }
 }
