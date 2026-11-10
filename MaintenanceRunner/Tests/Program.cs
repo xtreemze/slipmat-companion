@@ -156,6 +156,13 @@ if (host.Effects != 0) throw new Exception("unauthorized effect");
 await adapter.ExecuteAsync(leasedIntent, CloudMaintenanceAction.MoveSourceToBackup, default);
 if (host.Effects != 1) throw new Exception("valid guarded action did not reach host");
 if (host.LastJob != leasedJob || host.LastAdmission != admission) throw new Exception("host did not receive the complete admitted job snapshot");
+var racingLease = new FakeLease(new(leasedJob, "rev1"));
+var racingHost = new FakeHost { AfterObserve = () => racingLease.Current = racingLease.Current with { Revision = "rev2" } };
+var racingAdapter = new LeasedOperations(racingLease, racingHost);
+await racingAdapter.ReadAsync(jobId, default);
+try { await racingAdapter.ExecuteAsync(leasedIntent, CloudMaintenanceAction.MoveSourceToBackup, default); throw new Exception("journal change during observation reached a host effect"); }
+catch (InvalidOperationException ex) when (ex.Message == "journal-changed") { }
+if (racingHost.Effects != 0) throw new Exception("effect ran after journal changed during observation");
 var changedAdmissionJob = leasedJob with { MaintenanceAdmission = admission with { RemoteName = "foreign-remote" } };
 var changedAdmissionHost = new FakeHost();
 var changedAdmissionAdapter = new LeasedOperations(new FakeLease(new(changedAdmissionJob, "rev1")), changedAdmissionHost);
@@ -196,10 +203,12 @@ sealed class FakeHost : IMaintenanceHost
     public int Effects;
     public CloudMigrationJob? LastJob;
     public CloudMaintenanceAdmission? LastAdmission;
+    public Action? AfterObserve;
     public Task<CloudMaintenanceObservation> ObserveAsync(MaintenanceSnapshot snapshot, CancellationToken ct)
     {
         LastJob = snapshot.Job;
         LastAdmission = snapshot.Job.MaintenanceAdmission;
+        AfterObserve?.Invoke();
         return Task.FromResult(new CloudMaintenanceObservation(true, true, CloudMaintenancePathState.Expected, CloudMaintenancePathState.Missing, CloudMaintenanceMountState.Missing, false, false));
     }
     public Task<string?> ExecuteGuardedAsync(MaintenanceSnapshot snapshot, CloudMaintenanceAction action, CancellationToken ct) { Effects++; return Task.FromResult<string?>(null); }
