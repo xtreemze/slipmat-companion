@@ -1,6 +1,6 @@
 {
   "upstreamRepository": "xtreemze/slipmat",
-  "upstreamCommit": "b4f33cf30d458513722c30e2378420b560d9d356",
+  "upstreamCommit": "35d6c075947bc0ecdbfc80214132e79f041f3cbb",
   "files": {
     "schema/analysis.schema.json": "17b617c848e30b4a3d231d7227793f8a375329d3",
     "schema/server-extension-analysis-artifact-v1.schema.json": "d89ef09e3c3c994dbc9b722069994f9e6fa36d45",
@@ -19,8 +19,8 @@
     "schema/examples/server_extension_analysis_coverage_response.example.json": "156919fb8364dd56be4053455eac20745c8e132a",
     "schema/examples/server_extension_capabilities.degraded.example.json": "99c49d64698dabffab374ecb9b3a66a3735e269f",
     "schema/examples/server_extension_capabilities.example.json": "bc8b238145c754f668a53433dda654f14b71859b",
-    "schema/examples/server_extension_track_playback_event.example.json": "f72c71840a277fd5a1371017bfa8c27ff2f8a425",
-    "schema/examples/server_extension_track_playback_batch.example.json": "d2e153be2892371d5e0b2b963bf9c41fba62a5be",
+    "schema/examples/server_extension_track_playback_event.example.json": "fc7ef6665eecf56bfcafd65db220bd8e3c4f7d15",
+    "schema/examples/server_extension_track_playback_batch.example.json": "66182446af6d3357a0fb8a91d5b9dc4767deaaff",
     "schema/examples/track_event.example.json": "61009bbc2affb6f7e7cd0e9da17eaf08d0c4dd7a",
     "schema/examples/track_event.minimal.example.json": "54c63a5da5423ee04102760fa50682ba779942e8"
   }
