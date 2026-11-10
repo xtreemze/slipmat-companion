@@ -139,24 +139,31 @@ if (OperatingSystem.IsLinux() && Environment.UserName == "root")
     }
     finally { Directory.Delete(privateRoot, recursive: true); }
 }
-var leasedJob = new CloudMigrationJob(jobId, "profile", "Music", "local-to-vfs", "failed", "error", "/music", null, null, "remote", "path", "/previous", false, "rclone-check-download-content", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, Maintenance: intent, MaintenanceAdmission: admission);
+var leasedIntent = intent with { Custody = custody with { LocalPath = admission.LocalPath, BackupPath = "/mnt/backup" } };
+var leasedJob = new CloudMigrationJob(jobId, admission.ProfileId, admission.LibraryName, CloudMigrationDirections.LocalToVfs, CloudMigrationPhases.ReadyForCutover, "ready", admission.LocalPath, null, null, admission.RemoteName, admission.RemotePath, admission.PreviousProjectionPath, admission.PreviousEnabled, admission.Verification, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, ManifestDigestSha256: admission.ManifestDigestSha256, Maintenance: leasedIntent, MaintenanceAdmission: admission);
 var lease = new FakeLease(new(leasedJob, "rev1"));
 var host = new FakeHost();
 var adapter = new LeasedOperations(lease, host);
 await adapter.ReadAsync(jobId, default);
 lease.Current = lease.Current with { Revision = "rev2" };
-try { await adapter.ExecuteAsync(intent, CloudMaintenanceAction.MoveSourceToBackup, default); throw new Exception("stale revision accepted"); }
+try { await adapter.ExecuteAsync(leasedIntent, CloudMaintenanceAction.MoveSourceToBackup, default); throw new Exception("stale revision accepted"); }
 catch (InvalidOperationException ex) when (ex.Message == "journal-changed") { }
 if (host.Effects != 0) throw new Exception("effect on stale journal");
 await adapter.ReadAsync(jobId, default);
-try { await adapter.ExecuteAsync(intent, CloudMaintenanceAction.Unmount, default); throw new Exception("wrong action accepted"); }
+try { await adapter.ExecuteAsync(leasedIntent, CloudMaintenanceAction.Unmount, default); throw new Exception("wrong action accepted"); }
 catch (InvalidOperationException ex) when (ex.Message == "maintenance-action-rejected") { }
 if (host.Effects != 0) throw new Exception("unauthorized effect");
-await adapter.ExecuteAsync(intent, CloudMaintenanceAction.MoveSourceToBackup, default);
+await adapter.ExecuteAsync(leasedIntent, CloudMaintenanceAction.MoveSourceToBackup, default);
 if (host.Effects != 1) throw new Exception("valid guarded action did not reach host");
 if (host.LastJob != leasedJob || host.LastAdmission != admission) throw new Exception("host did not receive the complete admitted job snapshot");
-var changed = intent with { Custody = custody with { RemotePath = "another" } };
-if (await adapter.CompareExchangeAsync(intent, changed, default)) throw new Exception("custody change accepted");
+var changedAdmissionJob = leasedJob with { MaintenanceAdmission = admission with { RemoteName = "foreign-remote" } };
+var changedAdmissionHost = new FakeHost();
+var changedAdmissionAdapter = new LeasedOperations(new FakeLease(new(changedAdmissionJob, "rev1")), changedAdmissionHost);
+try { await changedAdmissionAdapter.ReadAsync(jobId, default); throw new Exception("changed admitted binding reached the host adapter"); }
+catch (InvalidOperationException ex) when (ex.Message == "maintenance-job-binding-mismatch") { }
+if (changedAdmissionHost.LastJob is not null || changedAdmissionHost.Effects != 0) throw new Exception("host observed a job with changed admission bindings");
+var changed = leasedIntent with { Custody = leasedIntent.Custody with { RemotePath = "another" } };
+if (await adapter.CompareExchangeAsync(leasedIntent, changed, default)) throw new Exception("custody change accepted");
 var root = Path.Combine(Path.GetTempPath(), "maintenance-journal-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 try

@@ -32,13 +32,21 @@ public sealed class LeasedOperations(IMaintenanceLease lease, IMaintenanceHost h
     public async Task<CloudMaintenanceIntent?> ReadAsync(string jobId, CancellationToken cancellationToken)
     {
         _snapshot = await lease.ReadAsync(jobId, cancellationToken).ConfigureAwait(false);
-        return _snapshot?.Intent;
+        if (_snapshot is null) return null;
+        var intent = _snapshot.Job.Maintenance;
+        if (intent is null) return null;
+        if (intent.JobId != jobId || !MatchesAdmittedJob(_snapshot, intent))
+        {
+            _snapshot = null;
+            throw new InvalidOperationException("maintenance-job-binding-mismatch");
+        }
+        return intent;
     }
 
-    public Task<CloudMaintenanceObservation> ObserveAsync(CloudMaintenanceIntent intent, CancellationToken cancellationToken)
+    public async Task<CloudMaintenanceObservation> ObserveAsync(CloudMaintenanceIntent intent, CancellationToken cancellationToken)
     {
-        RequireCurrent(intent);
-        return host.ObserveAsync(_snapshot!, cancellationToken);
+        await EnsureUnchangedAsync(intent, cancellationToken).ConfigureAwait(false);
+        return await host.ObserveAsync(_snapshot!, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<bool> CompareExchangeAsync(CloudMaintenanceIntent expected, CloudMaintenanceIntent replacement, CancellationToken cancellationToken)
@@ -46,8 +54,12 @@ public sealed class LeasedOperations(IMaintenanceLease lease, IMaintenanceHost h
         RequireCurrent(expected);
         if (replacement.JobId != expected.JobId || replacement.Custody != expected.Custody || replacement.LocalIdentity != expected.LocalIdentity || replacement.Direction != expected.Direction)
             return false;
-        var next = await lease.CompareExchangeAsync(_snapshot!, replacement, cancellationToken).ConfigureAwait(false);
-        if (next is null || next.Intent != replacement || string.IsNullOrEmpty(next.Revision))
+        var current = _snapshot!;
+        var next = await lease.CompareExchangeAsync(current, replacement, cancellationToken).ConfigureAwait(false);
+        var expectedJob = current.Job with { Maintenance = replacement };
+        if (next is null || next.Job != expectedJob || next.Intent != replacement
+            || string.IsNullOrEmpty(next.Revision) || next.Revision == current.Revision
+            || !MatchesAdmittedJob(next, replacement))
         {
             _snapshot = null;
             return false;
@@ -58,18 +70,56 @@ public sealed class LeasedOperations(IMaintenanceLease lease, IMaintenanceHost h
 
     public async Task<string?> ExecuteAsync(CloudMaintenanceIntent intent, CloudMaintenanceAction action, CancellationToken cancellationToken)
     {
-        RequireCurrent(intent);
-        var latest = await lease.ReadAsync(intent.JobId, cancellationToken).ConfigureAwait(false);
-        if (latest is null || latest.Revision != _snapshot!.Revision) throw new InvalidOperationException("journal-changed");
-        var observation = await host.ObserveAsync(_snapshot, cancellationToken).ConfigureAwait(false);
+        await EnsureUnchangedAsync(intent, cancellationToken).ConfigureAwait(false);
+        var observation = await host.ObserveAsync(_snapshot!, cancellationToken).ConfigureAwait(false);
         if (CloudMaintenanceTransaction.Decide(intent, observation).Action != action || action is CloudMaintenanceAction.Blocked or CloudMaintenanceAction.PersistPhase or CloudMaintenanceAction.Complete)
             throw new InvalidOperationException("maintenance-action-rejected");
-        return await host.ExecuteGuardedAsync(_snapshot, action, cancellationToken).ConfigureAwait(false);
+        await EnsureUnchangedAsync(intent, cancellationToken).ConfigureAwait(false);
+        return await host.ExecuteGuardedAsync(_snapshot!, action, cancellationToken).ConfigureAwait(false);
     }
 
     private void RequireCurrent(CloudMaintenanceIntent intent)
     {
-        if (_snapshot is null || _snapshot.Intent != intent || string.IsNullOrEmpty(_snapshot.Revision))
+        if (_snapshot is null || string.IsNullOrEmpty(_snapshot.Revision)
+            || !MatchesAdmittedJob(_snapshot, intent))
             throw new InvalidOperationException("journal-snapshot-stale");
+    }
+
+    private async Task EnsureUnchangedAsync(CloudMaintenanceIntent intent, CancellationToken cancellationToken)
+    {
+        RequireCurrent(intent);
+        var latest = await lease.ReadAsync(intent.JobId, cancellationToken).ConfigureAwait(false);
+        if (latest is null || latest.Revision != _snapshot!.Revision)
+            throw new InvalidOperationException("journal-changed");
+        if (!MatchesAdmittedJob(latest, intent))
+            throw new InvalidOperationException("maintenance-job-binding-mismatch");
+    }
+
+    private static bool MatchesAdmittedJob(MaintenanceSnapshot snapshot, CloudMaintenanceIntent intent)
+    {
+        var job = snapshot.Job;
+        var admission = job.MaintenanceAdmission;
+        var custody = intent.Custody;
+        if (job.Id != intent.JobId || job.Maintenance != intent || admission is null || custody is null
+            || !Guid.TryParse(custody.LibraryId, out var libraryId)) return false;
+        return libraryId == admission.LibraryId
+            && custody.LibraryName == admission.LibraryName
+            && custody.LocalPath == admission.LocalPath
+            && custody.ProfileId == admission.ProfileId
+            && custody.RemoteName == admission.RemoteName
+            && custody.RemotePath == admission.RemotePath
+            && string.Equals(custody.ManifestDigest, admission.ManifestDigestSha256, StringComparison.OrdinalIgnoreCase)
+            && custody.Verification == admission.Verification
+            && job.Direction == CloudMigrationDirections.LocalToVfs
+            && job.Phase == CloudMigrationPhases.ReadyForCutover
+            && job.ProfileId == admission.ProfileId
+            && job.LibraryName == admission.LibraryName
+            && job.LocalPath == admission.LocalPath
+            && job.RemoteName == admission.RemoteName
+            && job.RemotePath == admission.RemotePath
+            && job.PreviousProjectionPath == admission.PreviousProjectionPath
+            && job.PreviousEnabled == admission.PreviousEnabled
+            && string.Equals(job.ManifestDigestSha256, admission.ManifestDigestSha256, StringComparison.OrdinalIgnoreCase)
+            && job.Verification == admission.Verification;
     }
 }
