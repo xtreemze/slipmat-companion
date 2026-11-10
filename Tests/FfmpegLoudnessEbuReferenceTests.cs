@@ -1,5 +1,8 @@
 using System.Diagnostics;
+using System.IO;
+using System.Threading;
 using Jellyfin.Plugin.AudioGateway.Models;
+using Jellyfin.Plugin.AudioGateway.Services;
 using Jellyfin.Plugin.AudioGateway.Services.Analysis;
 using Xunit;
 
@@ -39,6 +42,103 @@ public class FfmpegLoudnessEbuReferenceTests
             + "0.0316227766*sin(2*PI*1000*t):s=48000:d=20:c=5.0");
 
         Assert.InRange(result.IntegratedLufs, -23.1d, -22.9d);
+    }
+
+    [Fact]
+    public async Task JellyfinFfmpeg_MeasuresEbuGatingAcrossOrderedAlbumTracks()
+    {
+        // EBU Tech 3341:2023 Test 3 is 10 s at -36 dBFS, 60 s at -23 dBFS,
+        // and 10 s at -36 dBFS. Split each programme segment into its own
+        // track so loudnorm must gate the concatenated album as one sequence.
+        var ffmpeg = RequireFfmpeg();
+        var directory = Path.Combine(Path.GetTempPath(), $"slipmat-album-loudness-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var tracks = new[]
+            {
+                (DurationSeconds: 10, Amplitude: "0.0158489319"),
+                (DurationSeconds: 60, Amplitude: "0.0707945784"),
+                (DurationSeconds: 10, Amplitude: "0.0158489319"),
+            };
+            var paths = new string[tracks.Length];
+            for (var index = 0; index < tracks.Length; index++)
+            {
+                var (durationSeconds, amplitude) = tracks[index];
+                paths[index] = Path.Combine(directory, $"track-{index + 1}.wav");
+                var tone =
+                    $"{amplitude}*sin(2*PI*1000*t)|{amplitude}*sin(2*PI*1000*t):s=48000:d={durationSeconds}:c=stereo";
+                await RunFfmpegAsync(ffmpeg, new[]
+                {
+                    "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+                    "-f", "lavfi", "-i", $"aevalsrc={tone}",
+                    "-c:a", "pcm_f32le", paths[index],
+                });
+            }
+
+            var result = await MeasureAlbumSequenceAsync(ffmpeg, paths);
+
+            Assert.NotNull(result);
+            Assert.InRange(result!.IntegratedLufs, -23.1d, -22.9d);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task JellyfinFfmpeg_DoesNotProduceAlbumMeasurementForSilence()
+    {
+        var ffmpeg = RequireFfmpeg();
+        var directory = Path.Combine(Path.GetTempPath(), $"slipmat-silent-album-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var trackPath = Path.Combine(directory, "silence.wav");
+            await RunFfmpegAsync(ffmpeg, new[]
+            {
+                "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "lavfi", "-i", "aevalsrc=0|0:s=48000:d=5:c=stereo",
+                "-c:a", "pcm_f32le", trackPath,
+            });
+
+            var result = await MeasureAlbumSequenceAsync(ffmpeg, [trackPath]);
+
+            Assert.Null(result);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task JellyfinFfmpeg_MeasuresMonoAlbumSequence()
+    {
+        var ffmpeg = RequireFfmpeg();
+        var directory = Path.Combine(Path.GetTempPath(), $"slipmat-mono-album-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var trackPath = Path.Combine(directory, "mono.wav");
+            await RunFfmpegAsync(ffmpeg, new[]
+            {
+                "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "lavfi", "-i", "aevalsrc=0.1*sin(2*PI*1000*t):s=48000:d=20:c=mono",
+                "-c:a", "pcm_f32le", trackPath,
+            });
+
+            var result = await MeasureAlbumSequenceAsync(ffmpeg, [trackPath], "mono");
+
+            Assert.NotNull(result);
+            Assert.InRange(result!.IntegratedLufs, -23.1d, -22.9d);
+            Assert.InRange(result.TruePeak, -20.1d, -19.9d);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     private static string RequireFfmpeg()
@@ -87,5 +187,97 @@ public class FfmpegLoudnessEbuReferenceTests
         var result = FfmpegLoudnessParser.Parse(diagnostics);
         Assert.NotNull(result);
         return result!;
+    }
+
+    private static async Task RunFfmpegAsync(string ffmpeg, IEnumerable<string> arguments)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = ffmpeg,
+            UseShellExecute = false,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = new Process { StartInfo = startInfo };
+        Assert.True(process.Start(), "Jellyfin FFmpeg did not start.");
+        var diagnosticsTask = process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync();
+            Assert.Fail("Jellyfin FFmpeg did not generate an album track in 30 seconds.");
+        }
+
+        var diagnostics = await diagnosticsTask;
+        Assert.True(process.ExitCode == 0, $"Jellyfin FFmpeg exited {process.ExitCode}: {diagnostics}");
+    }
+
+    private static async Task<LoudnessAnalysis?> MeasureAlbumSequenceAsync(
+        string ffmpeg,
+        IReadOnlyList<string> trackPaths,
+        string channelLayout = "stereo")
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = ffmpeg,
+            UseShellExecute = false,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+        startInfo.ArgumentList.Add("-nostdin");
+        startInfo.ArgumentList.Add("-hide_banner");
+        startInfo.ArgumentList.Add("-nostats");
+        startInfo.ArgumentList.Add("-loglevel");
+        startInfo.ArgumentList.Add("info");
+        startInfo.ArgumentList.Add("-filter_complex_threads");
+        startInfo.ArgumentList.Add("1");
+        foreach (var path in trackPaths)
+        {
+            startInfo.ArgumentList.Add("-i");
+            startInfo.ArgumentList.Add(path);
+        }
+        startInfo.ArgumentList.Add("-filter_complex");
+        startInfo.ArgumentList.Add(IntegratedAudioAnalyzer.BuildAlbumLoudnessFilterGraph(
+            Enumerable.Repeat(0, trackPaths.Count).ToArray(),
+            channelLayout));
+        startInfo.ArgumentList.Add("-map");
+        startInfo.ArgumentList.Add("[measured]");
+        startInfo.ArgumentList.Add("-vn");
+        startInfo.ArgumentList.Add("-sn");
+        startInfo.ArgumentList.Add("-dn");
+        startInfo.ArgumentList.Add("-threads");
+        startInfo.ArgumentList.Add("1");
+        startInfo.ArgumentList.Add("-f");
+        startInfo.ArgumentList.Add("null");
+        startInfo.ArgumentList.Add("-");
+
+        using var process = new Process { StartInfo = startInfo };
+        Assert.True(process.Start(), "Jellyfin FFmpeg did not start.");
+        var diagnosticsTask = process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync();
+            Assert.Fail("Jellyfin FFmpeg did not finish the album sequence in 30 seconds.");
+        }
+
+        var diagnostics = await diagnosticsTask;
+        Assert.True(process.ExitCode == 0, $"Jellyfin FFmpeg exited {process.ExitCode}: {diagnostics}");
+        return FfmpegLoudnessParser.Parse(diagnostics);
     }
 }

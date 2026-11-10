@@ -15,6 +15,10 @@ internal static class FfmpegLoudnessParser
     public const string AnalyzerVersion = "1";
     public const string AnalyzerConfigurationDigest =
         "sha256:d067e146e6dd806228d993e7cb40501a80c464fb84af3af7ecfa32f5fca2b4ec";
+    public const string AlbumAnalyzerConfiguration =
+        "ffmpeg-loudnorm-input-v1|album-sequence=disc-track-id|per-input=aresample=48000:async=0:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=exact-source-layout,asetpts=PTS-STARTPTS|concat=n=N:v=0:a=1|loudnorm=I=-23:TP=-2:LRA=7:print_format=json|fields=input_i,input_tp,input_lra|scope=album";
+    public const string AlbumAnalyzerConfigurationDigest =
+        "sha256:66d6caca65433193fc2c33c78f2ff8b1dfdc26ea33025551dd40412dae712f08";
 
     public static LoudnessAnalysis? Parse(string diagnosticOutput)
     {
@@ -45,6 +49,22 @@ internal static class FfmpegLoudnessParser
                 AnalyzerName,
                 AnalyzerVersion,
                 AnalyzerConfigurationDigest),
+            IntegratedLufs: loudness.IntegratedLufs,
+            TruePeakDbtp: loudness.TruePeak,
+            LoudnessRangeLu: loudness.DynamicRange);
+
+    /// <summary>Projects whole-album sequence loudness, separate from every track measurement.</summary>
+    public static LoudnessMeasurementEvidenceV1 ToAlbumMeasurementEvidence(
+        LoudnessAnalysis loudness)
+        => new(
+            Version: MeasurementContractVersion,
+            Scope: "album",
+            Authority: MeasurementAuthority,
+            Semantics: MeasurementSemantics,
+            Analyzer: new LoudnessAnalyzerIdentityV1(
+                AnalyzerName,
+                AnalyzerVersion,
+                AlbumAnalyzerConfigurationDigest),
             IntegratedLufs: loudness.IntegratedLufs,
             TruePeakDbtp: loudness.TruePeak,
             LoudnessRangeLu: loudness.DynamicRange);

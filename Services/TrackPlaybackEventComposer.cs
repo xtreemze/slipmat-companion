@@ -17,7 +17,8 @@ public static class TrackPlaybackEventComposer
         AnalysisSidecar? sidecar,
         IncludeFlags include,
         int waveformPps,
-        ArtworkPaletteV1? artworkPalette = null)
+        ArtworkPaletteV1? artworkPalette = null,
+        LoudnessMeasurementEvidenceV1? albumLoudnessMeasurement = null)
     {
         var waveform = include.HasFlag(IncludeFlags.Waveform) && sidecar is not null
             ? BuildWaveformRef(artifactItemId, sidecar, waveformPps)
@@ -34,12 +35,16 @@ public static class TrackPlaybackEventComposer
         var analysis = include.HasFlag(IncludeFlags.Analysis)
             ? sidecar?.Analysis
             : null;
+        var albumMeasurement = include.HasFlag(IncludeFlags.Analysis)
+            ? albumLoudnessMeasurement
+            : null;
 
         var availability = new TrackPlaybackAvailability(
             HasWaveform: sidecar?.WaveformRefs?.Count > 0,
             HasSidecar: sidecar is not null,
             HasDerivedAnalysis: sidecar?.Analysis is not null,
-            HasArtworkPalette: artworkPalette is not null);
+            HasArtworkPalette: artworkPalette is not null,
+            HasAlbumLoudnessMeasurement: albumMeasurement is not null);
 
         return new TrackPlaybackEvent(
             Track: track,
@@ -47,7 +52,8 @@ public static class TrackPlaybackEventComposer
             Sidecar: sidecarSummary,
             Analysis: analysis,
             Availability: availability,
-            ArtworkPalette: artworkPalette);
+            ArtworkPalette: artworkPalette,
+            AlbumLoudnessMeasurement: albumMeasurement);
     }
 
     private static WaveformRef? BuildWaveformRef(

@@ -42,4 +42,20 @@ public class SidecarLoader
         try { return JsonSerializer.Deserialize<AnalysisSidecar>(json, _options); }
         catch { return null; }
     }
+
+    public AlbumLoudnessSidecarV1? LoadAlbumLoudnessSidecarFromStore(string storeRoot, string subjectStoreKey)
+    {
+        var path = StorePaths.AlbumLoudnessSidecarPath(storeRoot, subjectStoreKey);
+        if (!File.Exists(path)) return null;
+        try
+        {
+            var json = File.ReadAllText(path);
+            var sidecar = JsonSerializer.Deserialize<AlbumLoudnessSidecarV1>(json, _options);
+            return sidecar?.IsCurrentFor(subjectStoreKey) == true ? sidecar : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }

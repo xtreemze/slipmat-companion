@@ -84,6 +84,11 @@ public sealed class IntegratedAnalysisWorker : BackgroundService
             try
             {
                 await _analyzer.AnalyzeItemAsync(itemId, stoppingToken).ConfigureAwait(false);
+                if (_library.GetItemById(itemId) is Audio audio
+                    && _library.GetItemById(audio.ParentId) is MusicAlbum album)
+                {
+                    await _analyzer.AnalyzeAlbumAsync(album.Id, stoppingToken, onDemand: true).ConfigureAwait(false);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

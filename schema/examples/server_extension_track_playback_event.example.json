@@ -57,11 +57,26 @@
       "loudnessRangeLu": 14.8
     }
   },
+  "albumLoudnessMeasurement": {
+    "version": 1,
+    "scope": "album",
+    "authority": "server-analysis",
+    "semantics": "ffmpeg-loudnorm-input",
+    "analyzer": {
+      "name": "ffmpeg-loudnorm",
+      "version": "1",
+      "configurationDigest": "sha256:66d6caca65433193fc2c33c78f2ff8b1dfdc26ea33025551dd40412dae712f08"
+    },
+    "integratedLufs": -18.5,
+    "truePeakDbtp": -1.2,
+    "loudnessRangeLu": 7.4
+  },
   "availability": {
     "hasWaveform": true,
     "hasSidecar": true,
     "hasDerivedAnalysis": true,
-    "hasArtworkPalette": true
+    "hasArtworkPalette": true,
+    "hasAlbumLoudnessMeasurement": true
   },
   "artworkPalette": {
     "version": 1,

@@ -56,6 +56,12 @@ public sealed class AnalysisBackfillTask : IScheduledTask
         var unsupported = 0;
         var failed = 0;
         var cloudExcluded = 0;
+        var albumGenerated = 0;
+        var albumSkipped = 0;
+        var albumUnsupported = 0;
+        var albumFailed = 0;
+        var albumCloudExcluded = 0;
+        var albumDeferred = 0;
         var completed = 0;
 
         try
@@ -66,9 +72,15 @@ public sealed class AnalysisBackfillTask : IScheduledTask
                 IncludeItemTypes = [BaseItemKind.Audio],
                 Recursive = true,
             });
+            var albums = _library.GetItemList(new InternalItemsQuery
+            {
+                MediaTypes = [MediaType.Audio],
+                IncludeItemTypes = [BaseItemKind.MusicAlbum],
+                Recursive = true,
+            });
 
             var config = _configurationSource.GetCurrent();
-            var total = items.Count;
+            var total = items.Count + albums.Count;
             if (total == 0)
             {
                 progress.Report(100);
@@ -113,15 +125,52 @@ public sealed class AnalysisBackfillTask : IScheduledTask
                 completed++;
                 progress.Report(completed * 100d / total);
             }
+
+            foreach (var album in albums)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var result = album is MusicAlbum musicAlbum
+                    ? await _analyzer.AnalyzeAlbumAsync(
+                        musicAlbum.Id,
+                        cancellationToken,
+                        onDemand: false).ConfigureAwait(false)
+                    : new IntegratedAnalysisResult(IntegratedAnalysisStatus.Unsupported);
+
+                switch (result.Status)
+                {
+                    case IntegratedAnalysisStatus.Generated:
+                        albumGenerated++;
+                        break;
+                    case IntegratedAnalysisStatus.Skipped:
+                        albumSkipped++;
+                        break;
+                    case IntegratedAnalysisStatus.CloudExcluded:
+                        albumCloudExcluded++;
+                        break;
+                    case IntegratedAnalysisStatus.Deferred:
+                        albumDeferred++;
+                        break;
+                    case IntegratedAnalysisStatus.Unsupported:
+                        albumUnsupported++;
+                        break;
+                    case IntegratedAnalysisStatus.Failed:
+                        albumFailed++;
+                        break;
+                }
+
+                completed++;
+                progress.Report(completed * 100d / total);
+            }
         }
         finally
         {
             elapsed.Stop();
             // Aggregate only; never log source paths, titles, or credentials.
             _logger.LogInformation(
-                "Slipmat scheduled analysis {Outcome}: examined={Examined}, generated={Generated}, skipped={Skipped}, unsupported={Unsupported}, failed={Failed}, cloudExcluded={CloudExcluded}, elapsedMs={ElapsedMs}",
+                "Slipmat scheduled analysis {Outcome}: examined={Examined}, generated={Generated}, skipped={Skipped}, unsupported={Unsupported}, failed={Failed}, cloudExcluded={CloudExcluded}, albumGenerated={AlbumGenerated}, albumSkipped={AlbumSkipped}, albumUnsupported={AlbumUnsupported}, albumFailed={AlbumFailed}, albumCloudExcluded={AlbumCloudExcluded}, albumDeferred={AlbumDeferred}, elapsedMs={ElapsedMs}",
                 cancellationToken.IsCancellationRequested ? "cancelled" : "ended",
                 completed, generated, skipped, unsupported, failed, cloudExcluded,
+                albumGenerated, albumSkipped, albumUnsupported, albumFailed, albumCloudExcluded, albumDeferred,
                 elapsed.ElapsedMilliseconds);
         }
     }

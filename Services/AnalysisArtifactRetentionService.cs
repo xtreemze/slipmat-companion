@@ -278,12 +278,23 @@ public sealed class AnalysisArtifactRetentionService
     {
         var fullRoot = Path.GetFullPath(storeRoot);
         var analysisRoot = Path.Combine(fullRoot, "analysis");
+        var albumAnalysisRoot = Path.Combine(fullRoot, "analysis-albums");
         var waveformsRoot = Path.Combine(fullRoot, "waveforms");
         var entries = new Dictionary<string, CacheEntry>(StringComparer.Ordinal);
 
         if (Directory.Exists(analysisRoot) && !IsReparsePoint(analysisRoot))
         {
             foreach (var path in EnumerateFiles(analysisRoot, "*.json"))
+            {
+                var key = Path.GetFileNameWithoutExtension(path);
+                if (!AnalysisSubjectV1.IsStoreKey(key) || IsReparsePoint(path)) continue;
+                GetEntry(entries, fullRoot, key).AddFile(path);
+            }
+        }
+
+        if (Directory.Exists(albumAnalysisRoot) && !IsReparsePoint(albumAnalysisRoot))
+        {
+            foreach (var path in EnumerateFiles(albumAnalysisRoot, "*.json"))
             {
                 var key = Path.GetFileNameWithoutExtension(path);
                 if (!AnalysisSubjectV1.IsStoreKey(key) || IsReparsePoint(path)) continue;
@@ -343,6 +354,8 @@ public sealed class AnalysisArtifactRetentionService
     {
         var sidecar = StorePaths.SidecarPath(storeRoot, subjectStoreKey);
         if (File.Exists(sidecar) && !IsReparsePoint(sidecar)) yield return sidecar;
+        var albumSidecar = StorePaths.AlbumLoudnessSidecarPath(storeRoot, subjectStoreKey);
+        if (File.Exists(albumSidecar) && !IsReparsePoint(albumSidecar)) yield return albumSidecar;
         var waveforms = Path.Combine(storeRoot, "waveforms", subjectStoreKey);
         if (!Directory.Exists(waveforms) || IsReparsePoint(waveforms)) yield break;
         foreach (var variantDirectory in EnumerateDirectories(waveforms))

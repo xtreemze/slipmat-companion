@@ -36,6 +36,17 @@ public class TrackPlaybackEventComposerTests
                 new ArtworkPaletteSwatchV1(35, 90, 180, 0.35),
             ]);
 
+    private static LoudnessMeasurementEvidenceV1 MakeAlbumMeasurement()
+        => new(
+            1,
+            "album",
+            "server-analysis",
+            "gated-integrated-loudness",
+            new LoudnessAnalyzerIdentityV1("ffmpeg-loudnorm", "1", "sha256:" + new string('c', 64)),
+            -18.5,
+            -1.2,
+            7.4);
+
     [Fact]
     public void Compose_ProjectsJellyfinItemIdOnlyAtClientBoundary()
     {
@@ -111,5 +122,33 @@ public class TrackPlaybackEventComposerTests
         Assert.Same(palette, result.ArtworkPalette);
         Assert.True(result.Availability.HasDerivedAnalysis);
         Assert.True(result.Availability.HasArtworkPalette);
+    }
+
+    [Fact]
+    public void Compose_ProjectsAlbumMeasurementSeparatelyFromTrackAnalysis()
+    {
+        var measurement = MakeAlbumMeasurement();
+
+        var result = TrackPlaybackEventComposer.Compose(
+            new TrackRow("track-1", "Blue Train", 60000),
+            "abc123",
+            MakeSidecar(),
+            IncludeFlags.Analysis,
+            10,
+            albumLoudnessMeasurement: measurement);
+
+        Assert.Null(result.Analysis);
+        Assert.Same(measurement, result.AlbumLoudnessMeasurement);
+        Assert.True(result.Availability.HasAlbumLoudnessMeasurement);
+
+        var withoutAnalysis = TrackPlaybackEventComposer.Compose(
+            new TrackRow("track-1", "Blue Train", 60000),
+            "abc123",
+            MakeSidecar(),
+            IncludeFlags.None,
+            10,
+            albumLoudnessMeasurement: measurement);
+        Assert.Null(withoutAnalysis.AlbumLoudnessMeasurement);
+        Assert.False(withoutAnalysis.Availability.HasAlbumLoudnessMeasurement);
     }
 }
