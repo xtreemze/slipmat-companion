@@ -14,6 +14,7 @@ internal static class LinuxMaintenanceBarrierTests
         }
         var startup = normal with { PersistentMaskTrusted = false, ActiveState = "activating", ControlPid = 42, CgroupPids = [42] };
         await new LinuxMaintenanceBarrier(new Query(startup)).VerifyStartupAsync(spec, 42, default);
+        await new LinuxMaintenanceBarrier(new Query(startup), startupGuardPid: 42).VerifyCurrentAsync(spec, default);
         foreach (var invalid in new[] { startup with { ActiveState = "inactive" }, startup with { MainPid = 1 }, startup with { ControlPid = 43 }, startup with { CgroupPids = [42, 44] } })
         {
             try { await new LinuxMaintenanceBarrier(new Query(invalid)).VerifyStartupAsync(spec, 42, default); throw new Exception("invalid startup state accepted"); }

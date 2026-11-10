@@ -13,8 +13,14 @@ public interface ILinuxBarrierQuery
 }
 
 /// <summary>Verifies service isolation; callers must also hold the journal lease and validate custody at each effect.</summary>
-public sealed class LinuxMaintenanceBarrier(ILinuxBarrierQuery query)
+public sealed class LinuxMaintenanceBarrier(ILinuxBarrierQuery query, int startupGuardPid = 0)
 {
+    /// <summary>Verify whichever invocation boundary this runner instance was configured for.</summary>
+    public Task VerifyCurrentAsync(HostSpecification spec, CancellationToken cancellationToken)
+        => startupGuardPid > 0
+            ? VerifyStartupAsync(spec, startupGuardPid, cancellationToken)
+            : VerifyMaintenanceAsync(spec, cancellationToken);
+
     /// <summary>Verify the persistently masked, stopped maintenance state.</summary>
     public async Task VerifyMaintenanceAsync(HostSpecification spec, CancellationToken cancellationToken)
     {

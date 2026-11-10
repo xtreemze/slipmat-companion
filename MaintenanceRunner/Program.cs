@@ -9,11 +9,13 @@ internal static class Program
     public static async Task<int> Main(string[] args)
     {
         var inspect = args.Length == 3 && args[0] == "inspect";
+        var startup = args.Length == 4 && args[0] == "startup" && Path.IsPathFullyQualified(args[3]);
         var run = args.Length == 4 && args[0] == "run" && Path.IsPathFullyQualified(args[3]);
-        if ((!inspect && !run) || !Path.IsPathFullyQualified(args[1]) || !Guid.TryParseExact(args[2], "N", out _))
+        if ((!inspect && !run && !startup) || !Path.IsPathFullyQualified(args[1]) || !Guid.TryParseExact(args[2], "N", out _))
         {
             Console.Error.WriteLine("Usage: Slipmat.MaintenanceRunner inspect ABSOLUTE_JOURNAL_DIRECTORY JOB_ID");
             Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner run ABSOLUTE_JOURNAL_DIRECTORY JOB_ID ABSOLUTE_SPEC_PATH");
+            Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner startup ABSOLUTE_JOURNAL_DIRECTORY JOB_ID ABSOLUTE_SPEC_PATH");
             return 2;
         }
         if (!OperatingSystem.IsLinux() || GetEffectiveUserId() != 0)
@@ -55,11 +57,37 @@ internal static class Program
                     return snapshot is null ? 2 : 0;
                 }
 
-                var barrier = new LinuxMaintenanceBarrier(new LinuxSystemdBarrierQuery());
+                var barrier = new LinuxMaintenanceBarrier(
+                    new LinuxSystemdBarrierQuery(), startup ? Environment.ProcessId : 0);
+                var specifications = new LinuxHostSpecificationProvider(args[3]);
+                if (startup)
+                {
+                    var current = await lease.ReadAsync(args[2], cancellation.Token);
+                    if (current is null)
+                    {
+                        Console.Error.WriteLine("Configured maintenance job is missing.");
+                        return 2;
+                    }
+                    var snapshot = new MaintenanceSnapshot(current.Job, current.Revision);
+                    var startupSpec = current.Job.Maintenance is null
+                        ? specifications.ReadForStartup(snapshot)
+                        : specifications.Read(snapshot);
+                    await barrier.VerifyCurrentAsync(startupSpec, cancellation.Token).ConfigureAwait(false);
+                    if (current.Job.Maintenance is null)
+                    {
+                        Console.WriteLine(JsonSerializer.Serialize(new
+                        {
+                            status = "no-recovery-required",
+                            jobId = current.Job.Id,
+                            journalRevision = current.Revision,
+                        }));
+                        return 0;
+                    }
+                }
                 var mountSystem = new LinuxSystemdMountBackend();
                 var mountSafety = new LinuxMountSafetyBoundary(barrier);
                 var host = new LinuxMaintenanceHost(
-                    new LinuxHostSpecificationProvider(args[3]), barrier, mountSafety, mountSystem);
+                    specifications, barrier, mountSafety, mountSystem);
                 var operations = new LeasedOperations(new JournalLeaseAdapter(lease), host);
                 var decision = await CloudMaintenanceTransaction.RunAsync(args[2], operations, cancellation.Token);
                 var final = await lease.ReadAsync(args[2], cancellation.Token);

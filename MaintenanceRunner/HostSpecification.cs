@@ -49,6 +49,32 @@ public sealed record HostSpecification(
         return spec;
     }
 
+    /// <summary>Validate the immutable specification against an admitted job before intent is persisted.</summary>
+    public static HostSpecification ParseForStartup(byte[] bytes, CloudMigrationJob job)
+    {
+        ArgumentNullException.ThrowIfNull(bytes);
+        ArgumentNullException.ThrowIfNull(job);
+        if (bytes.Length is 0 or > 65536 || job.Maintenance is not null)
+            throw new InvalidOperationException("invalid-host-specification");
+        var admission = job.MaintenanceAdmission
+            ?? throw new InvalidOperationException("maintenance-admission-missing");
+        HostSpecification spec;
+        try { spec = JsonSerializer.Deserialize<HostSpecification>(bytes, JsonOptions) ?? throw new JsonException(); }
+        catch (JsonException) { throw new InvalidOperationException("invalid-host-specification"); }
+
+        var custody = new CloudMaintenanceCustody(admission.LibraryId.ToString(), admission.LibraryName,
+            admission.LocalPath, spec.BackupPath, admission.ProfileId, admission.RemoteName,
+            admission.RemotePath, admission.ManifestDigestSha256, admission.Verification,
+            Convert.ToHexString(SHA256.HashData(bytes)));
+        var intent = new CloudMaintenanceIntent(job.Id, CloudMaintenanceDirection.Promote,
+            CloudMaintenancePhase.Prepared, "pending-host-identity", null, custody);
+        spec.Validate(intent, admission);
+        if (!LeasedOperations.MatchesAdmittedJob(
+                new MaintenanceSnapshot(job with { Maintenance = intent }, "startup-admission"), intent))
+            throw new InvalidOperationException("maintenance-admission-mismatch");
+        return spec;
+    }
+
     private void Validate(CloudMaintenanceIntent intent, CloudMaintenanceAdmission admission)
     {
         if (Version != 1 || JobId != intent.JobId || !Guid.TryParseExact(JobId, "N", out _)

@@ -152,6 +152,17 @@ if (OperatingSystem.IsLinux() && Environment.UserName == "root")
         var loadedSpec = new LinuxHostSpecificationProvider(Path.Combine(privateRoot, "spec.json"))
             .Read(new MaintenanceSnapshot(specJobForProvider, "prepared-spec-rev1"));
         if (loadedSpec != prepared) throw new Exception("trusted specification provider changed the prepared spec");
+        var startupJob = specJobForProvider with { Maintenance = null };
+        var startupSpec = new LinuxHostSpecificationProvider(Path.Combine(privateRoot, "spec.json"))
+            .ReadForStartup(new MaintenanceSnapshot(startupJob, "prepared-admission-rev1"));
+        if (startupSpec != prepared) throw new Exception("startup specification validation changed the prepared spec");
+        try
+        {
+            new LinuxHostSpecificationProvider(Path.Combine(privateRoot, "spec.json"))
+                .ReadForStartup(new MaintenanceSnapshot(startupJob with { LocalPath = "/other" }, "changed-admission-rev1"));
+            throw new Exception("startup specification accepted a changed job binding");
+        }
+        catch (InvalidOperationException) { }
         try { HostPreparation.Prepare(draft, job, Path.Combine(privateRoot, "spec.json")); throw new Exception("snapshots overwritten"); }
         catch (IOException) { }
     }

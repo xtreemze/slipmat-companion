@@ -20,6 +20,12 @@ public sealed class LinuxHostSpecificationProvider(string path) : IHostSpecifica
             ?? throw new InvalidOperationException("maintenance-admission-missing");
         return HostSpecification.Parse(LinuxTrustedFile.Read(path), snapshot.Intent, admission);
     }
+
+    public HostSpecification ReadForStartup(MaintenanceSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        return HostSpecification.ParseForStartup(LinuxTrustedFile.Read(path), snapshot.Job);
+    }
 }
 
 /// <summary>Linux host effects guarded by the stopped-service barrier and exact custody observations.</summary>
@@ -37,7 +43,7 @@ public sealed class LinuxMaintenanceHost(
         if (!OperatingSystem.IsLinux()) throw new InvalidOperationException("linux-required");
         var intent = snapshot.Intent;
         var spec = specifications.Read(snapshot);
-        await barrier.VerifyMaintenanceAsync(spec, cancellationToken).ConfigureAwait(false);
+        await barrier.VerifyCurrentAsync(spec, cancellationToken).ConfigureAwait(false);
 
         var bindingsMatch = !string.IsNullOrWhiteSpace(snapshot.Revision)
             && LeasedOperations.MatchesAdmittedJob(snapshot, intent);
@@ -53,7 +59,7 @@ public sealed class LinuxMaintenanceHost(
         var profileMatches = MatchesHash(spec.Profile.Path, profileTargetHash);
         var policyMatches = MatchesHash(spec.Policy.Path, policyTargetHash);
 
-        await barrier.VerifyMaintenanceAsync(spec, cancellationToken).ConfigureAwait(false);
+        await barrier.VerifyCurrentAsync(spec, cancellationToken).ConfigureAwait(false);
         var finalMount = await ObserveMountAsync(spec, intent, cancellationToken).ConfigureAwait(false);
         if (finalMount != mount)
         {
@@ -77,21 +83,21 @@ public sealed class LinuxMaintenanceHost(
             || action is CloudMaintenanceAction.Blocked or CloudMaintenanceAction.PersistPhase or CloudMaintenanceAction.Complete)
             throw new InvalidOperationException("maintenance-action-rejected");
 
-        await barrier.VerifyMaintenanceAsync(spec, cancellationToken).ConfigureAwait(false);
+        await barrier.VerifyCurrentAsync(spec, cancellationToken).ConfigureAwait(false);
         var remoteSpec = admission.RemoteName + ":" + admission.RemotePath;
         switch (action)
         {
             case CloudMaintenanceAction.MoveSourceToBackup:
                 await CustodyProcess.RenameAsync(spec, Path.GetFileName(spec.Source.Path), Path.GetFileName(spec.BackupPath), cancellationToken).ConfigureAwait(false);
-                await barrier.VerifyMaintenanceAsync(spec, cancellationToken).ConfigureAwait(false);
+                await barrier.VerifyCurrentAsync(spec, cancellationToken).ConfigureAwait(false);
                 return null;
 
             case CloudMaintenanceAction.Mount:
             {
                 var remoteType = await RemoteTypeResolver.ResolveAsync(spec, admission.RemoteName, cancellationToken).ConfigureAwait(false);
-                await barrier.VerifyMaintenanceAsync(spec, cancellationToken).ConfigureAwait(false);
+                await barrier.VerifyCurrentAsync(spec, cancellationToken).ConfigureAwait(false);
                 ProjectionMarker.Ensure(spec, admission.RemoteName, remoteType, admission.RemotePath);
-                await barrier.VerifyMaintenanceAsync(spec, cancellationToken).ConfigureAwait(false);
+                await barrier.VerifyCurrentAsync(spec, cancellationToken).ConfigureAwait(false);
                 return await mountSupervisor.MountAsync(spec, remoteSpec, cancellationToken).ConfigureAwait(false);
             }
 
@@ -103,11 +109,11 @@ public sealed class LinuxMaintenanceHost(
             case CloudMaintenanceAction.RestoreBackup:
             {
                 var remoteType = await RemoteTypeResolver.ResolveAsync(spec, admission.RemoteName, cancellationToken).ConfigureAwait(false);
-                await barrier.VerifyMaintenanceAsync(spec, cancellationToken).ConfigureAwait(false);
+                await barrier.VerifyCurrentAsync(spec, cancellationToken).ConfigureAwait(false);
                 await CustodyProcess.RemoveEmptyProjectionAsync(spec, admission.RemoteName, remoteType, admission.RemotePath, cancellationToken).ConfigureAwait(false);
-                await barrier.VerifyMaintenanceAsync(spec, cancellationToken).ConfigureAwait(false);
+                await barrier.VerifyCurrentAsync(spec, cancellationToken).ConfigureAwait(false);
                 await CustodyProcess.RenameAsync(spec, Path.GetFileName(spec.BackupPath), Path.GetFileName(spec.Source.Path), cancellationToken).ConfigureAwait(false);
-                await barrier.VerifyMaintenanceAsync(spec, cancellationToken).ConfigureAwait(false);
+                await barrier.VerifyCurrentAsync(spec, cancellationToken).ConfigureAwait(false);
                 return null;
             }
 
@@ -232,11 +238,11 @@ public sealed class LinuxMaintenanceHost(
             policyBytes = originalPolicy;
         }
 
-        await barrier.VerifyMaintenanceAsync(spec, cancellationToken).ConfigureAwait(false);
+        await barrier.VerifyCurrentAsync(spec, cancellationToken).ConfigureAwait(false);
         await CustodyProcess.ReplaceConfigurationAsync(spec, spec.Profile, profileBytes, promote, cancellationToken).ConfigureAwait(false);
-        await barrier.VerifyMaintenanceAsync(spec, cancellationToken).ConfigureAwait(false);
+        await barrier.VerifyCurrentAsync(spec, cancellationToken).ConfigureAwait(false);
         await CustodyProcess.ReplaceConfigurationAsync(spec, spec.Policy, policyBytes, promote, cancellationToken).ConfigureAwait(false);
-        await barrier.VerifyMaintenanceAsync(spec, cancellationToken).ConfigureAwait(false);
+        await barrier.VerifyCurrentAsync(spec, cancellationToken).ConfigureAwait(false);
     }
 
     private static bool MatchesBytes(byte[] bytes, string hash)
