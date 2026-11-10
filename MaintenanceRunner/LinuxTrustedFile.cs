@@ -50,6 +50,53 @@ public static class LinuxTrustedFile
         finally { current?.Dispose(); }
     }
 
+    /// <summary>Inspect a root-controlled directory, returning null only when the exact path is absent.</summary>
+    public static DirectoryIdentity? TryInspectDirectory(string path)
+    {
+        if (!OperatingSystem.IsLinux()) throw new InvalidOperationException("linux-required");
+        if (!Path.IsPathFullyQualified(path) || Path.GetFullPath(path) != path || path.Contains('\0'))
+            throw new InvalidOperationException("trusted-path-invalid");
+        var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Any(part => part is "." or "..")) throw new InvalidOperationException("trusted-path-invalid");
+        var arm64 = RuntimeInformation.ProcessArchitecture == Architecture.Arm64;
+        if (!arm64 && RuntimeInformation.ProcessArchitecture != Architecture.X64) throw new InvalidOperationException("unsupported-linux-architecture");
+        var flags = (arm64 ? 0x4000 | 0x8000 : 0x10000 | 0x20000) | CloseOnExec;
+        using var root = OpenAt(-100, "/", flags);
+        RequireRootControlled(root, directory: true);
+        SafeFileHandle? current = null;
+        try
+        {
+            foreach (var part in parts)
+            {
+                var parent = current ?? root;
+                var descriptor = openat(parent.DangerousGetHandle().ToInt32(), part, flags);
+                if (descriptor < 0)
+                {
+                    var error = Marshal.GetLastPInvokeError();
+                    if (error == 2) return null; // ENOENT at a no-follow path component.
+                    throw new IOException("trusted-path-open-failed", Marshal.GetHRForLastWin32Error());
+                }
+                var next = new SafeFileHandle((IntPtr)descriptor, ownsHandle: true);
+                try { RequireRootControlled(next, directory: true); }
+                catch { next.Dispose(); throw; }
+                current?.Dispose(); current = next;
+            }
+
+            var buffer = new byte[256];
+            if (statx((current ?? root).DangerousGetHandle().ToInt32(), "", EmptyPath, BasicStats | 0x1000, buffer) != 0
+                || (BinaryPrimitives.ReadUInt32LittleEndian(buffer) & 0x1000) == 0)
+                throw new IOException("trusted-mount-identity-unavailable");
+            var inode = BinaryPrimitives.ReadUInt64LittleEndian(buffer.AsSpan(32));
+            var major = BinaryPrimitives.ReadUInt32LittleEndian(buffer.AsSpan(136));
+            var minor = BinaryPrimitives.ReadUInt32LittleEndian(buffer.AsSpan(140));
+            var device = ((ulong)(major & 0xfff) << 8) | (minor & 0xff) | ((ulong)(minor & 0xffffff00) << 12) | ((ulong)(major & 0xfffff000) << 32);
+            var mountId = BinaryPrimitives.ReadUInt64LittleEndian(buffer.AsSpan(144));
+            if (mountId == 0 || mountId > int.MaxValue) throw new IOException("trusted-mount-identity-unavailable");
+            return new(path, device, inode, (int)mountId);
+        }
+        finally { current?.Dispose(); }
+    }
+
     /// <summary>Create a private immutable snapshot once and flush file and containing directory.</summary>
     public static void CreateNew(string path, byte[] bytes)
     {

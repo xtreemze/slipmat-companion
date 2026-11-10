@@ -132,7 +132,7 @@ public sealed class LeasedOperations(IMaintenanceLease lease, IMaintenanceHost h
             throw new InvalidOperationException("maintenance-job-binding-mismatch");
     }
 
-    private static bool MatchesAdmittedJob(MaintenanceSnapshot snapshot, CloudMaintenanceIntent intent)
+    internal static bool MatchesAdmittedJob(MaintenanceSnapshot snapshot, CloudMaintenanceIntent intent)
     {
         var job = snapshot.Job;
         var admission = job.MaintenanceAdmission;

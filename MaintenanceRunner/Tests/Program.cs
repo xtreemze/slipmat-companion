@@ -14,6 +14,9 @@ if (OperatingSystem.IsLinux() && Environment.UserName == "root")
     try
     {
         var identity = LinuxTrustedFile.InspectDirectory(trustRoot);
+        if (LinuxTrustedFile.TryInspectDirectory(trustRoot) != identity) throw new Exception("optional directory inspection changed its identity");
+        if (LinuxTrustedFile.TryInspectDirectory(Path.Combine(trustRoot, "absent")) is not null) throw new Exception("missing directory reported as present");
+        if (LinuxTrustedFile.TryInspectDirectory(Path.Combine(trustRoot, "absent-parent", "child")) is not null) throw new Exception("missing parent directory reported as present");
         using (var stat = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("/usr/bin/stat") { ArgumentList = { "-c", "%d:%i", trustRoot }, RedirectStandardOutput = true }) ?? throw new Exception("stat unavailable"))
         {
             var expected = await stat.StandardOutput.ReadToEndAsync();
@@ -30,6 +33,12 @@ if (OperatingSystem.IsLinux() && Environment.UserName == "root")
         File.CreateSymbolicLink(link, trustedFile);
         try { LinuxTrustedFile.Read(link); throw new Exception("symlink accepted"); }
         catch (Exception ex) when (ex is IOException or InvalidOperationException && ex.Message == "trusted-path-not-root-controlled") { }
+        try { LinuxTrustedFile.TryInspectDirectory(link); throw new Exception("directory symlink accepted"); }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException) { }
+        var danglingDirectoryLink = Path.Combine(trustRoot, "dangling-directory");
+        Directory.CreateSymbolicLink(danglingDirectoryLink, Path.Combine(trustRoot, "absent-target"));
+        try { LinuxTrustedFile.TryInspectDirectory(Path.Combine(danglingDirectoryLink, "child")); throw new Exception("missing path beneath symlink reported absent"); }
+        catch (IOException) { }
         var fifo = Path.Combine(trustRoot, "fifo");
         using (var process = System.Diagnostics.Process.Start("/usr/bin/mkfifo", fifo) ?? throw new Exception("mkfifo unavailable"))
         {
@@ -134,6 +143,15 @@ if (OperatingSystem.IsLinux() && Environment.UserName == "root")
         var (prepared, digest) = HostPreparation.Prepare(draft, job, Path.Combine(privateRoot, "spec.json"));
         if (prepared.Profile.AfterHash != profilePlan.AfterHash || !HostSpecification.IsValidHash(digest)) throw new Exception("preparation did not derive target");
         if (!LinuxTrustedFile.Read(prepared.Profile.OriginalSnapshotPath).SequenceEqual(profileBytes) || !LinuxTrustedFile.Read(prepared.Policy.OriginalSnapshotPath).SequenceEqual(policyBytes)) throw new Exception("original snapshots differ");
+        var preparedCustody = new CloudMaintenanceCustody(preparedAdmission.LibraryId.ToString(), preparedAdmission.LibraryName,
+            preparedAdmission.LocalPath, prepared.BackupPath, preparedAdmission.ProfileId, preparedAdmission.RemoteName,
+            preparedAdmission.RemotePath, preparedAdmission.ManifestDigestSha256, preparedAdmission.Verification, digest);
+        var specIntentForProvider = new CloudMaintenanceIntent(job.Id, CloudMaintenanceDirection.Promote, CloudMaintenancePhase.Prepared,
+            "pending-host-identity", null, preparedCustody);
+        var specJobForProvider = job with { Maintenance = specIntentForProvider };
+        var loadedSpec = new LinuxHostSpecificationProvider(Path.Combine(privateRoot, "spec.json"))
+            .Read(new MaintenanceSnapshot(specJobForProvider, "prepared-spec-rev1"));
+        if (loadedSpec != prepared) throw new Exception("trusted specification provider changed the prepared spec");
         try { HostPreparation.Prepare(draft, job, Path.Combine(privateRoot, "spec.json")); throw new Exception("snapshots overwritten"); }
         catch (IOException) { }
     }
@@ -141,6 +159,7 @@ if (OperatingSystem.IsLinux() && Environment.UserName == "root")
 }
 var leasedIntent = intent with { Custody = custody with { LocalPath = admission.LocalPath, BackupPath = "/mnt/backup" } };
 var leasedJob = new CloudMigrationJob(jobId, admission.ProfileId, admission.LibraryName, CloudMigrationDirections.LocalToVfs, CloudMigrationPhases.ReadyForCutover, "ready", admission.LocalPath, null, null, admission.RemoteName, admission.RemotePath, admission.PreviousProjectionPath, admission.PreviousEnabled, admission.Verification, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, ManifestDigestSha256: admission.ManifestDigestSha256, Maintenance: leasedIntent, MaintenanceAdmission: admission);
+await LinuxMaintenanceHostTests.Run(hostSpec, admission, leasedJob);
 var lease = new FakeLease(new(leasedJob, "rev1"));
 var host = new FakeHost();
 var adapter = new LeasedOperations(lease, host);
