@@ -105,6 +105,28 @@ public sealed class AlbumLoudnessManifestV1Tests
     }
 
     [Fact]
+    public void ComputeSourceFingerprint_ChangesWhenTrackContentChangesWithoutMembershipChange()
+    {
+        var first = Member("00000000-0000-0000-0000-000000000001", track: 1) with
+        {
+            SourceFingerprint = new string('a', 64),
+        };
+        var second = Member("00000000-0000-0000-0000-000000000002", track: 2) with
+        {
+            SourceFingerprint = new string('b', 64),
+        };
+        var changed = second with { SourceFingerprint = new string('c', 64) };
+
+        Assert.True(AlbumLoudnessManifestV1.TryCreate([first, second], out var baseline, out _));
+        Assert.True(AlbumLoudnessManifestV1.TryCreate([first, changed], out var updated, out _));
+
+        Assert.Equal(baseline!.MembershipFingerprint, updated!.MembershipFingerprint);
+        Assert.NotEqual(
+            AlbumLoudnessManifestV1.ComputeSourceFingerprint(baseline.Members),
+            AlbumLoudnessManifestV1.ComputeSourceFingerprint(updated.Members));
+    }
+
+    [Fact]
     public void TryCreate_FailsClosedForEmptyInvalidDuplicateOrIncompatibleMembership()
     {
         Assert.False(AlbumLoudnessManifestV1.TryCreate([], out _, out _));
