@@ -1,4 +1,6 @@
 <Solution>
   <Project Path="Jellyfin.Plugin.AudioGateway.csproj" />
   <Project Path="Tests/Jellyfin.Plugin.AudioGateway.Tests.csproj" />
+  <Project Path="MaintenanceRunner/Slipmat.MaintenanceRunner.csproj" />
+  <Project Path="MaintenanceRunner/Tests/Slipmat.MaintenanceRunner.Tests.csproj" />
 </Solution>

@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.AudioGateway.Configuration;
@@ -394,6 +396,82 @@ public sealed class CloudMigrationCoordinator
             throw new InvalidOperationException("local-source-missing");
     }
 
+    /// <summary>Capture trusted live identity and configuration before supervised offline maintenance.</summary>
+    public async Task<CloudMigrationJob> PrepareMaintenanceAsync(
+        string jobId, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var snapshot = await _store.GetSnapshotAsync(jobId, cancellationToken).ConfigureAwait(false)
+                ?? throw new InvalidOperationException("migration-not-found");
+            var job = snapshot.Job;
+            if (job.Maintenance is not null || job.Phase != CloudMigrationPhases.ReadyForCutover
+                || job.Direction != CloudMigrationDirections.LocalToVfs
+                || job.Verification != "rclone-check-download-content"
+                || job.ManifestDigestSha256 is not { Length: 64 }
+                || !job.ManifestDigestSha256.All(Uri.IsHexDigit))
+                throw new InvalidOperationException("maintenance-verified-job-required");
+            await ValidateRecoveryBindingsAsync(job, cancellationToken).ConfigureAwait(false);
+            var binding = CloudMaintenanceAdmissionResolver.Resolve(_library, job.LibraryName, job.LocalPath);
+            var policy = _libraryProjection.CaptureScanPolicy(binding.LibraryName, binding.LocalPath)
+                ?? throw new InvalidOperationException("library-scan-policy-unavailable");
+            var configurationPath = Plugin.Instance?.ConfigurationFilePath
+                ?? throw new InvalidOperationException("maintenance-configuration-unavailable");
+            var configurationHash = await ConfigurationHashAsync(configurationPath, cancellationToken).ConfigureAwait(false);
+            var optionsHash = await ConfigurationHashAsync(binding.OptionsPath, cancellationToken).ConfigureAwait(false);
+            var profile = FindProfile(_configurationSource.GetCurrent(), job.ProfileId);
+            var admission = new CloudMaintenanceAdmission(binding.LibraryId, binding.LibraryName,
+                binding.LocalPath, binding.OptionsPath, Path.GetFullPath(configurationPath), policy,
+                profile.Id, profile.RemoteName, profile.RemotePath, job.ManifestDigestSha256,
+                job.Verification, configurationHash, optionsHash, profile.Enabled,
+                profile.ProjectionPath, DateTimeOffset.UtcNow);
+            // Capture is observational, not a lock on Jellyfin's configuration.
+            // Reject drift now and require the offline runner to recheck under its host barrier.
+            if (binding != CloudMaintenanceAdmissionResolver.Resolve(_library, job.LibraryName, job.LocalPath)
+                || configurationHash != await ConfigurationHashAsync(configurationPath, cancellationToken).ConfigureAwait(false)
+                || optionsHash != await ConfigurationHashAsync(binding.OptionsPath, cancellationToken).ConfigureAwait(false)
+                || JsonSerializer.Serialize(policy) != JsonSerializer.Serialize(
+                    _libraryProjection.CaptureScanPolicy(binding.LibraryName, binding.LocalPath)))
+                throw new InvalidOperationException("maintenance-configuration-changed");
+            var prepared = job with { MaintenanceAdmission = admission, UpdatedAt = DateTimeOffset.UtcNow };
+            await _store.SaveIfUnchangedAsync(snapshot, prepared, cancellationToken).ConfigureAwait(false);
+            return prepared;
+        }
+        finally { _gate.Release(); }
+    }
+
+    private static async Task<string> ConfigurationHashAsync(string path, CancellationToken cancellationToken)
+    {
+        var info = new FileInfo(path);
+        if (!info.Exists || (info.Attributes & FileAttributes.ReparsePoint) != 0 || info.Length > 4 * 1024 * 1024)
+            throw new InvalidOperationException("maintenance-configuration-unavailable");
+        var bytes = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
+        if (bytes.Length > 4 * 1024 * 1024)
+            throw new InvalidOperationException("maintenance-configuration-unavailable");
+        return Convert.ToHexStringLower(SHA256.HashData(bytes));
+    }
+
+    /// <summary>Cancel admission before any offline transaction has taken ownership.</summary>
+    public async Task<CloudMigrationJob> CancelMaintenanceAdmissionAsync(
+        string jobId, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var snapshot = await _store.GetSnapshotAsync(jobId, cancellationToken).ConfigureAwait(false)
+                ?? throw new InvalidOperationException("migration-not-found");
+            var job = snapshot.Job;
+            if (job.Maintenance is not null || job.Phase != CloudMigrationPhases.ReadyForCutover
+                || job.MaintenanceAdmission is null || _queue.IsPending(job.Id))
+                throw new InvalidOperationException("maintenance-admission-not-cancelable");
+            var canceled = job with { MaintenanceAdmission = null, UpdatedAt = DateTimeOffset.UtcNow };
+            await _store.SaveIfUnchangedAsync(snapshot, canceled, cancellationToken).ConfigureAwait(false);
+            return canceled;
+        }
+        finally { _gate.Release(); }
+    }
+
     public Task<CloudMigrationJob> RequestCutoverAsync(
         string jobId,
         CancellationToken cancellationToken = default)
@@ -487,6 +565,9 @@ public sealed class CloudMigrationCoordinator
             {
                 throw new InvalidOperationException("migration-invalid-phase");
             }
+
+            if (job.MaintenanceAdmission is not null || job.Maintenance is not null)
+                throw new InvalidOperationException("maintenance-offline-runner-required");
 
             if (_queue.IsPending(job.Id))
             {

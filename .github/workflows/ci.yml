@@ -105,6 +105,11 @@ jobs:
           LD_LIBRARY_PATH: ${{ steps.ffmpeg.outputs.lib }}
         run: dotnet test Tests/Jellyfin.Plugin.AudioGateway.Tests.csproj --configuration Release --no-build --no-restore --logger "console;verbosity=minimal"
 
+      - name: Test maintenance runner journal and host boundaries
+        run: |
+          dotnet run --project MaintenanceRunner/Tests/Slipmat.MaintenanceRunner.Tests.csproj --configuration Release --no-build --no-restore
+          sudo python3 -m unittest discover -s scripts/tests -p 'test_maintenance_*.py' -v
+
       - name: Package and exercise manifest tooling
         env:
           VERSION: ${{ steps.metadata.outputs.version }}

@@ -129,29 +129,42 @@ public sealed class CloudMigrationStore
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var root = ResolveRoot();
-            Directory.CreateDirectory(root);
-            var path = JobPath(job.Id);
-            var temp = Path.Combine(
-                root,
-                $".{job.Id}.{Guid.NewGuid():N}.tmp");
-            try
-            {
-                var bytes = JsonSerializer.SerializeToUtf8Bytes(job, JsonOptions);
-                await File
-                    .WriteAllBytesAsync(temp, bytes, cancellationToken)
-                    .ConfigureAwait(false);
-                File.Move(temp, path, overwrite: true);
-            }
-            finally
-            {
-                TryDelete(temp);
-            }
+            // Every plugin writer cooperates with the offline runner's lifetime
+            // lease. An offline-owned job is never overwritten by a stale worker.
+            await using var lease = await new CloudMigrationJournal(ResolveRoot())
+                .AcquireAsync(cancellationToken).ConfigureAwait(false);
+            var current = await lease.ReadAsync(job.Id, cancellationToken).ConfigureAwait(false);
+            if (current?.Job.Maintenance is not null)
+                throw new InvalidOperationException("migration-maintenance-owned");
+            if (current?.Job.MaintenanceAdmission is not null)
+                throw new InvalidOperationException("migration-maintenance-admitted");
+            await lease.CompareExchangeAsync(current, job, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             _gate.Release();
         }
+    }
+
+    /// <summary>Read a full revision for explicit admission instead of using a stale in-memory job.</summary>
+    public async Task<CloudMigrationJournalSnapshot?> GetSnapshotAsync(
+        string jobId, CancellationToken cancellationToken = default)
+    {
+        await using var lease = await new CloudMigrationJournal(ResolveRoot())
+            .AcquireAsync(cancellationToken).ConfigureAwait(false);
+        return await lease.ReadAsync(jobId, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Persist an explicit transition only if the complete previously read revision remains current.</summary>
+    public async Task SaveIfUnchangedAsync(
+        CloudMigrationJournalSnapshot expected, CloudMigrationJob replacement,
+        CancellationToken cancellationToken = default)
+    {
+        if (expected.Job.Maintenance is not null)
+            throw new InvalidOperationException("migration-maintenance-owned");
+        await using var lease = await new CloudMigrationJournal(ResolveRoot())
+            .AcquireAsync(cancellationToken).ConfigureAwait(false);
+        await lease.CompareExchangeAsync(expected, replacement, cancellationToken).ConfigureAwait(false);
     }
 
     private string ResolveRoot()
@@ -165,17 +178,4 @@ public sealed class CloudMigrationStore
     private static bool IsValidJobId(string? jobId)
         => Guid.TryParseExact(jobId, "N", out _);
 
-    private static void TryDelete(string path)
-    {
-        try
-        {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-        catch
-        {
-        }
-    }
 }

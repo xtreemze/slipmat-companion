@@ -65,6 +65,7 @@ public sealed record CloudMigrationBaselineRevision(
 public sealed record CloudMigrationFinalizeRequest(
     [property: JsonPropertyName("confirmationPath")] string ConfirmationPath);
 
+/// <summary>Authoritative durable migration job, including any admitted offline transaction.</summary>
 public sealed record CloudMigrationJob(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("profileId")] string ProfileId,
@@ -95,7 +96,9 @@ public sealed record CloudMigrationJob(
     [property: JsonPropertyName("progress")] CloudMigrationProgress? Progress = null,
     [property: JsonPropertyName("baselineHistory")] IReadOnlyList<CloudMigrationBaselineRevision>? BaselineHistory = null,
     [property: JsonPropertyName("diagnostics")] CloudMigrationDiagnostics? Diagnostics = null,
-    [property: JsonPropertyName("diagnosticProgress")] CloudMigrationProgress? DiagnosticProgress = null);
+    [property: JsonPropertyName("diagnosticProgress")] CloudMigrationProgress? DiagnosticProgress = null,
+    [property: JsonPropertyName("maintenance")] CloudMaintenanceIntent? Maintenance = null,
+    [property: JsonPropertyName("maintenanceAdmission")] CloudMaintenanceAdmission? MaintenanceAdmission = null);
 
 public sealed record CloudMigrationProgress(
     [property: JsonPropertyName("bytes")] long Bytes,

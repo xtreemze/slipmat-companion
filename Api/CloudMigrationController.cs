@@ -131,6 +131,24 @@ public sealed class CloudMigrationController : ControllerBase
             () => _coordinator.RequestCutoverAsync(jobId, cancellationToken))
             .ConfigureAwait(false);
 
+    /// <summary>Record a verified live library binding for the offline maintenance runner.</summary>
+    [HttpPost("{jobId}/maintenance/prepare")]
+    [ProducesResponseType(typeof(CloudMigrationJob), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<CloudMigrationJob>> PrepareMaintenance(
+        string jobId, CancellationToken cancellationToken)
+        => await Transition(() => _coordinator.PrepareMaintenanceAsync(jobId, cancellationToken))
+            .ConfigureAwait(false);
+
+    /// <summary>Cancel preparation while the original local source is still authoritative.</summary>
+    [HttpPost("{jobId}/maintenance/cancel")]
+    [ProducesResponseType(typeof(CloudMigrationJob), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<CloudMigrationJob>> CancelMaintenance(
+        string jobId, CancellationToken cancellationToken)
+        => await Transition(() => _coordinator.CancelMaintenanceAdmissionAsync(jobId, cancellationToken))
+            .ConfigureAwait(false);
+
     [HttpPost("{jobId}/rollback")]
     [ProducesResponseType(typeof(CloudMigrationJob), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

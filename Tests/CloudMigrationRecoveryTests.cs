@@ -19,6 +19,31 @@ namespace Jellyfin.Plugin.AudioGateway.Tests;
 public class CloudMigrationRecoveryTests
 {
     [Fact]
+    public async Task Startup_DoesNotRecoverOrQueueAnOfflineOwnedJob()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var custody = new CloudMaintenanceCustody(Guid.NewGuid().ToString(), "Music", fixture.Root,
+            fixture.Root + "-backup", "music", "tele2", "Slipmat", new string('a', 64),
+            "rclone-check-download-content", new string('b', 64));
+        var intent = new CloudMaintenanceIntent(fixture.Job.Id, CloudMaintenanceDirection.Promote,
+            CloudMaintenancePhase.MoveIntent, "local-identity", null, custody);
+        var owned = fixture.Job with { Phase = CloudMigrationPhases.CuttingOver, Maintenance = intent };
+        await fixture.Store.SaveAsync(owned);
+        var runner = new ProgressRunner();
+        using var worker = new CloudMigrationWorker(fixture.Store, fixture.Queue, runner,
+            fixture.Source, null!, null!, fixture.LibraryManager, NullLogger<CloudMigrationWorker>.Instance);
+        await worker.StartAsync(CancellationToken.None);
+        await worker.StopAsync(CancellationToken.None);
+        Assert.Equal(owned, await fixture.Store.GetAsync(owned.Id));
+        Assert.Empty(runner.Commands);
+        Assert.False(fixture.Queue.IsPending(owned.Id));
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Store.SaveAsync(fixture.Job));
+        Assert.Equal("migration-maintenance-owned", error.Message);
+        Assert.Equal(owned, await fixture.Store.GetAsync(owned.Id));
+    }
+
+    [Fact]
     public async Task Recovery_RetainsJobIdentityAndRequiresOriginalSourceInventory()
     {
         var root = Directory.CreateTempSubdirectory("migration-recovery-").FullName;
