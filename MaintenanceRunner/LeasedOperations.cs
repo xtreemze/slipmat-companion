@@ -28,9 +28,13 @@ public interface IMaintenanceHost
 public sealed class LeasedOperations(IMaintenanceLease lease, IMaintenanceHost host) : ICloudMaintenanceOperations
 {
     private MaintenanceSnapshot? _snapshot;
+    private PendingMountCas? _pendingMountCas;
+
+    private sealed record PendingMountCas(string Revision, CloudMaintenanceIntent Intent, string MountIdentity);
 
     public async Task<CloudMaintenanceIntent?> ReadAsync(string jobId, CancellationToken cancellationToken)
     {
+        _pendingMountCas = null;
         _snapshot = await lease.ReadAsync(jobId, cancellationToken).ConfigureAwait(false);
         if (_snapshot is null) return null;
         var intent = _snapshot.Job.Maintenance;
@@ -55,6 +59,34 @@ public sealed class LeasedOperations(IMaintenanceLease lease, IMaintenanceHost h
         if (replacement.JobId != expected.JobId || replacement.Custody != expected.Custody || replacement.LocalIdentity != expected.LocalIdentity || replacement.Direction != expected.Direction)
             return false;
         var current = _snapshot!;
+        var isPhaseAdvance = replacement.Phase != expected.Phase && replacement.MountIdentity == expected.MountIdentity;
+        var pendingMountCas = _pendingMountCas;
+        var isVerifiedMountIdentity = pendingMountCas is not null
+            && pendingMountCas.Revision == current.Revision
+            && pendingMountCas.Intent == expected
+            && !string.IsNullOrWhiteSpace(pendingMountCas.MountIdentity)
+            && replacement == expected with { MountIdentity = pendingMountCas.MountIdentity };
+
+        if (isPhaseAdvance)
+        {
+            _pendingMountCas = null;
+            await EnsureUnchangedAsync(expected, cancellationToken).ConfigureAwait(false);
+            var observation = await host.ObserveAsync(current, cancellationToken).ConfigureAwait(false);
+            await EnsureUnchangedAsync(expected, cancellationToken).ConfigureAwait(false);
+            var decision = CloudMaintenanceTransaction.Decide(expected, observation);
+            if (decision.Action != CloudMaintenanceAction.PersistPhase || decision.NextPhase != replacement.Phase)
+                return false;
+        }
+        else if (isVerifiedMountIdentity)
+        {
+            _pendingMountCas = null;
+        }
+        else
+        {
+            _pendingMountCas = null;
+            return false;
+        }
+
         var next = await lease.CompareExchangeAsync(current, replacement, cancellationToken).ConfigureAwait(false);
         var expectedJob = current.Job with { Maintenance = replacement };
         if (next is null || next.Job != expectedJob || next.Intent != replacement
@@ -75,7 +107,12 @@ public sealed class LeasedOperations(IMaintenanceLease lease, IMaintenanceHost h
         if (CloudMaintenanceTransaction.Decide(intent, observation).Action != action || action is CloudMaintenanceAction.Blocked or CloudMaintenanceAction.PersistPhase or CloudMaintenanceAction.Complete)
             throw new InvalidOperationException("maintenance-action-rejected");
         await EnsureUnchangedAsync(intent, cancellationToken).ConfigureAwait(false);
-        return await host.ExecuteGuardedAsync(_snapshot!, action, cancellationToken).ConfigureAwait(false);
+        var current = _snapshot!;
+        var result = await host.ExecuteGuardedAsync(current, action, cancellationToken).ConfigureAwait(false);
+        _pendingMountCas = action == CloudMaintenanceAction.Mount && !string.IsNullOrWhiteSpace(result)
+            ? new PendingMountCas(current.Revision, intent, result)
+            : null;
+        return result;
     }
 
     private void RequireCurrent(CloudMaintenanceIntent intent)

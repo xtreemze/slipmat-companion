@@ -163,6 +163,35 @@ await racingAdapter.ReadAsync(jobId, default);
 try { await racingAdapter.ExecuteAsync(leasedIntent, CloudMaintenanceAction.MoveSourceToBackup, default); throw new Exception("journal change during observation reached a host effect"); }
 catch (InvalidOperationException ex) when (ex.Message == "journal-changed") { }
 if (racingHost.Effects != 0) throw new Exception("effect ran after journal changed during observation");
+var preparedIntent = leasedIntent with { Phase = CloudMaintenancePhase.Prepared };
+var preparedJob = leasedJob with { Maintenance = preparedIntent };
+var forgedCasLease = new FakeLease(new(preparedJob, "cas-rev1"));
+var forgedCasAdapter = new LeasedOperations(forgedCasLease, new FakeHost());
+await forgedCasAdapter.ReadAsync(jobId, default);
+if (await forgedCasAdapter.CompareExchangeAsync(preparedIntent, preparedIntent with { Phase = CloudMaintenancePhase.Stable }, default))
+    throw new Exception("forged maintenance phase advance accepted");
+if (forgedCasLease.CompareExchangeCalls != 0) throw new Exception("forged phase reached durable compare/exchange");
+var authorizedCasLease = new FakeLease(new(preparedJob, "authorized-cas-rev1"));
+var authorizedCasAdapter = new LeasedOperations(authorizedCasLease, new FakeHost());
+await authorizedCasAdapter.ReadAsync(jobId, default);
+if (!await authorizedCasAdapter.CompareExchangeAsync(preparedIntent, preparedIntent with { Phase = CloudMaintenancePhase.MoveIntent }, default))
+    throw new Exception("planner-approved phase advance rejected");
+if (authorizedCasLease.Current.Intent.Phase != CloudMaintenancePhase.MoveIntent) throw new Exception("approved phase was not persisted");
+var mountIntent = leasedIntent with { Phase = CloudMaintenancePhase.MountIntent };
+var mountJob = leasedJob with { Maintenance = mountIntent };
+var mountLease = new FakeLease(new(mountJob, "mount-cas-rev1"));
+var mountHost = new FakeHost
+{
+    Observation = new(true, true, CloudMaintenancePathState.Missing, CloudMaintenancePathState.Expected, CloudMaintenanceMountState.Missing, false, false),
+    ExecuteResult = "verified-mount-instance",
+};
+var mountAdapter = new LeasedOperations(mountLease, mountHost);
+await mountAdapter.ReadAsync(jobId, default);
+if (await mountAdapter.ExecuteAsync(mountIntent, CloudMaintenanceAction.Mount, default) != "verified-mount-instance")
+    throw new Exception("verified mount identity was not returned");
+if (!await mountAdapter.CompareExchangeAsync(mountIntent, mountIntent with { MountIdentity = "verified-mount-instance" }, default))
+    throw new Exception("exact verified mount identity was not persisted");
+if (mountLease.Current.Intent.MountIdentity != "verified-mount-instance") throw new Exception("mount identity was not persisted");
 var changedAdmissionJob = leasedJob with { MaintenanceAdmission = admission with { RemoteName = "foreign-remote" } };
 var changedAdmissionHost = new FakeHost();
 var changedAdmissionAdapter = new LeasedOperations(new FakeLease(new(changedAdmissionJob, "rev1")), changedAdmissionHost);
@@ -195,8 +224,15 @@ Console.WriteLine("Leased adapter tests passed");
 sealed class FakeLease(MaintenanceSnapshot initial) : IMaintenanceLease
 {
     public MaintenanceSnapshot Current = initial;
+    public int CompareExchangeCalls;
     public Task<MaintenanceSnapshot?> ReadAsync(string jobId, CancellationToken ct) => Task.FromResult<MaintenanceSnapshot?>(Current);
-    public Task<MaintenanceSnapshot?> CompareExchangeAsync(MaintenanceSnapshot expected, CloudMaintenanceIntent replacement, CancellationToken ct) => Task.FromResult<MaintenanceSnapshot?>(null);
+    public Task<MaintenanceSnapshot?> CompareExchangeAsync(MaintenanceSnapshot expected, CloudMaintenanceIntent replacement, CancellationToken ct)
+    {
+        CompareExchangeCalls++;
+        if (Current.Revision != expected.Revision) return Task.FromResult<MaintenanceSnapshot?>(null);
+        Current = new(Current.Job with { Maintenance = replacement }, Current.Revision + "-next");
+        return Task.FromResult<MaintenanceSnapshot?>(Current);
+    }
 }
 sealed class FakeHost : IMaintenanceHost
 {
@@ -204,12 +240,14 @@ sealed class FakeHost : IMaintenanceHost
     public CloudMigrationJob? LastJob;
     public CloudMaintenanceAdmission? LastAdmission;
     public Action? AfterObserve;
+    public CloudMaintenanceObservation Observation = new(true, true, CloudMaintenancePathState.Expected, CloudMaintenancePathState.Missing, CloudMaintenanceMountState.Missing, false, false);
+    public string? ExecuteResult;
     public Task<CloudMaintenanceObservation> ObserveAsync(MaintenanceSnapshot snapshot, CancellationToken ct)
     {
         LastJob = snapshot.Job;
         LastAdmission = snapshot.Job.MaintenanceAdmission;
         AfterObserve?.Invoke();
-        return Task.FromResult(new CloudMaintenanceObservation(true, true, CloudMaintenancePathState.Expected, CloudMaintenancePathState.Missing, CloudMaintenanceMountState.Missing, false, false));
+        return Task.FromResult(Observation);
     }
-    public Task<string?> ExecuteGuardedAsync(MaintenanceSnapshot snapshot, CloudMaintenanceAction action, CancellationToken ct) { Effects++; return Task.FromResult<string?>(null); }
+    public Task<string?> ExecuteGuardedAsync(MaintenanceSnapshot snapshot, CloudMaintenanceAction action, CancellationToken ct) { Effects++; return Task.FromResult(ExecuteResult); }
 }
