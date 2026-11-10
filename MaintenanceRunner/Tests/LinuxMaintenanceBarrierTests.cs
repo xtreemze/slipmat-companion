@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Slipmat.MaintenanceRunner;
 
 internal static class LinuxMaintenanceBarrierTests
@@ -17,6 +18,39 @@ internal static class LinuxMaintenanceBarrierTests
         {
             try { await new LinuxMaintenanceBarrier(new Query(invalid)).VerifyStartupAsync(spec, 42, default); throw new Exception("invalid startup state accepted"); }
             catch (InvalidOperationException) { }
+        }
+
+        if (OperatingSystem.IsLinux() && Environment.UserName == "root")
+        {
+            var root = Path.Combine("/srv", "maintenance-mountpoint-retry-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            try
+            {
+                var parent = LinuxTrustedFile.InspectDirectory(root);
+                var sourcePath = Path.Combine(root, "music");
+                var pythonPath = File.ResolveLinkTarget("/usr/bin/python3", true)?.FullName
+                    ?? throw new Exception("python interpreter unavailable");
+                var helperPath = Path.Combine(root, "custody.py");
+                File.WriteAllBytes(helperPath, File.ReadAllBytes(Path.GetFullPath("MaintenanceRunner/custody.py")));
+                var testSpec = spec with
+                {
+                    Parent = parent,
+                    Source = new(sourcePath, parent.Device, 123, parent.MountId),
+                    BackupPath = Path.Combine(root, "music.backup"),
+                    PythonPath = pythonPath,
+                    PythonSha256 = Convert.ToHexString(SHA256.HashData(LinuxTrustedFile.Read(pythonPath, 128 * 1024 * 1024))),
+                    CustodyHelperPath = helperPath,
+                    CustodyHelperSha256 = Convert.ToHexString(SHA256.HashData(LinuxTrustedFile.Read(helperPath, 1024 * 1024))),
+                };
+                var concreteSafety = new LinuxMountSafetyBoundary(new LinuxMaintenanceBarrier(new Query(normal)));
+                var first = await concreteSafety.PrepareEmptyMountpointAsync(testSpec, default);
+                var retry = await concreteSafety.PrepareEmptyMountpointAsync(testSpec, default);
+                if (retry != first) throw new Exception("mountpoint retry changed the owned empty directory identity");
+                File.WriteAllText(Path.Combine(sourcePath, "unexpected"), "preserve");
+                try { await concreteSafety.PrepareEmptyMountpointAsync(testSpec, default); throw new Exception("nonempty recovered mountpoint accepted"); }
+                catch (InvalidOperationException) { }
+            }
+            finally { Directory.Delete(root, recursive: true); }
         }
     }
     private sealed class Query(LinuxBarrierSnapshot snapshot) : ILinuxBarrierQuery

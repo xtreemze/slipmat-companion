@@ -15,7 +15,16 @@ public sealed class LinuxMountSafetyBoundary(LinuxMaintenanceBarrier barrier) : 
     public async Task<DirectoryIdentity> PrepareEmptyMountpointAsync(HostSpecification spec, CancellationToken cancellationToken)
     {
         await VerifyAsync(spec, cancellationToken).ConfigureAwait(false);
-        var identity = await CustodyProcess.CreateEmptyMountpointAsync(spec, cancellationToken).ConfigureAwait(false);
+        DirectoryIdentity identity;
+        if (Directory.Exists(spec.Source.Path))
+        {
+            identity = LinuxTrustedFile.InspectDirectory(spec.Source.Path);
+            await CustodyProcess.VerifyEmptyMountpointAsync(spec, identity, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            identity = await CustodyProcess.CreateEmptyMountpointAsync(spec, cancellationToken).ConfigureAwait(false);
+        }
         await VerifyAsync(spec, cancellationToken).ConfigureAwait(false);
         return identity;
     }
