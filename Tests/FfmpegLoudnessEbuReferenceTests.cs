@@ -78,7 +78,34 @@ public class FfmpegLoudnessEbuReferenceTests
 
             var result = await MeasureAlbumSequenceAsync(ffmpeg, paths);
 
-            Assert.InRange(result.IntegratedLufs, -23.1d, -22.9d);
+            Assert.NotNull(result);
+            Assert.InRange(result!.IntegratedLufs, -23.1d, -22.9d);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task JellyfinFfmpeg_DoesNotProduceAlbumMeasurementForSilence()
+    {
+        var ffmpeg = RequireFfmpeg();
+        var directory = Path.Combine(Path.GetTempPath(), $"slipmat-silent-album-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var trackPath = Path.Combine(directory, "silence.wav");
+            await RunFfmpegAsync(ffmpeg, new[]
+            {
+                "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "lavfi", "-i", "aevalsrc=0|0:s=48000:d=5:c=stereo",
+                "-c:a", "pcm_f32le", trackPath,
+            });
+
+            var result = await MeasureAlbumSequenceAsync(ffmpeg, [trackPath]);
+
+            Assert.Null(result);
         }
         finally
         {
@@ -167,7 +194,7 @@ public class FfmpegLoudnessEbuReferenceTests
         Assert.True(process.ExitCode == 0, $"Jellyfin FFmpeg exited {process.ExitCode}: {diagnostics}");
     }
 
-    private static async Task<LoudnessAnalysis> MeasureAlbumSequenceAsync(
+    private static async Task<LoudnessAnalysis?> MeasureAlbumSequenceAsync(
         string ffmpeg,
         IReadOnlyList<string> trackPaths)
     {
@@ -222,8 +249,6 @@ public class FfmpegLoudnessEbuReferenceTests
 
         var diagnostics = await diagnosticsTask;
         Assert.True(process.ExitCode == 0, $"Jellyfin FFmpeg exited {process.ExitCode}: {diagnostics}");
-        var result = FfmpegLoudnessParser.Parse(diagnostics);
-        Assert.NotNull(result);
-        return result!;
+        return FfmpegLoudnessParser.Parse(diagnostics);
     }
 }
