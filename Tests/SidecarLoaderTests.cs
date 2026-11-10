@@ -82,6 +82,25 @@ public class SidecarLoaderTests
     }
 
     [Fact]
+    public void LoadAlbumLoudnessSidecarFromStore_CorruptJsonReturnsNull()
+    {
+        var loader = new SidecarLoader();
+        var root = Directory.CreateTempSubdirectory("audio-gateway-album-sidecar-test");
+        try
+        {
+            var path = StorePaths.AlbumLoudnessSidecarPath(root.FullName, StoreKey);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, "{{{ not json }}}");
+
+            Assert.Null(loader.LoadAlbumLoudnessSidecarFromStore(root.FullName, StoreKey));
+        }
+        finally
+        {
+            root.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public void LoadSidecarFromStore_RejectsRawProviderId()
     {
         var loader = new SidecarLoader();
