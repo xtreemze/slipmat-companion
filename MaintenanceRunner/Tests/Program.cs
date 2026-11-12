@@ -104,6 +104,43 @@ if (OperatingSystem.IsLinux() && Environment.UserName == "root" && File.Exists("
             ManifestVersion: manifest.Version, ManifestDigestSha256: manifest.DigestSha256, ManifestFileCount: manifest.FileCount, ManifestTotalBytes: manifest.TotalBytes, MaintenanceAdmission: checkAdmission);
         var checkSpec = hostSpec with { RclonePath = executable, RcloneSha256 = Convert.ToHexString(SHA256.HashData(script)), RcloneConfigPath = config, ServiceUid = 65534, ServiceGid = 65534 };
         await HostVerification.VerifyAsync(checkJob, checkSpec, CancellationToken.None);
+        // Cancellation must not return while the owned verifier is still reading
+        // the source. The fake rclone command records its PID before sleeping.
+        var verifierPidFile = Path.Combine(Path.GetTempPath(), "slipmat-verify-" + Guid.NewGuid().ToString("N") + ".pid");
+        try
+        {
+            var slowScript = System.Text.Encoding.UTF8.GetBytes(
+                "#!/bin/sh\ncase \"$*\" in *'check '*" + source
+                + "*' --download --stats=0 --log-level=ERROR') echo $ > " + verifierPidFile
+                + "; exec /usr/bin/sleep 30;; *) exit 9;; esac\n");
+            await File.WriteAllBytesAsync(executable, slowScript);
+            var slowSpec = checkSpec with { RcloneSha256 = Convert.ToHexString(SHA256.HashData(slowScript)) };
+            using var stopVerification = new CancellationTokenSource();
+            var pendingVerification = HostVerification.VerifyAsync(checkJob, slowSpec, stopVerification.Token);
+            for (var attempt = 0; attempt < 400 && !File.Exists(verifierPidFile) && !pendingVerification.IsCompleted; attempt++)
+                await Task.Delay(25);
+            if (!File.Exists(verifierPidFile))
+            {
+                stopVerification.Cancel();
+                try { await pendingVerification; } catch (OperationCanceledException) { }
+                throw new Exception("download verifier did not start");
+            }
+            var verifierPid = int.Parse((await File.ReadAllTextAsync(verifierPidFile)).Trim());
+            stopVerification.Cancel();
+            try { await pendingVerification; throw new Exception("cancelled verification succeeded"); }
+            catch (OperationCanceledException) { }
+            try
+            {
+                using var lingering = System.Diagnostics.Process.GetProcessById(verifierPid);
+                if (!lingering.HasExited) throw new Exception("cancelled verifier was not reaped");
+            }
+            catch (ArgumentException) { /* The process was reaped and is no longer indexed. */ }
+        }
+        finally
+        {
+            await File.WriteAllBytesAsync(executable, script);
+            File.Delete(verifierPidFile);
+        }
         await File.WriteAllTextAsync(Path.Combine(source, "track"), "changed");
         try { await HostVerification.VerifyAsync(checkJob, checkSpec, CancellationToken.None); throw new Exception("source drift accepted"); }
         catch (InvalidOperationException ex) when (ex.Message == "source-manifest-changed") { }
