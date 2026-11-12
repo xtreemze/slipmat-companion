@@ -111,8 +111,8 @@ if (OperatingSystem.IsLinux() && Environment.UserName == "root" && File.Exists("
         {
             var slowScript = System.Text.Encoding.UTF8.GetBytes(
                 "#!/bin/sh\ncase \"$*\" in *'check '*" + source
-                + "*' --download --stats=0 --log-level=ERROR') echo $ > " + verifierPidFile
-                + "; exec /usr/bin/sleep 30;; *) exit 9;; esac\n");
+                + "*' --download --stats=0 --log-level=ERROR') /bin/sh -c 'echo $PPID > " + verifierPidFile
+                + "; exec /usr/bin/sleep 30';; *) exit 9;; esac\n");
             await File.WriteAllBytesAsync(executable, slowScript);
             var slowSpec = checkSpec with { RcloneSha256 = Convert.ToHexString(SHA256.HashData(slowScript)) };
             using var stopVerification = new CancellationTokenSource();
