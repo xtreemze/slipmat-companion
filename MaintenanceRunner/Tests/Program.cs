@@ -74,6 +74,8 @@ var hostSpec = new HostSpecification(1, jobId, boot, "mnt:[42]", "jellyfin.servi
     "/var/cache/music", 10, 24, 1, 180,
     new("/etc/profile.xml", "/root/bundle/profile.xml", new string('b', 64), new string('c', 64)),
     new("/etc/policy.xml", "/root/bundle/policy.xml", new string('d', 64), new string('e', 64)));
+LinuxProtectedSourceTreeTests.Run();
+LinuxCacheCustodyTests.Run();
 await LinuxMaintenanceBarrierTests.Run(hostSpec);
 await LinuxMountSupervisorTests.Run(hostSpec);
 var specBytes = JsonSerializer.SerializeToUtf8Bytes(hostSpec, new JsonSerializerOptions(JsonSerializerDefaults.Web));
@@ -102,6 +104,43 @@ if (OperatingSystem.IsLinux() && Environment.UserName == "root" && File.Exists("
             ManifestVersion: manifest.Version, ManifestDigestSha256: manifest.DigestSha256, ManifestFileCount: manifest.FileCount, ManifestTotalBytes: manifest.TotalBytes, MaintenanceAdmission: checkAdmission);
         var checkSpec = hostSpec with { RclonePath = executable, RcloneSha256 = Convert.ToHexString(SHA256.HashData(script)), RcloneConfigPath = config, ServiceUid = 65534, ServiceGid = 65534 };
         await HostVerification.VerifyAsync(checkJob, checkSpec, CancellationToken.None);
+        // Cancellation must not return while the owned verifier is still reading
+        // the source. The fake rclone command records its PID before sleeping.
+        var verifierPidFile = Path.Combine(Path.GetTempPath(), "slipmat-verify-" + Guid.NewGuid().ToString("N") + ".pid");
+        try
+        {
+            var slowScript = System.Text.Encoding.UTF8.GetBytes(
+                "#!/bin/sh\ncase \"$*\" in *'check '*" + source
+                + "*' --download --stats=0 --log-level=ERROR') /bin/sh -c 'echo $PPID > " + verifierPidFile
+                + "; exec /usr/bin/sleep 30';; *) exit 9;; esac\n");
+            await File.WriteAllBytesAsync(executable, slowScript);
+            var slowSpec = checkSpec with { RcloneSha256 = Convert.ToHexString(SHA256.HashData(slowScript)) };
+            using var stopVerification = new CancellationTokenSource();
+            var pendingVerification = HostVerification.VerifyAsync(checkJob, slowSpec, stopVerification.Token);
+            for (var attempt = 0; attempt < 400 && !File.Exists(verifierPidFile) && !pendingVerification.IsCompleted; attempt++)
+                await Task.Delay(25);
+            if (!File.Exists(verifierPidFile))
+            {
+                stopVerification.Cancel();
+                try { await pendingVerification; } catch (OperationCanceledException) { }
+                throw new Exception("download verifier did not start");
+            }
+            var verifierPid = int.Parse((await File.ReadAllTextAsync(verifierPidFile)).Trim());
+            stopVerification.Cancel();
+            try { await pendingVerification; throw new Exception("cancelled verification succeeded"); }
+            catch (OperationCanceledException) { }
+            try
+            {
+                using var lingering = System.Diagnostics.Process.GetProcessById(verifierPid);
+                if (!lingering.HasExited) throw new Exception("cancelled verifier was not reaped");
+            }
+            catch (ArgumentException) { /* The process was reaped and is no longer indexed. */ }
+        }
+        finally
+        {
+            await File.WriteAllBytesAsync(executable, script);
+            File.Delete(verifierPidFile);
+        }
         await File.WriteAllTextAsync(Path.Combine(source, "track"), "changed");
         try { await HostVerification.VerifyAsync(checkJob, checkSpec, CancellationToken.None); throw new Exception("source drift accepted"); }
         catch (InvalidOperationException ex) when (ex.Message == "source-manifest-changed") { }
@@ -109,6 +148,14 @@ if (OperatingSystem.IsLinux() && Environment.UserName == "root" && File.Exists("
     finally { Directory.Delete(rootVerify, recursive: true); }
 }
 if (HostSpecification.Parse(specBytes, specIntent, admission) != hostSpec) throw new Exception("valid host specification rejected");
+foreach (var badCache in new[] { "/mnt/music/cache", "/mnt/backup/cache", "/mnt", "/root/bundle/cache", "/etc", "/usr/bin" })
+{
+    var changedSpec = hostSpec with { CachePath = badCache };
+    var changedBytes = JsonSerializer.SerializeToUtf8Bytes(changedSpec, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+    var changedIntent = specIntent with { Custody = specIntent.Custody with { ConfigurationDigest = Convert.ToHexString(SHA256.HashData(changedBytes)) } };
+    try { HostSpecification.Parse(changedBytes, changedIntent, admission); throw new Exception("overlapping cache accepted: " + badCache); }
+    catch (InvalidOperationException ex) when (ex.Message == "invalid-host-specification") { }
+}
 try { HostSpecification.Parse(specBytes, intent, admission); throw new Exception("wrong specification hash accepted"); }
 catch (InvalidOperationException ex) when (ex.Message == "host-specification-hash-mismatch") { }
 try { HostSpecification.Parse(specBytes, specIntent, admission with { RemotePath = "different" }); throw new Exception("changed admission accepted"); }
@@ -134,10 +181,18 @@ if (OperatingSystem.IsLinux() && Environment.UserName == "root")
         var policyPath = Path.Combine(privateRoot, "live-policy.xml");
         LinuxTrustedFile.CreateNew(profilePath, profileBytes);
         LinuxTrustedFile.CreateNew(policyPath, policyBytes);
-        var preparedAdmission = testAdmission with { PluginConfigurationPath = profilePath, OptionsPath = policyPath,
-            PluginConfigurationSha256 = profilePlan.BeforeHash, OptionsSha256 = policyPlan.BeforeHash };
-        var draft = planSpec with { Profile = planSpec.Profile with { Path = profilePath, OriginalSnapshotPath = Path.Combine(privateRoot, "profile-original.xml") },
-            Policy = planSpec.Policy with { Path = policyPath, OriginalSnapshotPath = Path.Combine(privateRoot, "policy-original.xml") } };
+        var preparedAdmission = testAdmission with
+        {
+            PluginConfigurationPath = profilePath,
+            OptionsPath = policyPath,
+            PluginConfigurationSha256 = profilePlan.BeforeHash,
+            OptionsSha256 = policyPlan.BeforeHash
+        };
+        var draft = planSpec with
+        {
+            Profile = planSpec.Profile with { Path = profilePath, OriginalSnapshotPath = Path.Combine(privateRoot, "profile-original.xml") },
+            Policy = planSpec.Policy with { Path = policyPath, OriginalSnapshotPath = Path.Combine(privateRoot, "policy-original.xml") }
+        };
         var job = new CloudMigrationJob(jobId, "legacy", "Music", "local-to-vfs", "ready-for-cutover", "ready", "/mnt/music", null, null, "remote", "path", "/previous", false, "rclone-check-download-content", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
             ManifestDigestSha256: new string('a', 64), MaintenanceAdmission: preparedAdmission);
         var (prepared, digest) = HostPreparation.Prepare(draft, job, Path.Combine(privateRoot, "spec.json"));
@@ -170,6 +225,9 @@ if (OperatingSystem.IsLinux() && Environment.UserName == "root")
 }
 var leasedIntent = intent with { Custody = custody with { LocalPath = admission.LocalPath, BackupPath = "/mnt/backup" } };
 var leasedJob = new CloudMigrationJob(jobId, admission.ProfileId, admission.LibraryName, CloudMigrationDirections.LocalToVfs, CloudMigrationPhases.ReadyForCutover, "ready", admission.LocalPath, null, null, admission.RemoteName, admission.RemotePath, admission.PreviousProjectionPath, admission.PreviousEnabled, admission.Verification, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, ManifestDigestSha256: admission.ManifestDigestSha256, Maintenance: leasedIntent, MaintenanceAdmission: admission);
+await StartupGuardTests.Run(hostSpec, leasedJob);
+await PreparationRunnerTests.Run(hostSpec, leasedJob);
+await MaintenanceCompletionTests.Run(leasedJob);
 await LinuxMaintenanceHostTests.Run(hostSpec, admission, leasedJob);
 var lease = new FakeLease(new(leasedJob, "rev1"));
 var host = new FakeHost();

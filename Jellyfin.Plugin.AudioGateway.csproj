@@ -38,6 +38,9 @@
     <Compile Remove="MaintenanceRunner/**/*.cs" />
     <EmbeddedResource Remove="MaintenanceRunner/**" />
     <None Remove="MaintenanceRunner/**" />
+    <Compile Remove="scripts/maintenance-vm-fixture/**/*.cs" />
+    <EmbeddedResource Remove="scripts/maintenance-vm-fixture/**" />
+    <None Remove="scripts/maintenance-vm-fixture/**" />
 
     <!--
       Atlas/provider implementations below still contain resolver and product-semantic

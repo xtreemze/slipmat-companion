@@ -280,6 +280,53 @@ def remove_empty_projection(parent, source, marker, remote_name, remote_type, re
     finally:
         os.close(parent_fd)
 
+def probe_noreplace(parent):
+    """Probe only newly-created empty metadata directories on the actual filesystem.
+
+    No media path is accepted. Unsupported no-replace or directory fsync semantics
+    block preparation before the authoritative source can be moved.
+    """
+    import tempfile
+    if sys.platform != 'linux' or os.geteuid() != 0:
+        raise CustodyError('linux-root-required')
+    if os.path.realpath(parent) != parent:
+        raise CustodyError('invalid-parent-or-target')
+    _trusted_ancestors(parent)
+    probe = tempfile.mkdtemp(prefix='.slipmat-noreplace-probe-', dir=parent)
+    identities = set()
+    original = os.lstat(probe)
+    try:
+        for name in ('source', 'occupied'):
+            os.mkdir(os.path.join(probe, name), 0o700)
+            entry = os.lstat(os.path.join(probe, name))
+            identities.add((entry.st_dev, entry.st_ino))
+        source = os.lstat(os.path.join(probe, 'source'))
+        occupied = os.lstat(os.path.join(probe, 'occupied'))
+        try:
+            rename_directory(probe, 'source', 'occupied', source.st_dev, source.st_ino)
+        except CustodyError as error:
+            if str(error) != 'destination-exists':
+                raise
+        else:
+            raise CustodyError('filesystem-noreplace-unsupported')
+        if (os.lstat(os.path.join(probe, 'occupied')).st_dev,
+                os.lstat(os.path.join(probe, 'occupied')).st_ino) != (occupied.st_dev, occupied.st_ino):
+            raise CustodyError('filesystem-noreplace-unsupported')
+        rename_directory(probe, 'source', 'moved', source.st_dev, source.st_ino)
+        rename_directory(probe, 'moved', 'source', source.st_dev, source.st_ino)
+    finally:
+        current = os.lstat(probe)
+        if (current.st_dev, current.st_ino) != (original.st_dev, original.st_ino):
+            raise CustodyError('probe-cleanup-ambiguous')
+        for name in os.listdir(probe):
+            entry = os.lstat(os.path.join(probe, name))
+            if name not in ('source', 'occupied', 'moved') or not stat.S_ISDIR(entry.st_mode) or (entry.st_dev, entry.st_ino) not in identities:
+                raise CustodyError('probe-cleanup-ambiguous')
+        for name in os.listdir(probe):
+            os.rmdir(os.path.join(probe, name))  # Only this probe's verified empty directories.
+        os.rmdir(probe)
+
+
 def main():
     import base64
     import json
@@ -287,7 +334,9 @@ def main():
         request = json.loads(sys.stdin.buffer.read(6 * 1024 * 1024 + 1))
         action = request['action']
         result = {'status': 'ok'}
-        if action == 'rename':
+        if action == 'probe-noreplace':
+            probe_noreplace(request['parent'])
+        elif action == 'rename':
             rename_directory(request['parent'], request['source'], request['destination'], request['device'], request['inode'])
         elif action == 'create-empty-mountpoint':
             result['identity'] = create_empty_mountpoint(request['parent'], request['source'], request['device'], request['mountId'])
