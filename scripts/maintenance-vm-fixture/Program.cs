@@ -16,9 +16,9 @@ if (args[0] == "inspect-admitted")
     // kernel released the whole-job lease. Do not reconstruct state by path.
     await using var lease = await new CloudMigrationJournal(root + "/journal").AcquireAsync();
     var current = await lease.ReadAsync(args[2]) ?? throw new InvalidOperationException("missing job");
-    var job = current.Job;
-    if (job.Phase != CloudMigrationPhases.ReadyForCutover || job.Maintenance is not null
-        || job.BackupPath is not null || job.Id != args[2]
+    var observedJob = current.Job;
+    if (observedJob.Phase != CloudMigrationPhases.ReadyForCutover || observedJob.Maintenance is not null
+        || observedJob.BackupPath is not null || observedJob.Id != args[2]
         || !File.Exists(root + "/music/track.flac")
         || !File.Exists(root + "/remote/track.flac")
         || Directory.Exists(root + "/music.backup")
