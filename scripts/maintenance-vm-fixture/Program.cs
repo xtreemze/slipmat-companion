@@ -8,6 +8,25 @@ using Slipmat.MaintenanceRunner;
 if (!OperatingSystem.IsLinux() || Environment.UserName != "root" || args.Length < 2) throw new InvalidOperationException("VM root required");
 var root = args[1];
 if (!root.StartsWith("/mnt/slipmat-maintenance-fixture-", StringComparison.Ordinal) || Path.GetFullPath(root) != root || root.Contains("..")) throw new InvalidOperationException("fixture path rejected");
+if (args[0] == "inspect-admitted")
+{
+    if (args.Length != 3 || !File.Exists(root + "/journal/.writer.lock"))
+        throw new ArgumentException("inspect-admitted requires existing job");
+    // Reading through the canonical journal after SIGKILL proves that the
+    // kernel released the whole-job lease. Do not reconstruct state by path.
+    await using var lease = await new CloudMigrationJournal(root + "/journal").AcquireAsync();
+    var current = await lease.ReadAsync(args[2]) ?? throw new InvalidOperationException("missing job");
+    var job = current.Job;
+    if (job.Phase != CloudMigrationPhases.ReadyForCutover || job.Maintenance is not null
+        || job.BackupPath is not null || job.Id != args[2]
+        || !File.Exists(root + "/music/track.flac")
+        || !File.Exists(root + "/remote/track.flac")
+        || Directory.Exists(root + "/music.backup")
+        || !File.ReadAllBytes(root + "/music/track.flac").AsSpan().SequenceEqual(File.ReadAllBytes(root + "/remote/track.flac")))
+        throw new InvalidOperationException("interrupted preparation changed source or journal");
+    Console.WriteLine($"uncommitted preparation preserved local and remote bytes, journal={current.Revision}");
+    return;
+}
 if (args[0] == "inspect")
 {
     if (args.Length != 4 || !File.Exists(root + "/journal/.writer.lock")) throw new ArgumentException("inspect requires existing job and expected phase");
