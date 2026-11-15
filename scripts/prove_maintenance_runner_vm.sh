@@ -46,6 +46,13 @@ check_startup() {
             echo 'Startup unexpectedly admitted incomplete or changed state' >&2
             exit 1
         fi
+        # Do not count unrelated service-manager failures as a passed guard test.
+        # The runner uses exit 1 only when it deliberately blocks startup.
+        guard_result=$(systemctl show jellyfin.service --property=ExecStartPre --value)
+        case "$guard_result" in
+            *'code=exited'*'status=1'*) ;;
+            *) echo 'Startup failure was not a guard rejection' >&2; exit 1 ;;
+        esac
     else
         systemctl start jellyfin.service
     fi
