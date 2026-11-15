@@ -28,6 +28,11 @@ restore_mask() {
     if [ ! -e /etc/systemd/system/jellyfin.service ] && [ ! -L /etc/systemd/system/jellyfin.service ]; then ln -s /dev/null /etc/systemd/system/jellyfin.service; fi
     rm -f /run/systemd/system/jellyfin.service
     systemctl daemon-reload
+    # A deliberately rejected ExecStartPre leaves the disposable service in
+    # "failed". Clear only that stand-in state before returning to the
+    # separately verified offline-maintenance (inactive) barrier.
+    systemctl reset-failed jellyfin.service
+    [ "$(systemctl show jellyfin.service --property=ActiveState --value)" = inactive ]
 }
 trap restore_mask EXIT HUP INT TERM
 install_guard() {
