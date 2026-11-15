@@ -18,6 +18,8 @@ done
 [ ! -e /run/systemd/system/jellyfin.service ] || exit 2
 [ ! -e /usr/lib/systemd/system/jellyfin.service ] && [ ! -e /lib/systemd/system/jellyfin.service ] || exit 2
 [ "$(systemctl show jellyfin.service --property=ActiveState --value)" = inactive ] || exit 2
+expected_exe=$(readlink -f /usr/bin/sleep)
+[ -x "$expected_exe" ] || { echo 'Missing synthetic sleep executable' >&2; exit 2; }
 marker_dir=/run/slipmat-vfs-proof-interrupted-check
 marker=$marker_dir/active.pid
 wrapper=$rclone-interruption-fixture
@@ -44,7 +46,7 @@ cleanup() {
         wait "$runner_pid" 2>/dev/null || :
     fi
     if [ -n "$verifier_pid" ]; then
-        if [ "$(readlink "/proc/$verifier_pid/exe" 2>/dev/null || :)" = /usr/bin/sleep ]; then
+        if [ "$(readlink "/proc/$verifier_pid/exe" 2>/dev/null || :)" = "$expected_exe" ]; then
             kill -KILL "$verifier_pid" 2>/dev/null || :
         fi
     fi
@@ -75,11 +77,11 @@ case "$verifier_pid" in ''|*[!0-9]*) echo 'Invalid test verifier PID' >&2; exit 
 count=0
 while [ "$count" -lt 100 ]; do
     current_exe=$(readlink "/proc/$verifier_pid/exe" 2>/dev/null || :)
-    [ "$current_exe" = /usr/bin/sleep ] && break
+    [ "$current_exe" = "$expected_exe" ] && break
     sleep 0.02
     count=$((count + 1))
 done
-[ "$current_exe" = /usr/bin/sleep ] || { echo "Unexpected verifier executable: $current_exe" >&2; exit 1; }
+[ "$current_exe" = "$expected_exe" ] || { echo "Unexpected verifier executable: $current_exe" >&2; exit 1; }
 # Confirm the verifier is the disposable test process, not a privileged actor.
 [ "$(stat -c %u "/proc/$verifier_pid")" = 65534 ] || { echo 'Unexpected verifier owner' >&2; exit 1; }
 kill -KILL "$runner_pid"
