@@ -70,7 +70,16 @@ done
 [ -s "$marker" ] || { echo 'Verification marker was not created' >&2; exit 1; }
 verifier_pid=$(cat "$marker")
 case "$verifier_pid" in ''|*[!0-9]*) echo 'Invalid test verifier PID' >&2; exit 1;; esac
-[ "$(readlink "/proc/$verifier_pid/exe")" = /usr/bin/sleep ] || { echo 'Unexpected verifier executable' >&2; exit 1; }
+# The marker is written by the shell immediately before exec. Wait for the
+# expected executable rather than assuming that the exec has completed.
+count=0
+while [ "$count" -lt 100 ]; do
+    current_exe=$(readlink "/proc/$verifier_pid/exe" 2>/dev/null || :)
+    [ "$current_exe" = /usr/bin/sleep ] && break
+    sleep 0.02
+    count=$((count + 1))
+done
+[ "$current_exe" = /usr/bin/sleep ] || { echo "Unexpected verifier executable: $current_exe" >&2; exit 1; }
 # Confirm the verifier is the disposable test process, not a privileged actor.
 [ "$(stat -c %u "/proc/$verifier_pid")" = 65534 ] || { echo 'Unexpected verifier owner' >&2; exit 1; }
 kill -KILL "$runner_pid"
