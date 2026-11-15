@@ -25,13 +25,17 @@ mount -t tmpfs -o size=32m,mode=0755 "slipmat-cache-$job" "$root/cache"
 # The persistent mask was verified before fixture creation. Restore it after
 # every attempted startup, including rejection or interruption.
 restore_mask() {
+    # Clear a deliberately rejected startup while the stand-in unit is still
+    # loaded. Once it is masked and unloaded, reset-failed can itself fail.
+    state=$(systemctl show jellyfin.service --property=ActiveState --value)
+    case "$state" in
+        failed) systemctl reset-failed jellyfin.service ;;
+        inactive) ;;
+        *) echo 'Disposable Jellyfin stand-in is not quiescent' >&2; return 1 ;;
+    esac
     if [ ! -e /etc/systemd/system/jellyfin.service ] && [ ! -L /etc/systemd/system/jellyfin.service ]; then ln -s /dev/null /etc/systemd/system/jellyfin.service; fi
     rm -f /run/systemd/system/jellyfin.service
     systemctl daemon-reload
-    # A deliberately rejected ExecStartPre leaves the disposable service in
-    # "failed". Clear only that stand-in state before returning to the
-    # separately verified offline-maintenance (inactive) barrier.
-    systemctl reset-failed jellyfin.service
     [ "$(systemctl show jellyfin.service --property=ActiveState --value)" = inactive ]
 }
 trap restore_mask EXIT HUP INT TERM
