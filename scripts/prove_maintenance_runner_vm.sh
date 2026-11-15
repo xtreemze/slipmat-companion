@@ -22,29 +22,56 @@ case "$job" in *[!0-9a-f]*|'') echo 'Invalid job ID' >&2; exit 2;; esac
 mount -t tmpfs -o size=32m,mode=0755 "slipmat-cache-$job" "$root/cache"
 [ "$(stat -c %d "$root/cache")" != "$(stat -c %d "$root/music")" ]
 "$runner" prepare "$root/journal" "$job" "$root/draft.json" "$root/bundle/spec.json"
-"$runner" run "$root/journal" "$job" "$root/bundle/spec.json"
-"$fixture" inspect "$root" "$job" ready-to-finalize
-findmnt -rn --mountpoint "$root/music" -o TARGET,SOURCE,FSTYPE,OPTIONS
-systemctl is-active "slipmat-vfs-$job.service"
-setpriv --reuid=65534 --regid=65534 --clear-groups -- cat "$root/music/track.flac"
-before=$(sha256sum "$root/journal/$job.json" | cut -d ' ' -f1)
-# Only remove the mask we verified above; restore it even when startup fails.
+# The persistent mask was verified before fixture creation. Restore it after
+# every attempted startup, including rejection or interruption.
 restore_mask() {
     if [ ! -e /etc/systemd/system/jellyfin.service ] && [ ! -L /etc/systemd/system/jellyfin.service ]; then ln -s /dev/null /etc/systemd/system/jellyfin.service; fi
     rm -f /run/systemd/system/jellyfin.service
     systemctl daemon-reload
 }
-printf '[Unit]\nDescription=Disposable Jellyfin startup guard fixture\n[Service]\nType=oneshot\nExecStartPre=%s startup %s/journal %s %s/bundle/spec.json\nExecStart=/usr/bin/true\n' "$runner" "$root" "$job" "$root" > /run/systemd/system/jellyfin.service
-rm /etc/systemd/system/jellyfin.service
 trap restore_mask EXIT HUP INT TERM
-systemctl daemon-reload
-systemctl start jellyfin.service
-after=$(sha256sum "$root/journal/$job.json" | cut -d ' ' -f1)
-[ "$before" = "$after" ] || { echo 'Startup modified journal' >&2; exit 1; }
-restore_mask
-trap - EXIT HUP INT TERM
+install_guard() {
+    printf '[Unit]\nDescription=Disposable Jellyfin startup guard fixture\n[Service]\nType=oneshot\nExecStartPre=%s startup %s/journal %s %s/bundle/spec.json\nExecStart=/usr/bin/true\n' "$runner" "$root" "$job" "$root" > /run/systemd/system/jellyfin.service
+    rm /etc/systemd/system/jellyfin.service
+    systemctl daemon-reload
+}
+# Startup must never mutate the authoritative journal. Incomplete or changed
+# custody is rejected by ExecStartPre, not repaired during service activation.
+check_startup() {
+    expected=$1
+    journal_before=$(sha256sum "$root/journal/$job.json" | cut -d ' ' -f1)
+    install_guard
+    if [ "$expected" = blocked ]; then
+        if systemctl start jellyfin.service; then
+            echo 'Startup unexpectedly admitted incomplete or changed state' >&2
+            exit 1
+        fi
+    else
+        systemctl start jellyfin.service
+    fi
+    journal_after=$(sha256sum "$root/journal/$job.json" | cut -d ' ' -f1)
+    [ "$journal_before" = "$journal_after" ] || { echo 'Startup modified journal' >&2; exit 1; }
+    restore_mask
+}
+# Prepared intent is incomplete. Refuse Jellyfin startup before cutover.
+check_startup blocked
+"$runner" run "$root/journal" "$job" "$root/bundle/spec.json"
+"$fixture" inspect "$root" "$job" ready-to-finalize
+findmnt -rn --mountpoint "$root/music" -o TARGET,SOURCE,FSTYPE,OPTIONS
+systemctl is-active "slipmat-vfs-$job.service"
+setpriv --reuid=65534 --regid=65534 --clear-groups -- cat "$root/music/track.flac"
+# Simulate a changed plugin configuration after successful promotion.
+# Keep the exact promoted bytes so the fixture can restore them safely.
+cp "$root/profile.xml" "$root/bundle/profile-promoted-for-test.xml"
+printf '\n<!-- injected startup drift -->\n' >> "$root/profile.xml"
+check_startup blocked
+cp "$root/bundle/profile-promoted-for-test.xml" "$root/profile.xml"
+cmp "$root/bundle/profile-promoted-for-test.xml" "$root/profile.xml"
+check_startup stable
 "$runner" rollback "$root/journal" "$job" "$root/bundle/spec.json"
 "$fixture" inspect "$root" "$job" rolled-back
+# A completed rollback is independently admissible at service startup.
+check_startup stable
 cmp "$root/music/track.flac" "$root/remote/track.flac"
 [ ! -e "$root/music.backup" ]
 ! findmnt -rn --mountpoint "$root/music"
