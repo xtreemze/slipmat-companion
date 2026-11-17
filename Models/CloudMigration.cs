@@ -12,6 +12,8 @@ public static class CloudMigrationDirections
 
 public static class CloudMigrationPhases
 {
+    /// <summary>Explicit archive-and-repair work, including persisted in-flight intent.</summary>
+    public const string QueuedConflictRecovery = "queued-conflict-recovery";
     public const string QueuedDiagnostics = "queued-diagnostics";
     public const string Diagnosing = "diagnosing";
     public const string QueuedRebaseline = "queued-rebaseline";
@@ -98,7 +100,8 @@ public sealed record CloudMigrationJob(
     [property: JsonPropertyName("diagnostics")] CloudMigrationDiagnostics? Diagnostics = null,
     [property: JsonPropertyName("diagnosticProgress")] CloudMigrationProgress? DiagnosticProgress = null,
     [property: JsonPropertyName("maintenance")] CloudMaintenanceIntent? Maintenance = null,
-    [property: JsonPropertyName("maintenanceAdmission")] CloudMaintenanceAdmission? MaintenanceAdmission = null);
+    [property: JsonPropertyName("maintenanceAdmission")] CloudMaintenanceAdmission? MaintenanceAdmission = null,
+    [property: JsonPropertyName("conflictRecovery")] CloudConflictRecoverySession? ConflictRecovery = null);
 
 public sealed record CloudMigrationProgress(
     [property: JsonPropertyName("bytes")] long Bytes,
@@ -132,4 +135,5 @@ public sealed record CloudMigrationDiagnostics(
 public sealed record CloudMigrationRecoveryActions(
     [property: JsonPropertyName("resume")] bool Resume,
     [property: JsonPropertyName("rebaseline")] bool Rebaseline,
-    [property: JsonPropertyName("diagnose")] bool Diagnose);
+    [property: JsonPropertyName("diagnose")] bool Diagnose,
+    [property: JsonPropertyName("recoverConflicts")] bool RecoverConflicts = false);

@@ -2104,6 +2104,36 @@
                     const actions = document.createElement('div');
                     actions.className = 'ag-actions ag-actions--compact';
 
+                    if (job.conflictRecovery) {
+                        const repair = document.createElement('div');
+                        repair.className = 'fieldDescription';
+                        const session = job.conflictRecovery;
+                        const cursor = session.cursor || {};
+                        const count = session.plan && Number(session.plan.count);
+                        const summary = session.status === 'archiving'
+                            ? 'Verified originals archived: ' + Number(cursor.archived || 0) + ' / ' + count + '.'
+                            : session.status === 'repairing'
+                            ? 'Metadata paths repaired: ' + Number(cursor.resolved || 0) + ' / ' + count + '. Originals remain archived.'
+                            : session.status === 'completed'
+                            ? (job.phase === 'ready-for-cutover'
+                                ? 'Conflict repair, normal copy and downloaded-content verification complete.'
+                                : 'Conflict repair complete. See the migration status for normal copy and downloaded-content verification.')
+                            : session.status === 'blocked'
+                            ? 'Conflict repair stopped. Retained originals and journal are preserved.'
+                            : 'Content preflight queued/running. It may read the full library before archiving begins.';
+                        repair.textContent = summary + ' Archive: ' + job.remoteName + ':' + session.archiveRoot + '.';
+                        row.appendChild(repair);
+                        if (session.progress) {
+                            const progress = document.createElement('div');
+                            progress.className = 'fieldDescription';
+                            progress.textContent = 'Content preflight: ' + session.progress.phase + ' · ' +
+                                Number(session.progress.files) + ' / ' + Number(session.progress.totalFiles) +
+                                ' files · ' + formatCloudSize(session.progress.bytesRead) + ' read · observed ' +
+                                session.progress.observedAt + '. Refresh to see current progress.';
+                            row.appendChild(progress);
+                        }
+                    }
+
                     if (job.phase === 'failed' && job.direction === 'local-to-vfs' &&
                         !job.backupPath && job.manifestDigestSha256) {
                         const allowed = response && response.actions && response.actions[job.id] || {};
@@ -2122,19 +2152,32 @@
                                 return rebaselineMigration(job);
                             }));
                         }
+                        if (allowed.recoverConflicts) {
+                            actions.appendChild(migrationActionButton(job.conflictRecovery
+                                ? 'Resume archive-and-repair' : 'Archive originals and repair metadata', function() {
+                                return recoverConflictMigration(job);
+                            }));
+                        }
                         const recovery = document.createElement('div');
                         recovery.className = 'fieldDescription';
                         recovery.textContent = (!allowed.resume && allowed.rebaseline
                             ? 'Original-baseline resume is unavailable after the failed recovery check. Inspect the diagnostic report before another current-source review. '
                             : 'Resume reuses this job and partial destination after source/profile checks. ') +
-                            'Existing remote objects remain immutable. Changed source or target requires operator recovery.';
+                            'Standard recovery keeps remote objects immutable. Archive-and-repair is a separate explicit operation: ' +
+                            'verified originals are retained before approved metadata changes; any audio conflict stops repair.';
                         actions.appendChild(recovery);
                     }
 
-                    if (job.phase === 'ready-for-cutover') {
+                    if (job.phase === 'ready-for-cutover' && !job.conflictRecovery) {
                         actions.appendChild(migrationActionButton('Cut over', function() {
                             return transitionMigration(job.id, 'cutover');
                         }));
+                    }
+                    if (job.phase === 'ready-for-cutover' && job.conflictRecovery) {
+                        const offline = document.createElement('div');
+                        offline.className = 'fieldDescription';
+                        offline.textContent = 'Content verification passed. Use the reviewed offline maintenance procedure for cutover; the local library remains authoritative.';
+                        actions.appendChild(offline);
                     }
 
                     if (job.phase === 'ready-to-finalize') {
@@ -2296,6 +2339,28 @@
                 if (!payload && response && response.data) payload = response.data;
                 const code = payload && payload.code;
                 return typeof code === 'string' && /^[a-z][a-z0-9-]{0,99}$/.test(code) ? code : null;
+            }
+
+            async function recoverConflictMigration(job) {
+                if (!window.confirm('Archive and repair ' + job.libraryName + '? Confirm that Slipmat Companion is the ONLY writer to ' +
+                    job.remoteName + ':' + job.remotePath + '. Current local metadata becomes authoritative. ' +
+                    'Cloud metadata/artwork originals are copied to a verified archive before replacement; remote-only artwork ' +
+                    'is retained in that archive and removed from the active library. Audio conflicts stop the whole plan. ' +
+                    'Content preflight can read the full collection. Normal copy and downloaded verification follow. ' +
+                    'VFS cutover and local cleanup remain separate actions.')) return;
+                const status = document.querySelector('#CloudMigrationStatus');
+                status.textContent = 'Queuing content preflight and verified archive-and-repair…';
+                try {
+                    await ApiClient.ajax({
+                        type: 'POST', contentType: 'application/json', dataType: 'json',
+                        data: JSON.stringify({ expectedManifestDigestSha256: job.manifestDigestSha256, writerPolicy: 'companion-only' }),
+                        url: ApiClient.getUrl('Plugins/AudioGateway/cloud/migrations/' + encodeURIComponent(job.id) + '/recover-conflicts')
+                    });
+                    await refreshMigrations();
+                } catch (error) {
+                    const code = await migrationErrorCode(error);
+                    status.textContent = 'Archive-and-repair was not accepted: ' + (code || 'inspect current phase and connection') + '.';
+                }
             }
 
             async function rebaselineMigration(job) {

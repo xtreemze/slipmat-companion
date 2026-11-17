@@ -104,7 +104,7 @@ public sealed class CloudMigrationCoordinator
             CloudLibraryScanPolicy? previousScanPolicy = null;
             if (currentJobs.Any(job =>
                     string.Equals(job.ProfileId, profile.Id, StringComparison.OrdinalIgnoreCase)
-                    && (!IsTerminal(job.Phase) || _queue.IsPending(job.Id))))
+                    && (job.ConflictRecovery?.OwnsJob == true || !IsTerminal(job.Phase) || _queue.IsPending(job.Id))))
             {
                 throw new InvalidOperationException("migration-already-active");
             }
@@ -273,6 +273,64 @@ public sealed class CloudMigrationCoordinator
         }
 
         return new CloudMigrationBulkStartResponse(started, skipped);
+    }
+
+    /// <summary>Admit or explicitly resume lossless conflict recovery without changing the source baseline.</summary>
+    public async Task<CloudMigrationJob> RequestConflictRecoveryAsync(
+        string jobId, CloudConflictRecoveryRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var snapshot = await _store.GetSnapshotAsync(jobId, cancellationToken).ConfigureAwait(false)
+                ?? throw new InvalidOperationException("migration-not-found");
+            var job = snapshot.Job;
+            var existing = job.ConflictRecovery;
+            if (job.Maintenance is not null || job.MaintenanceAdmission is not null
+                || job.BackupPath is not null || job.StagingPath is not null
+                || job.Direction != CloudMigrationDirections.LocalToVfs
+                || (existing is null ? !CloudMigrationRecovery.CanRebaseline(job)
+                    : existing.Status != "blocked" || job.Phase != CloudMigrationPhases.Failed))
+                throw new InvalidOperationException("migration-not-conflict-recoverable");
+            if (!string.Equals(request.ExpectedManifestDigestSha256, job.ManifestDigestSha256, StringComparison.Ordinal))
+                throw new InvalidOperationException("migration-baseline-confirmation-stale");
+            if (request.WriterPolicy != CloudConflictRecoverySession.CompanionOnlyWriter)
+                throw new InvalidOperationException("conflict-recovery-exclusive-writer-required");
+            if ((job.BaselineHistory?.Count ?? 0) >= CloudMigrationRecovery.MaxBaselineRevisions)
+                throw new InvalidOperationException("migration-baseline-history-limit");
+            await ValidateRecoveryBindingsAsync(job, cancellationToken).ConfigureAwait(false);
+            if (ContainsReparsePoint(job.LocalPath))
+                throw new InvalidOperationException("source-reparse-point-unsupported");
+            var attempt = existing?.AttemptId ?? Guid.NewGuid().ToString("N");
+            CloudMigrationStore.RejectRecoverySourceOverlap(job.LocalPath, _store.ConflictRecoveryDirectory(job.Id, attempt));
+            var firstSegment = job.RemotePath.Split('/')[0];
+            if (string.IsNullOrWhiteSpace(firstSegment) || firstSegment is "." or "..")
+                throw new InvalidOperationException("conflict-recovery-root-unsupported");
+            var session = existing is null
+                ? new CloudConflictRecoverySession(attempt,
+                    firstSegment + "-recovery-archives/" + job.Id + "/" + attempt,
+                    request.WriterPolicy, "queued", DateTimeOffset.UtcNow)
+                : existing with { Status = "queued", Code = null };
+            var queued = job with
+            {
+                Phase = CloudMigrationPhases.QueuedConflictRecovery,
+                Code = "conflict-recovery-queued",
+                ConflictRecovery = session,
+                Verification = null,
+                UpdatedAt = DateTimeOffset.UtcNow,
+            };
+            // Admission is a deliberate owner transition, never an ordinary stale SaveAsync.
+            await using var lease = await _store.AcquireRecoveryLeaseAsync(cancellationToken).ConfigureAwait(false);
+            var saved = await lease.CompareExchangeAsync(snapshot, queued, cancellationToken).ConfigureAwait(false);
+            if (!_queue.TryEnqueue(job.Id))
+            {
+                await lease.CompareExchangeAsync(saved, job, CancellationToken.None).ConfigureAwait(false);
+                throw new InvalidOperationException("migration-queue-full");
+            }
+            return queued;
+        }
+        finally { _gate.Release(); }
     }
 
     public async Task<CloudMigrationJob> RequestResumeAsync(
@@ -567,6 +625,8 @@ public sealed class CloudMigrationCoordinator
             }
 
             if (job.MaintenanceAdmission is not null || job.Maintenance is not null)
+                throw new InvalidOperationException("maintenance-offline-runner-required");
+            if (nextPhase == CloudMigrationPhases.QueuedCutover && job.ConflictRecovery is not null)
                 throw new InvalidOperationException("maintenance-offline-runner-required");
 
             if (_queue.IsPending(job.Id))

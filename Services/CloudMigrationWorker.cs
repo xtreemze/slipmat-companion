@@ -29,6 +29,7 @@ public sealed class CloudMigrationWorker : BackgroundService
     private readonly ICloudLibraryProjection _libraryProjection;
     private readonly ILibraryManager _library;
     private readonly ILogger<CloudMigrationWorker> _logger;
+    private readonly Func<CloudMigrationJob, CloudConflictRecoveryFence.RecoveryLease, ICloudConflictRecoveryHost> _conflictHostFactory;
     // Startup may recover more durable jobs than the bounded channel can hold.
     // Only the single migration worker drains this overflow as capacity becomes free.
     private readonly Queue<string> _startupOverflow = new();
@@ -41,7 +42,8 @@ public sealed class CloudMigrationWorker : BackgroundService
         CloudProjectionService projectionService,
         ICloudLibraryProjection libraryProjection,
         ILibraryManager library,
-        ILogger<CloudMigrationWorker> logger)
+        ILogger<CloudMigrationWorker> logger,
+        Func<CloudMigrationJob, CloudConflictRecoveryFence.RecoveryLease, ICloudConflictRecoveryHost>? conflictHostFactory = null)
     {
         _store = store;
         _queue = queue;
@@ -51,6 +53,9 @@ public sealed class CloudMigrationWorker : BackgroundService
         _libraryProjection = libraryProjection;
         _library = library;
         _logger = logger;
+        _conflictHostFactory = conflictHostFactory ?? ((job, lease) => new RcloneCloudConflictRecoveryHost(
+            _runner, lease, Path.Combine(_store.ConflictRecoveryDirectory(job.Id, job.ConflictRecovery!.AttemptId), "cache"),
+            job.ConflictRecovery.WriterPolicy));
     }
 
     public override async Task StartAsync(CancellationToken cancellationToken)
@@ -62,6 +67,11 @@ public sealed class CloudMigrationWorker : BackgroundService
             // Offline transactions are owned by the supervised runner. A plugin
             // restart must never replay their path effects through the online worker.
             if (job.Maintenance is not null) continue;
+            if (job.ConflictRecovery?.OwnsJob == true)
+            {
+                if (job.Phase == CloudMigrationPhases.QueuedConflictRecovery) QueueRestoredJob(job.Id);
+                continue;
+            }
             switch (job.Phase)
             {
                 case CloudMigrationPhases.QueuedDiagnostics:
@@ -142,13 +152,17 @@ public sealed class CloudMigrationWorker : BackgroundService
             try
             {
                 var job = await _store.GetAsync(jobId, stoppingToken).ConfigureAwait(false);
-                if (job is null || job.Maintenance is not null)
+                if (job is null || job.Maintenance is not null
+                    || job.ConflictRecovery?.OwnsJob == true && job.Phase != CloudMigrationPhases.QueuedConflictRecovery)
                 {
                     continue;
                 }
 
                 switch (job.Phase)
                 {
+                    case CloudMigrationPhases.QueuedConflictRecovery:
+                        await ExecuteConflictRecoveryAsync(job.Id, stoppingToken).ConfigureAwait(false);
+                        break;
                     case CloudMigrationPhases.QueuedDiagnostics:
                         await ExecuteDiagnosticsAsync(job, stoppingToken).ConfigureAwait(false);
                         break;
@@ -177,7 +191,7 @@ public sealed class CloudMigrationWorker : BackgroundService
             {
                 _logger.LogWarning(ex, "Cloud migration job {JobId} failed unexpectedly", jobId);
                 var job = await _store.GetAsync(jobId, CancellationToken.None).ConfigureAwait(false);
-                if (job is not null)
+                if (job is not null && job.ConflictRecovery?.OwnsJob != true)
                 {
                     await SaveAsync(
                         job with
@@ -206,6 +220,16 @@ public sealed class CloudMigrationWorker : BackgroundService
     {
         while (_startupOverflow.Count > 0 && _queue.TryEnqueue(_startupOverflow.Peek()))
             _startupOverflow.Dequeue();
+    }
+
+    private async Task ExecuteConflictRecoveryAsync(string jobId, CancellationToken cancellationToken)
+    {
+        var executor = new CloudConflictRecoveryExecutor(_store, _conflictHostFactory, RebaselineBindingsMatch);
+        var repaired = await executor.ExecuteAsync(jobId, cancellationToken).ConfigureAwait(false);
+        // The executor has released its job lease and writer fence before normal
+        // recovery adopts the current source, copies additions and verifies all bytes.
+        if (repaired.Phase == CloudMigrationPhases.QueuedRebaseline && repaired.ConflictRecovery?.OwnsJob == false)
+            await ExecuteRebaselineAsync(repaired, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task ExecuteDiagnosticsAsync(CloudMigrationJob job, CancellationToken cancellationToken)
@@ -476,6 +500,12 @@ public sealed class CloudMigrationWorker : BackgroundService
         CloudMigrationJob job,
         CancellationToken cancellationToken)
     {
+        if (job.ConflictRecovery is not null)
+        {
+            await SaveAsync(job with { Phase = CloudMigrationPhases.ReadyForCutover,
+                Code = "maintenance-offline-runner-required" }, cancellationToken).ConfigureAwait(false);
+            return;
+        }
         if (_library.IsScanRunning)
         {
             await SaveAsync(

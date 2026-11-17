@@ -16,7 +16,8 @@ using Xunit;
 
 namespace Jellyfin.Plugin.AudioGateway.Tests;
 
-public class CloudMigrationRecoveryTests
+[Collection("Shared rclone recovery fence")]
+public partial class CloudMigrationRecoveryTests
 {
     [Fact]
     public async Task Startup_DoesNotRecoverOrQueueAnOfflineOwnedJob()

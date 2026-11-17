@@ -61,7 +61,7 @@ jobs:
           node-version: "24"
 
       - name: Test migration error projection
-        run: node --test scripts/tests/migration_error_code.test.mjs
+        run: node --test scripts/tests/migration_error_code.test.mjs scripts/tests/conflict_recovery_ui.test.mjs
 
       - name: Build companion site
         run: |
@@ -99,8 +99,20 @@ jobs:
           echo "path=$path" >> "$GITHUB_OUTPUT"
           echo "lib=$root/lib" >> "$GITHUB_OUTPUT"
 
+      - name: Resolve pinned rclone for isolated recovery tests
+        id: rclone
+        run: |
+          archive="$RUNNER_TEMP/rclone.zip"
+          curl --fail --location --silent --show-error \
+            https://downloads.rclone.org/v1.74.4/rclone-v1.74.4-linux-amd64.zip \
+            --output "$archive"
+          echo "fe435e0c36228e7c2f116a8701f01127bb1f694005fc11d1f27186c8bca4115d  $archive" | sha256sum --check --strict
+          unzip -q "$archive" -d "$RUNNER_TEMP/rclone"
+          echo "path=$RUNNER_TEMP/rclone/rclone-v1.74.4-linux-amd64/rclone" >> "$GITHUB_OUTPUT"
+
       - name: Test
         env:
+          SLIPMAT_TEST_RCLONE: ${{ steps.rclone.outputs.path }}
           SLIPMAT_PARITY_FFMPEG: ${{ steps.ffmpeg.outputs.path }}
           LD_LIBRARY_PATH: ${{ steps.ffmpeg.outputs.lib }}
         run: dotnet test Tests/Jellyfin.Plugin.AudioGateway.Tests.csproj --configuration Release --no-build --no-restore --logger "console;verbosity=minimal"

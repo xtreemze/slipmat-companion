@@ -26,7 +26,8 @@ public sealed record RcloneCommandResult(
     string StandardOutput,
     string StandardError,
     bool TimedOut,
-    bool OutputTruncated);
+    bool OutputTruncated,
+    string? ErrorCode = null);
 
 public sealed record RcloneCliStatus(
     RcloneCliHealth Health,
@@ -99,6 +100,10 @@ public sealed class RcloneProcessRunner : IRcloneProgressRunner, IRcloneDiagnost
         ArgumentException.ThrowIfNullOrWhiteSpace(executable);
         ArgumentNullException.ThrowIfNull(arguments);
 
+        if (!CloudConflictRecoveryFence.Shared.TryEnterCommand(out var commandPermit))
+            return new RcloneCommandResult(false, null, "", "", false, false, "remote-recovery-in-progress");
+        using var ownedCommand = commandPermit;
+
         using var process = new Process();
         process.StartInfo.FileName = executable;
         process.StartInfo.UseShellExecute = false;
@@ -142,6 +147,7 @@ public sealed class RcloneProcessRunner : IRcloneProgressRunner, IRcloneDiagnost
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             TryKill(process);
+            await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
             await ObserveReadersAsync(stdoutTask, stderrTask).ConfigureAwait(false);
             var partialStdout = await stdoutTask.ConfigureAwait(false);
             var partialStderr = await stderrTask.ConfigureAwait(false);
@@ -156,6 +162,7 @@ public sealed class RcloneProcessRunner : IRcloneProgressRunner, IRcloneDiagnost
         catch (OperationCanceledException)
         {
             TryKill(process);
+            await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
             await ObserveReadersAsync(stdoutTask, stderrTask).ConfigureAwait(false);
             throw;
         }
@@ -346,7 +353,7 @@ public sealed partial class RcloneCliHost
 
         if (!versionResult.StartSucceeded)
         {
-            return Status(RcloneCliHealth.Unavailable, null, "rclone-unavailable");
+            return Status(RcloneCliHealth.Unavailable, null, versionResult.ErrorCode ?? "rclone-unavailable");
         }
 
         if (versionResult.TimedOut)
@@ -373,7 +380,7 @@ public sealed partial class RcloneCliHost
 
         if (!remotesResult.StartSucceeded)
         {
-            return Status(RcloneCliHealth.Unavailable, version, "rclone-unavailable");
+            return Status(RcloneCliHealth.Unavailable, version, remotesResult.ErrorCode ?? "rclone-unavailable");
         }
 
         if (remotesResult.TimedOut)
@@ -421,7 +428,7 @@ public sealed partial class RcloneCliHost
 
         if (!result.StartSucceeded)
         {
-            return new RcloneRemoteProbe(false, "rclone-unavailable", result.OutputTruncated);
+            return new RcloneRemoteProbe(false, result.ErrorCode ?? "rclone-unavailable", result.OutputTruncated);
         }
 
         if (result.TimedOut)
@@ -457,7 +464,7 @@ public sealed partial class RcloneCliHost
 
         if (!result.StartSucceeded)
         {
-            return ListingFailure("rclone-unavailable", result.OutputTruncated);
+            return ListingFailure(result.ErrorCode ?? "rclone-unavailable", result.OutputTruncated);
         }
 
         if (result.TimedOut)
@@ -1015,6 +1022,7 @@ public sealed partial class RcloneCliHost
 
     internal static string? ClassifyRemoteFailure(RcloneCommandResult result)
     {
+        if (result.ErrorCode is not null) return result.ErrorCode;
         var combined = string.Concat(
             result.StandardError,
             "\n",

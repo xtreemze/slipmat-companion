@@ -9,6 +9,8 @@
     <Compile Remove="Tests/**/*.cs" />
     <Compile Include="../Models/CloudMaintenance.cs" Link="Shared/CloudMaintenance.cs" />
     <Compile Include="../Models/CloudMigration.cs" Link="Shared/CloudMigration.cs" />
+    <Compile Include="../Models/CloudConflictRecovery.cs" Link="Shared/CloudConflictRecovery.cs" />
+    <Compile Include="../Models/CloudConflictRecoverySession.cs" Link="Shared/CloudConflictRecoverySession.cs" />
     <Compile Include="../Models/CloudProjection.cs" Link="Shared/CloudProjection.cs" />
     <Compile Include="../Services/CloudMigrationJournal.cs" Link="Shared/CloudMigrationJournal.cs" />
     <Compile Include="../Services/CloudMigrationManifestBuilder.cs" Link="Shared/CloudMigrationManifestBuilder.cs" />
