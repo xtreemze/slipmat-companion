@@ -49,7 +49,7 @@ public sealed class CloudMigrationController : ControllerBase
         var jobs = await _coordinator.ListAsync(cancellationToken).ConfigureAwait(false);
         var actions = jobs.ToDictionary(job => job.Id, job => new CloudMigrationRecoveryActions(
             CloudMigrationRecovery.CanResume(job), CloudMigrationRecovery.CanRebaseline(job),
-            CloudMigrationRecovery.CanRebaseline(job)));
+            CloudMigrationRecovery.CanRebaseline(job), CloudMigrationRecovery.CanRecoverConflicts(job)));
         return Ok(new CloudMigrationListResponse(jobs, actions));
     }
 
@@ -119,6 +119,15 @@ public sealed class CloudMigrationController : ControllerBase
         string jobId, [FromBody] CloudMigrationRebaselineRequest request,
         CancellationToken cancellationToken)
         => await Transition(() => _coordinator.RequestRebaselineAsync(jobId, request, cancellationToken))
+            .ConfigureAwait(false);
+
+    /// <summary>Archive verified metadata originals before repairing an explicitly confirmed local-source recovery.</summary>
+    [HttpPost("{jobId}/recover-conflicts")]
+    [ProducesResponseType(typeof(CloudMigrationJob), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<CloudMigrationJob>> RecoverConflicts(string jobId,
+        [FromBody] CloudConflictRecoveryRequest request, CancellationToken cancellationToken)
+        => await Transition(() => _coordinator.RequestConflictRecoveryAsync(jobId, request, cancellationToken))
             .ConfigureAwait(false);
 
     [HttpPost("{jobId}/cutover")]

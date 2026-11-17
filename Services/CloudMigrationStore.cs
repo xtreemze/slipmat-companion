@@ -138,6 +138,8 @@ public sealed class CloudMigrationStore
                 throw new InvalidOperationException("migration-maintenance-owned");
             if (current?.Job.MaintenanceAdmission is not null)
                 throw new InvalidOperationException("migration-maintenance-admitted");
+            if (current?.Job.ConflictRecovery?.OwnsJob == true)
+                throw new InvalidOperationException("migration-conflict-recovery-owned");
             await lease.CompareExchangeAsync(current, job, cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -162,6 +164,8 @@ public sealed class CloudMigrationStore
     {
         if (expected.Job.Maintenance is not null)
             throw new InvalidOperationException("migration-maintenance-owned");
+        if (expected.Job.ConflictRecovery?.OwnsJob == true)
+            throw new InvalidOperationException("migration-conflict-recovery-owned");
         await using var lease = await new CloudMigrationJournal(ResolveRoot())
             .AcquireAsync(cancellationToken).ConfigureAwait(false);
         await lease.CompareExchangeAsync(expected, replacement, cancellationToken).ConfigureAwait(false);
@@ -171,6 +175,30 @@ public sealed class CloudMigrationStore
         => Path.Combine(
             RuntimeSettings.ResolveStoreRoot(_configurationSource.GetCurrent()),
             "cloud-migrations");
+
+    /// <summary>Acquire the shared whole-job writer lease for a recovery transaction.</summary>
+    internal Task<CloudMigrationJournalLease> AcquireRecoveryLeaseAsync(CancellationToken cancellationToken)
+        => new CloudMigrationJournal(ResolveRoot()).AcquireAsync(cancellationToken);
+
+    /// <summary>Resolve only a server-generated, job-owned recovery sidecar directory.</summary>
+    internal string ConflictRecoveryDirectory(string jobId, string attemptId)
+    {
+        if (!Guid.TryParseExact(jobId, "N", out _) || !Guid.TryParseExact(attemptId, "N", out _))
+            throw new InvalidOperationException("conflict-recovery-id-invalid");
+        return Path.Combine(ResolveRoot(), "conflict-recovery", jobId, attemptId);
+    }
+
+    /// <summary>Recovery sidecars must never become part of the source media tree.</summary>
+    internal static void RejectRecoverySourceOverlap(string localPath, string directory)
+    {
+        var source = Path.TrimEndingDirectorySeparator(Path.GetFullPath(localPath));
+        var recovery = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (source.Equals(recovery, comparison)
+            || recovery.StartsWith(source + Path.DirectorySeparatorChar, comparison)
+            || source.StartsWith(recovery + Path.DirectorySeparatorChar, comparison))
+            throw new InvalidOperationException("conflict-recovery-store-overlaps-source");
+    }
 
     private string JobPath(string jobId)
         => Path.Combine(ResolveRoot(), $"{jobId}.json");

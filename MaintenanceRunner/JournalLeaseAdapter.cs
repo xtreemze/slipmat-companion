@@ -11,7 +11,8 @@ public sealed class JournalLeaseAdapter(CloudMigrationJournalLease lease) : IMai
     public async Task<MaintenanceSnapshot?> ReadAsync(string jobId, CancellationToken cancellationToken)
     {
         _snapshot = await lease.ReadAsync(jobId, cancellationToken).ConfigureAwait(false);
-        return _snapshot?.Job.Maintenance is not null ? new(_snapshot.Job, _snapshot.Revision) : null;
+        return _snapshot?.Job.Maintenance is not null && _snapshot.Job.ConflictRecovery?.OwnsJob != true
+            ? new(_snapshot.Job, _snapshot.Revision) : null;
     }
 
     public async Task<MaintenanceSnapshot?> CompareExchangeAsync(MaintenanceSnapshot expected, CloudMaintenanceIntent replacement, CancellationToken cancellationToken)

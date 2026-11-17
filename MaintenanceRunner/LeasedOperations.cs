@@ -137,7 +137,8 @@ public sealed class LeasedOperations(IMaintenanceLease lease, IMaintenanceHost h
         var job = snapshot.Job;
         var admission = job.MaintenanceAdmission;
         var custody = intent.Custody;
-        if (job.Id != intent.JobId || job.Maintenance != intent || admission is null || custody is null
+        if (job.ConflictRecovery?.OwnsJob == true
+            || job.Id != intent.JobId || job.Maintenance != intent || admission is null || custody is null
             || !Guid.TryParse(custody.LibraryId, out var libraryId)) return false;
         return libraryId == admission.LibraryId
             && custody.LibraryName == admission.LibraryName

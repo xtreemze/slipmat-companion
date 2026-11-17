@@ -8,6 +8,17 @@ public static class CloudMigrationRecovery
 {
     public const int MaxBaselineRevisions = 32;
 
+    /// <summary>Offer explicit conflict disposition only for uncut local-source jobs.</summary>
+    public static bool CanRecoverConflicts(CloudMigrationJob job)
+        => job.Maintenance is null && job.MaintenanceAdmission is null
+            && job.Direction == CloudMigrationDirections.LocalToVfs && job.Phase == CloudMigrationPhases.Failed
+            && job.BackupPath is null && job.StagingPath is null
+            && job.ManifestVersion == CloudMigrationManifestBuilder.CurrentVersion
+            && job.ManifestFileCount is >= 0 && job.ManifestTotalBytes is >= 0
+            && CloudConflictRecoveryPlanner.Digest(job.ManifestDigestSha256)
+            && (job.BaselineHistory?.Count ?? 0) < MaxBaselineRevisions
+            && (job.ConflictRecovery is null ? CanRebaseline(job) : job.ConflictRecovery.Status == "blocked");
+
     public static bool CanRebaseline(CloudMigrationJob job)
         => CanResume(job) || (IsPrecutoverFailure(job)
             && (job.Code == "migration-source-changed"
@@ -15,6 +26,7 @@ public static class CloudMigrationRecovery
 
     private static bool IsPrecutoverFailure(CloudMigrationJob job)
         => job.Phase == CloudMigrationPhases.Failed
+            && job.ConflictRecovery?.OwnsJob != true
             && job.Direction == CloudMigrationDirections.LocalToVfs
             && job.BackupPath is null && job.StagingPath is null
             && job.ManifestVersion == CloudMigrationManifestBuilder.CurrentVersion

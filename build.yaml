@@ -1,7 +1,7 @@
 ---
 name: "Audio Gateway"
 guid: "d3a2b1c0-e4f5-6789-abcd-ef0123456789"
-version: "0.5.2.12"
+version: "0.5.2.13"
 targetAbi: "12.4.0.0"
 framework: "net10.0"
 overview: "Optional Jellyfin companion that accelerates and enriches Slipmat."
@@ -15,4 +15,4 @@ category: "General"
 owner: "xtreemze"
 artifacts:
 - "Jellyfin.Plugin.AudioGateway.dll"
-changelog: "Target Jellyfin 12.4 and retain bounded migration diagnostics on timeout. Keep matching rows from exhausting report capacity, show separate diagnostic observations, and offer recovery actions from server eligibility. Preserve failed jobs, baselines and media; full downloaded verification remains required before cutover."
+changelog: "Add explicit verified archive-and-repair for cloud metadata conflicts. Preserve every conflicting remote original before repair, block audio and unsupported conflicts, retain resumable job custody, and require normal copy/download verification. Recovered jobs require offline maintenance for VFS promotion."
