@@ -19,6 +19,14 @@ The request binds the selected job's existing manifest digest and the explicit
 `companion-only` writer policy. Clients cannot submit inventories, archive paths,
 hash evidence, or mutation receipts.
 
+After updating Companion, verify that the Jellyfin Linux service actually
+restarted; an installed-version label alone does not prove the running assembly
+changed. Open a fresh settings tab if an already-open page still has the old
+controls. When handing a confirmation to an operator, retain that browser tab
+and read the canonical journal before submitting again. A queued attempt or
+preflight progress confirms admission; do not duplicate the request because a
+browser action timed out.
+
 The source must remain available and unchanged during recovery. The profile must
 remain disabled and the original library binding must still match. Authentication
 must work in Jellyfin's service environment, with token refresh allowed to persist
@@ -70,6 +78,9 @@ published as diagnostics.
 Progress counters are observations, never verification authority. After repair
 completes, inspect the migration's normal copy/check status as well. A completed
 repair by itself does not establish a verified or mounted cloud library.
+Local hashing is followed by full remote directory enumeration, which can leave
+the last local-hashing counters unchanged. Cloud-hashing progress advances after
+each complete directory command. Quiet counters alone do not establish a hang.
 
 ## Validation boundary
 

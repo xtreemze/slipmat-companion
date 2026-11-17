@@ -1,0 +1,75 @@
+namespace Jellyfin.Plugin.AudioGateway.Services;
+
+/// <summary>Maps server-owned recovery failures to exact bounded diagnostic codes.</summary>
+internal static class CloudConflictRecoveryFailure
+{
+    private static readonly HashSet<string> SafeCodes = new(StringComparer.Ordinal)
+    {
+        "conflict-active-object-changed",
+        "conflict-archive-path-invalid",
+        "conflict-archive-proof-missing",
+        "conflict-archive-set-incomplete",
+        "conflict-archive-target-occupied",
+        "conflict-archive-verification-failed",
+        "conflict-artifact-too-large",
+        "conflict-binding-changed",
+        "conflict-binding-invalid",
+        "conflict-cache-budget-exceeded",
+        "conflict-cache-not-private",
+        "conflict-cache-overlaps-source",
+        "conflict-cache-root-invalid",
+        "conflict-cache-root-not-absolute",
+        "conflict-cache-space-insufficient",
+        "conflict-command-arguments-invalid",
+        "conflict-delete-has-local-object",
+        "conflict-delete-verification-failed",
+        "conflict-durable-intent-required",
+        "conflict-host-unavailable",
+        "conflict-inventory-artifact-too-large",
+        "conflict-inventory-binding-mismatch",
+        "conflict-inventory-changed",
+        "conflict-inventory-hash-mismatch",
+        "conflict-inventory-invalid",
+        "conflict-inventory-limit-exceeded",
+        "conflict-local-cache-verification-failed",
+        "conflict-local-object-changed",
+        "conflict-local-object-missing",
+        "conflict-local-source-changed",
+        "conflict-local-type-unverified",
+        "conflict-manifest-path-invalid",
+        "conflict-mutation-verification-failed",
+        "conflict-operation-unsupported",
+        "conflict-path-collision",
+        "conflict-path-invalid",
+        "conflict-path-link-unsupported",
+        "conflict-plan-invalid",
+        "conflict-plan-inventory-mismatch",
+        "conflict-provider-operation-failed",
+        "conflict-provider-unsupported",
+        "conflict-recovery-id-invalid",
+        "conflict-recovery-invalid",
+        "conflict-recovery-store-overlaps-source",
+        "conflict-remote-cache-mismatch",
+        "conflict-remote-config-unavailable",
+        "conflict-remote-entry-invalid",
+        "conflict-remote-hash-failed",
+        "conflict-remote-hash-output-too-large",
+        "conflict-remote-hash-unrecognized",
+        "conflict-remote-list-failed",
+        "conflict-remote-list-invalid",
+        "conflict-remote-list-too-large",
+        "conflict-remote-path-collision",
+        "conflict-remote-size-invalid",
+        "conflict-remote-type-unverified",
+        "conflict-source-changed",
+        "conflict-state-plan-mismatch",
+        "conflict-unsupported-content-difference",
+        "conflict-writer-lease-binding-mismatch",
+    };
+
+    /// <summary>Unknown text, nested exceptions and provider output are never persisted.</summary>
+    internal static string Code(Exception exception)
+        => exception is OperationCanceledException ? "conflict-recovery-cancelled"
+            : exception is InvalidOperationException && SafeCodes.Contains(exception.Message)
+                ? exception.Message : "conflict-recovery-blocked";
+}

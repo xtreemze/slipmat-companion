@@ -311,7 +311,7 @@ public sealed class CloudMigrationCoordinator
                 ? new CloudConflictRecoverySession(attempt,
                     firstSegment + "-recovery-archives/" + job.Id + "/" + attempt,
                     request.WriterPolicy, "queued", DateTimeOffset.UtcNow)
-                : existing with { Status = "queued", Code = null };
+                : existing with { Status = "queued", Code = null, FailureStage = null };
             var queued = job with
             {
                 Phase = CloudMigrationPhases.QueuedConflictRecovery,

@@ -30,9 +30,11 @@ public sealed class CloudConflictRecoveryExecutor
         var snapshot = await journal.ReadAsync(jobId, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException("migration-not-found");
         var originalAttempt = snapshot.Job.ConflictRecovery?.AttemptId;
+        var failureStage = "validating";
         try
         {
             ValidateJob(snapshot.Job);
+            failureStage = "validating-source";
             var source = await CloudMigrationManifestBuilder.CaptureAsync(snapshot.Job.LocalPath, cancellationToken).ConfigureAwait(false);
             var binding = Binding(snapshot.Job, source.DigestSha256);
             var directory = _store.ConflictRecoveryDirectory(jobId, binding.AttemptId);
@@ -41,6 +43,7 @@ public sealed class CloudConflictRecoveryExecutor
             var planPath = Path.Combine(directory, "plan.json");
             var inventoryPath = Path.Combine(directory, "inventory.json");
             CloudConflictRecoveryPlan? storedPlan = null;
+            failureStage = "validating-plan";
             if (snapshot.Job.ConflictRecovery!.Plan is { } storedReference)
             {
                 if (storedReference.Path != planPath || !CloudConflictRecoveryPlanner.Digest(storedReference.Sha256)
@@ -58,6 +61,7 @@ public sealed class CloudConflictRecoveryExecutor
                 if (!CloudConflictRecoveryPlanner.EqualDigest(rebuilt.Fingerprint, storedPlan.Fingerprint)) throw Invalid();
             }
             var fenceDigest = CloudConflictRecoveryPlanner.BindingFingerprint(binding);
+            failureStage = "waiting-for-writer";
             await using var fence = await CloudConflictRecoveryFence.Shared.AcquireAsync(jobId, fenceDigest, cancellationToken).ConfigureAwait(false);
             return await fence.RunAsync(async () =>
             {
@@ -71,6 +75,7 @@ public sealed class CloudConflictRecoveryExecutor
                             || sample.Files < 0 || sample.TotalFiles < sample.Files
                             || sample.TotalFiles > CloudConflictRecoveryPlanner.MaxCandidates || sample.BytesRead < 0)
                             throw Invalid();
+                        failureStage = sample.Phase;
                         if (last is not null && last.Phase == sample.Phase && sample.Files < sample.TotalFiles
                             && sample.Files - last.Files < 32 && sample.ObservedAt - last.ObservedAt < TimeSpan.FromSeconds(1)) return;
                         snapshot = await SaveSessionAsync(journal, snapshot, snapshot.Job.ConflictRecovery! with
@@ -82,12 +87,17 @@ public sealed class CloudConflictRecoveryExecutor
                 if (snapshot.Job.ConflictRecovery!.Plan is null)
                 {
                     if (snapshot.Job.ConflictRecovery.Cursor is not null) throw Invalid();
+                    failureStage = "preflighting";
                     var inventory = await host.CaptureAsync(binding, inventoryPath, cancellationToken).ConfigureAwait(false);
+                    failureStage = "validating-inventory";
                     await ValidateInventoryAsync(binding, inventoryPath, inventory, cancellationToken).ConfigureAwait(false);
+                    failureStage = "validating-source";
                     await EnsureCurrentAsync(snapshot.Job, binding, cancellationToken).ConfigureAwait(false);
+                    failureStage = "planning";
                     plan = CloudConflictRecoveryPlanner.Create(binding, inventory);
                     var planBytes = JsonSerializer.SerializeToUtf8Bytes(plan, JsonOptions);
                     if (planBytes.Length > MaxArtifactBytes) throw Invalid();
+                    failureStage = "persisting-plan";
                     await CreateOrCompareAsync(planPath, planBytes, cancellationToken).ConfigureAwait(false);
                     var reference = new CloudConflictPlanReference(planPath, Hash(planBytes), plan.Fingerprint, plan.Items.Count);
                     snapshot = await SaveSessionAsync(journal, snapshot, snapshot.Job.ConflictRecovery with
@@ -108,6 +118,7 @@ public sealed class CloudConflictRecoveryExecutor
                     var session = snapshot.Job.ConflictRecovery!;
                     var cursor = session.Cursor ?? throw Invalid();
                     var state = Reconstruct(plan, cursor);
+                    failureStage = "observing";
                     var live = await host.ObserveAsync(plan, state, cancellationToken).ConfigureAwait(false);
                     var decision = CloudConflictRecoveryTransaction.Decide(prepared, state, live);
                     switch (decision.Action)
@@ -117,6 +128,7 @@ public sealed class CloudConflictRecoveryExecutor
                             snapshot = await SaveSessionAsync(journal, snapshot, session with { Cursor = cursor with { Intent = "archive" }, Status = "archiving" }, cancellationToken).ConfigureAwait(false);
                             break;
                         case CloudConflictAction.Archive:
+                            failureStage = "archiving";
                             RequireIndex(decision, cursor.Archived);
                             if (!_bindingsMatch(snapshot.Job)) throw Invalid();
                             await host.ArchiveAsync(plan, cursor.Archived, cancellationToken).ConfigureAwait(false);
@@ -135,6 +147,7 @@ public sealed class CloudConflictRecoveryExecutor
                             snapshot = await SaveSessionAsync(journal, snapshot, session with { Cursor = cursor with { Intent = "mutation" }, Status = "repairing" }, cancellationToken).ConfigureAwait(false);
                             break;
                         case CloudConflictAction.Mutate:
+                            failureStage = "repairing";
                             RequireIndex(decision, cursor.Resolved);
                             if (!sourceRecheckedForMutation)
                             {
@@ -149,10 +162,11 @@ public sealed class CloudConflictRecoveryExecutor
                             snapshot = await SaveSessionAsync(journal, snapshot, session with { Cursor = cursor with { Resolved = cursor.Resolved + 1, Intent = null } }, cancellationToken).ConfigureAwait(false);
                             break;
                         case CloudConflictAction.Complete:
+                            failureStage = "completing";
                             snapshot = await journal.CompareExchangeAsync(snapshot, snapshot.Job with
                             {
                                 Phase = CloudMigrationPhases.QueuedRebaseline, Code = "baseline-review-after-conflict-recovery",
-                                ConflictRecovery = session with { Status = "completed", Code = null }, UpdatedAt = DateTimeOffset.UtcNow,
+                                ConflictRecovery = session with { Status = "completed", Code = null, FailureStage = null }, UpdatedAt = DateTimeOffset.UtcNow,
                             }, cancellationToken).ConfigureAwait(false);
                             return snapshot.Job;
                         default: throw Invalid();
@@ -169,8 +183,9 @@ public sealed class CloudConflictRecoveryExecutor
             {
                 snapshot = await journal.CompareExchangeAsync(current, current.Job with
                 {
-                    Phase = CloudMigrationPhases.Failed, Code = "conflict-recovery-blocked",
-                    ConflictRecovery = session with { Status = "blocked", Code = "conflict-recovery-blocked" }, UpdatedAt = DateTimeOffset.UtcNow,
+                    Phase = CloudMigrationPhases.Failed, Code = CloudConflictRecoveryFailure.Code(ex),
+                    ConflictRecovery = session with
+                    { Status = "blocked", Code = CloudConflictRecoveryFailure.Code(ex), FailureStage = failureStage }, UpdatedAt = DateTimeOffset.UtcNow,
                 }, CancellationToken.None).ConfigureAwait(false);
             }
             if (ex is OperationCanceledException) throw;
@@ -232,7 +247,7 @@ public sealed class CloudConflictRecoveryExecutor
 
     private static async Task<CloudMigrationJournalSnapshot> SaveSessionAsync(CloudMigrationJournalLease lease,
         CloudMigrationJournalSnapshot snapshot, CloudConflictRecoverySession session, CancellationToken ct)
-        => await lease.CompareExchangeAsync(snapshot, snapshot.Job with { ConflictRecovery = session, UpdatedAt = DateTimeOffset.UtcNow }, ct).ConfigureAwait(false);
+        => await lease.CompareExchangeAsync(snapshot, snapshot.Job with { ConflictRecovery = session with { FailureStage = null }, UpdatedAt = DateTimeOffset.UtcNow }, ct).ConfigureAwait(false);
 
     private static void RequireIndex(CloudConflictDecision decision, int expected)
     {

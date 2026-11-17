@@ -13,7 +13,8 @@ public sealed record CloudConflictRecoverySession(
     CloudConflictPlanReference? Plan = null,
     CloudConflictRecoveryCursor? Cursor = null,
     string? Code = null,
-    CloudConflictPreflightProgress? Progress = null)
+    CloudConflictPreflightProgress? Progress = null,
+    string? FailureStage = null)
 {
     /// <summary>Only this explicit operator declaration permits acquiring the server-side writer fence.</summary>
     public const string CompanionOnlyWriter = "companion-only";

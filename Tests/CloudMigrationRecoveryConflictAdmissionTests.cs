@@ -57,7 +57,8 @@ public partial class CloudMigrationRecoveryTests
     {
         using var fixture = await Fixture.CreateAsync();
         var blocked = fixture.Job with { ConflictRecovery = new(Guid.NewGuid().ToString("N"),
-            "Archive/retained", CloudConflictRecoverySession.CompanionOnlyWriter, "blocked", DateTimeOffset.UtcNow) };
+            "Archive/retained", CloudConflictRecoverySession.CompanionOnlyWriter, "blocked", DateTimeOffset.UtcNow,
+            Code: "conflict-remote-hash-failed", FailureStage: "hashing-cloud") };
         await fixture.Store.SaveAsync(blocked);
         Assert.True(fixture.Queue.TryEnqueue(blocked.Id));
         Assert.True(fixture.Queue.Reader.TryRead(out _)); // currently executing, not still in the channel
@@ -67,6 +68,8 @@ public partial class CloudMigrationRecoveryTests
         fixture.Queue.Complete(blocked.Id);
         var resumed = await fixture.Coordinator.RequestConflictRecoveryAsync(blocked.Id, request);
         Assert.Equal(CloudMigrationPhases.QueuedConflictRecovery, resumed.Phase);
+        Assert.Null(resumed.ConflictRecovery!.Code);
+        Assert.Null(resumed.ConflictRecovery.FailureStage);
         Assert.True(fixture.Queue.Reader.TryRead(out var queued));
         Assert.Equal(blocked.Id, queued);
         Assert.False(fixture.Queue.Reader.TryRead(out _));
