@@ -26,3 +26,10 @@ public interface ICloudConflictRecoveryProgressHost
     /// <summary>The canonical executor owns persistence; a report carries no mutation authority.</summary>
     Func<CloudConflictPreflightProgress, CancellationToken, Task>? ReportProgress { get; set; }
 }
+
+internal interface ICloudConflictHandoffHost
+{
+    // Returns whether the current download subset needs ASCII case matching.
+    Task<bool> ValidateNamespaceAsync(CloudConflictRecoveryBinding binding, string sourceManifestSha256, string? knownArchivePath,
+        CancellationToken cancellationToken);
+}

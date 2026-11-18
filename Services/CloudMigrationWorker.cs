@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.AudioGateway.Configuration;
@@ -20,6 +21,8 @@ public sealed class CloudMigrationWorker : BackgroundService
 {
     private const string VerificationContract =
         "rclone-check-download-content";
+    private const string ExplicitRecoveryBaselineChecking = "baseline-checking-explicit-conflict-review";
+    private const string ExplicitRecoveryBaselineResuming = "baseline-resuming-explicit-conflict-review";
 
     private readonly CloudMigrationStore _store;
     private readonly CloudMigrationQueue _queue;
@@ -88,7 +91,8 @@ public sealed class CloudMigrationWorker : BackgroundService
                     await SaveAsync(job with
                     {
                         Phase = CloudMigrationPhases.QueuedRebaseline,
-                        Code = "baseline-review-resuming-after-restart",
+                        Code = job.Code == ExplicitRecoveryBaselineChecking
+                            ? ExplicitRecoveryBaselineResuming : "baseline-review-resuming-after-restart",
                         Progress = null,
                     }, cancellationToken).ConfigureAwait(false);
                     QueueRestoredJob(job.Id);
@@ -227,7 +231,7 @@ public sealed class CloudMigrationWorker : BackgroundService
         var executor = new CloudConflictRecoveryExecutor(_store, _conflictHostFactory, RebaselineBindingsMatch);
         var repaired = await executor.ExecuteAsync(jobId, cancellationToken).ConfigureAwait(false);
         // The executor has released its job lease and writer fence before normal
-        // recovery adopts the current source, copies additions and verifies all bytes.
+        // recovery accepts the repaired baseline, copies additions and verifies all bytes.
         if (repaired.Phase == CloudMigrationPhases.QueuedRebaseline && repaired.ConflictRecovery?.OwnsJob == false)
             await ExecuteRebaselineAsync(repaired, cancellationToken).ConfigureAwait(false);
     }
@@ -263,7 +267,83 @@ public sealed class CloudMigrationWorker : BackgroundService
         }, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task ExecuteRebaselineAsync(CloudMigrationJob job, CancellationToken cancellationToken)
+    private Task ExecuteRebaselineAsync(CloudMigrationJob job, CancellationToken cancellationToken)
+        => job.ConflictRecovery is { OwnsJob: false }
+            ? ExecuteRecoveredHandoffAsync(job, rebaseline: true, cancellationToken)
+            : ExecuteRebaselineCoreAsync(job, cancellationToken);
+
+    private static bool IsExplicitRecoveryBaseline(CloudMigrationJob job)
+        => job.Code is "baseline-review-queued" or ExplicitRecoveryBaselineResuming;
+
+    private async Task ExecuteRecoveredHandoffAsync(CloudMigrationJob job, bool rebaseline,
+        CancellationToken cancellationToken)
+    {
+        CloudMigrationJournalSnapshot snapshot;
+        CloudConflictRecoveryPlan plan;
+        try
+        {
+            await using var journal = await _store.AcquireRecoveryLeaseAsync(cancellationToken).ConfigureAwait(false);
+            var current = await journal.ReadAsync(job.Id, cancellationToken).ConfigureAwait(false);
+            if (current is null || current.Job.Phase != job.Phase || current.Job.UpdatedAt != job.UpdatedAt) return;
+            snapshot = current;
+            job = snapshot.Job;
+            plan = await CloudConflictRecoveryExecutor.ReadCompletedPlanAsync(_store, job, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or JsonException)
+        {
+            await FailAsync(job, "baseline-conflict-proof-invalid", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        // Drain before running the phase, with no journal lease held. Progress
+        // callbacks of previously admitted commands can finish their own writes.
+        await using var fence = await CloudConflictRecoveryFence.Shared.AcquireAsync(job.Id,
+            CloudConflictRecoveryPlanner.BindingFingerprint(plan.Binding), cancellationToken).ConfigureAwait(false);
+        await fence.RunAsync(async () =>
+        {
+            var latest = await _store.GetSnapshotAsync(job.Id, cancellationToken).ConfigureAwait(false);
+            if (latest?.Revision != snapshot.Revision) return false;
+            if (!RebaselineBindingsMatch(job))
+            {
+                await FailAsync(job, rebaseline ? "baseline-binding-changed" : "migration-binding-changed",
+                    cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+
+            CloudMigrationManifest source;
+            bool aliases;
+            try
+            {
+                source = await CloudMigrationManifestBuilder.CaptureAsync(job.LocalPath, cancellationToken).ConfigureAwait(false);
+                var explicitAdoption = rebaseline && IsExplicitRecoveryBaseline(job);
+                if (!explicitAdoption && (!CloudMigrationRecovery.ManifestMatches(job, source)
+                    || (rebaseline && !CloudConflictRecoveryPlanner.EqualDigest(plan.Binding.SourceManifestSha256, source.DigestSha256))))
+                {
+                    await FailAsync(job, rebaseline ? "baseline-conflict-source-changed" : "migration-source-changed",
+                        cancellationToken).ConfigureAwait(false);
+                    return false;
+                }
+
+                if (_conflictHostFactory(job, fence) is not ICloudConflictHandoffHost host)
+                    throw new InvalidOperationException("conflict-host-unavailable");
+                aliases = await host.ValidateNamespaceAsync(plan.Binding, source.DigestSha256,
+                    plan.Items.FirstOrDefault()?.ArchivePath, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or JsonException)
+            {
+                await FailAsync(job, "baseline-" + CloudConflictRecoveryFailure.Code(ex), cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+            if (rebaseline)
+                await ExecuteRebaselineCoreAsync(job, cancellationToken, source, aliases).ConfigureAwait(false);
+            else
+                await ExecuteInitialCopyCoreAsync(job, cancellationToken).ConfigureAwait(false);
+            return true;
+        }).ConfigureAwait(false);
+    }
+
+    private async Task ExecuteRebaselineCoreAsync(CloudMigrationJob job, CancellationToken cancellationToken,
+        CloudMigrationManifest? recoverySource = null, bool useVerifiedCaseAliases = false)
     {
         if (job.Direction != CloudMigrationDirections.LocalToVfs || job.BackupPath is not null
             || job.StagingPath is not null || job.ManifestVersion != CloudMigrationManifestBuilder.CurrentVersion
@@ -277,7 +357,8 @@ public sealed class CloudMigrationWorker : BackgroundService
         var observed = await SaveAsync(job with
         {
             Phase = CloudMigrationPhases.CheckingBaseline,
-            Code = "baseline-checking-existing-cloud-content",
+            Code = recoverySource is not null && IsExplicitRecoveryBaseline(job)
+                ? ExplicitRecoveryBaselineChecking : "baseline-checking-existing-cloud-content",
             Progress = null,
             Verification = null,
         }, cancellationToken).ConfigureAwait(false);
@@ -291,13 +372,18 @@ public sealed class CloudMigrationWorker : BackgroundService
             }
             var current = await CloudMigrationManifestBuilder.CaptureAsync(job.LocalPath, cancellationToken)
                 .ConfigureAwait(false);
+            if (recoverySource is not null && current.DigestSha256 != recoverySource.DigestSha256)
+            {
+                await FailAsync(observed, "baseline-conflict-source-changed", cancellationToken).ConfigureAwait(false);
+                return;
+            }
             var cli = new RcloneCliHost(runner: _runner, progress: async sample =>
             {
                 observed = observed with { Progress = sample };
                 await _store.SaveAsync(observed, cancellationToken).ConfigureAwait(false);
             });
             var check = await cli.CheckRemoteSubsetByDownloadAsync(
-                job.RemoteName, job.RemotePath, job.LocalPath, cancellationToken).ConfigureAwait(false);
+                job.RemoteName, job.RemotePath, job.LocalPath, cancellationToken, useVerifiedCaseAliases).ConfigureAwait(false);
             var failure = TransferFailure(check, "verification");
             if (failure is not null)
             {
@@ -357,7 +443,7 @@ public sealed class CloudMigrationWorker : BackgroundService
         }
         // Once adoption is journaled, later failures must preserve that revision.
         if (accepted is not null)
-            await ExecuteInitialCopyAsync(accepted, cancellationToken).ConfigureAwait(false);
+            await ExecuteInitialCopyCoreAsync(accepted, cancellationToken).ConfigureAwait(false);
     }
 
     private bool RebaselineBindingsMatch(CloudMigrationJob job)
@@ -377,7 +463,12 @@ public sealed class CloudMigrationWorker : BackgroundService
                 OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
     }
 
-    private async Task ExecuteInitialCopyAsync(
+    private Task ExecuteInitialCopyAsync(CloudMigrationJob job, CancellationToken cancellationToken)
+        => job.ConflictRecovery is { OwnsJob: false }
+            ? ExecuteRecoveredHandoffAsync(job, rebaseline: false, cancellationToken)
+            : ExecuteInitialCopyCoreAsync(job, cancellationToken);
+
+    private async Task ExecuteInitialCopyCoreAsync(
         CloudMigrationJob job,
         CancellationToken cancellationToken)
     {

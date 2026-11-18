@@ -34,7 +34,9 @@ to its actual rclone configuration. A successful interactive-user rclone command
 alone does not establish service authentication.
 
 The provider absence probes currently require the tested rclone **1.74.4**
-command contract and a typed case-insensitive capability. They check file and
+command contract, its Go **1.26.5** build and a typed case-insensitive capability.
+The runtime's scalar lowercase mapping is checked against the pinned Go mapping
+before namespace comparisons; unsupported mappings block recovery. They check file and
 directory resolution separately: a successful lookup of an otherwise unmatched
 local path blocks recovery as an unproven provider alias. Permission, transport,
 malformed-output and unrecognized missing-result errors never count as absence.
@@ -71,6 +73,18 @@ first active-library mutation.
    content verification. Local-only files, including audio, are handled by that
    canonical migration path. Only successful verification can reach
    `ready-for-cutover`.
+
+The canonical handoff reopens and verifies the completed plan and inventory, then
+holds the Companion writer fence through fresh provider/namespace validation,
+baseline verification, copy and full verification. Automatic handoff requires
+the source observed by the recovery plan. A later explicit current-source
+rebaseline may adopt a fresh source after validation; restart and copy retry
+retain that adopted manifest. Source drift never authorizes automatic adoption.
+Only the remote-to-local subset download check uses `--ignore-case-sync`, and
+only when validated ASCII aliases require it. Copy and full verification retain
+their existing arguments. Names that collide under rclone's pinned lowercase
+mapping block before handoff, including collisions that its normal command
+logging could silently skip.
 
 Content preflight may read the full library from both local storage and cloud.
 Normal verification afterward adds another cloud content-read pass. Budget time,

@@ -28,6 +28,8 @@ public sealed class CloudConflictNamespaceTests
     [InlineData("a", false, "A", false)]
     [InlineData("a", true, "A", true)]
     [InlineData("a", true, "A", false)]
+    [InlineData("i.nfo", false, "İ.nfo", false)]
+    [InlineData("i", true, "İ", true)]
     public void RejectsSameSideAliases(string left, bool leftDir, string right, bool rightDir)
     {
         var entries = new[] { new CloudConflictNamespaceEntry(left, leftDir), new CloudConflictNamespaceEntry(right, rightDir) };
@@ -41,5 +43,16 @@ public sealed class CloudConflictNamespaceTests
             [new("dir", true)], [new("DIR", false)], true));
         Assert.Throws<InvalidOperationException>(() => CloudConflictNamespace.Match(
             [new("ä.flac", false)], [new("Ä.flac", false)], true));
+        Assert.Throws<InvalidOperationException>(() => CloudConflictNamespace.Match(
+            [new("i.nfo", false)], [new("İ.nfo", false)], true));
+    }
+
+    [Fact]
+    public void MatchesExactNonAsciiCharactersEvenWhenRcloneLowersThemDifferently()
+    {
+        var pair = Assert.Single(CloudConflictNamespace.Match(
+            [new("İ.NFO", false)], [new("İ.nfo", false)], true));
+        Assert.Equal("İ.NFO", pair.LocalPath);
+        Assert.Equal("İ.nfo", pair.RemotePath);
     }
 }

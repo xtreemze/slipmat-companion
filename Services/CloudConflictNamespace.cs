@@ -1,3 +1,7 @@
+using System.Buffers.Binary;
+using System.Security.Cryptography;
+using System.Text;
+
 namespace Jellyfin.Plugin.AudioGateway.Services;
 
 /// <summary>A single observed namespace entry, including empty directories.</summary>
@@ -9,6 +13,17 @@ public sealed record CloudConflictNamespacePair(string? LocalPath, string? Remot
 /// <summary>Validate namespace identity before reading payloads or planning mutations.</summary>
 public static class CloudConflictNamespace
 {
+    internal const string RcloneGoVersion = "go1.26.5";
+    // SHA-256 of unicode.ToLower(r) as uint32 little-endian for every scalar in
+    // increasing order, generated with the official Go 1.26.5 toolchain (Unicode 15.0.0).
+    private const string RcloneLowerMappingSha256 = "10a1522878b42be935ecf849f2689253e6818040e1f683683336581cebb3fd47";
+    private static readonly Lazy<bool> RcloneCaseMappingMatches = new(VerifyRcloneCaseMapping);
+
+    internal static void RequireVerifiedRcloneCaseMapping()
+    {
+        if (!RcloneCaseMappingMatches.Value) throw new InvalidOperationException("conflict-provider-case-unsupported");
+    }
+
     /// <summary>Match only uniquely observed paths whose differences are ASCII letter case.</summary>
     public static IReadOnlyList<CloudConflictNamespacePair> Match(
         IEnumerable<CloudConflictNamespaceEntry> local, IEnumerable<CloudConflictNamespaceEntry> remote,
@@ -16,6 +31,14 @@ public static class CloudConflictNamespace
     {
         var localEntries = Build(local);
         var remoteEntries = Build(remote);
+        if (providerCaseInsensitive)
+        {
+            var localFolded = BuildRcloneKeys(localEntries.Values);
+            var remoteFolded = BuildRcloneKeys(remoteEntries.Values);
+            foreach (var (key, entry) in localFolded)
+                if (remoteFolded.TryGetValue(key, out var other)
+                    && (entry.IsDirectory != other.IsDirectory || !AsciiEqual(entry.Path, other.Path))) throw Invalid();
+        }
         var result = new List<CloudConflictNamespacePair>();
         foreach (var entry in localEntries.Values)
         {
@@ -46,6 +69,45 @@ public static class CloudConflictNamespace
                 || !string.Equals(parent, found.Path, StringComparison.Ordinal)) throw Invalid();
         }
         return map;
+    }
+
+    private static Dictionary<string, CloudConflictNamespaceEntry> BuildRcloneKeys(IEnumerable<CloudConflictNamespaceEntry> entries)
+    {
+        var map = new Dictionary<string, CloudConflictNamespaceEntry>(StringComparer.Ordinal);
+        Span<char> scalar = stackalloc char[2];
+        foreach (var entry in entries)
+        {
+            var key = new StringBuilder(entry.Path.Length);
+            foreach (var rune in entry.Path.EnumerateRunes())
+            {
+                var length = RcloneLower(rune).EncodeToUtf16(scalar);
+                key.Append(scalar[..length]);
+            }
+            if (!map.TryAdd(key.ToString(), entry)) throw Invalid();
+        }
+        return map;
+    }
+
+    // rclone's March uses Go strings.ToLower. Go maps U+0130 to plain i,
+    // while .NET invariant casing leaves it unchanged.
+    private static Rune RcloneLower(Rune rune) => rune.Value == 0x130 ? new Rune('i') : Rune.ToLowerInvariant(rune);
+
+    private static bool VerifyRcloneCaseMapping()
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        Span<byte> block = stackalloc byte[4096];
+        var offset = 0;
+        for (var value = 0; value <= 0x10ffff; value++)
+        {
+            if (!Rune.TryCreate(value, out var rune)) continue;
+            BinaryPrimitives.WriteInt32LittleEndian(block[offset..], RcloneLower(rune).Value);
+            offset += sizeof(int);
+            if (offset != block.Length) continue;
+            hash.AppendData(block);
+            offset = 0;
+        }
+        hash.AppendData(block[..offset]);
+        return Convert.ToHexStringLower(hash.GetHashAndReset()) == RcloneLowerMappingSha256;
     }
 
     internal static bool AsciiEqual(string left, string right)

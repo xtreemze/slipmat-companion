@@ -82,6 +82,45 @@ public sealed class RcloneCloudConflictRecoveryHostTests
     }
 
     [Fact]
+    public async Task HandoffRejectsUnverifiedRcloneCompilerBeforeProviderListing()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        using var fixture = new Fixture();
+        var runner = new FakeCloudRunner
+        {
+            ProbeOverride = args => args[0] == "version"
+                ? Success("rclone v1.74.4\n- go/version: go1.26.4\n") : null,
+        };
+        var binding = await fixture.BindingAsync();
+        var fence = new CloudConflictRecoveryFence();
+        await using var lease = await fence.AcquireAsync(binding.JobId, CloudConflictRecoveryPlanner.BindingFingerprint(binding));
+        ICloudConflictHandoffHost host = fixture.Host(runner, lease);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            host.ValidateNamespaceAsync(binding, binding.SourceManifestSha256, null, default));
+        Assert.Equal("conflict-provider-version-unsupported", error.Message);
+        Assert.DoesNotContain(runner.Commands, args => args[0] is "backend" or "lsjson" or "hashsum" or "copyto");
+    }
+
+    [Theory]
+    [InlineData("track.flac", false)]
+    [InlineData("Track.flac", true)]
+    public async Task HandoffReportsOnlyLiveValidatedFileAliasesAndPerformsNoWrites(string remoteName, bool aliases)
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        using var fixture = new Fixture();
+        var bytes = Encoding.UTF8.GetBytes("same audio");
+        await File.WriteAllBytesAsync(Path.Combine(fixture.Source, "track.flac"), bytes);
+        var runner = new FakeCloudRunner();
+        runner.Files.Add("cloud:Music/" + remoteName, bytes);
+        var binding = await fixture.BindingAsync();
+        var fence = new CloudConflictRecoveryFence();
+        await using var lease = await fence.AcquireAsync(binding.JobId, CloudConflictRecoveryPlanner.BindingFingerprint(binding));
+        ICloudConflictHandoffHost host = fixture.Host(runner, lease);
+        Assert.Equal(aliases, await host.ValidateNamespaceAsync(binding, binding.SourceManifestSha256, null, default));
+        Assert.All(runner.Commands, args => Assert.Contains(args[0], new[] { "listremotes", "version", "backend", "lsjson" }));
+    }
+
+    [Fact]
     public async Task CaptureRejectsAudioDifferenceBeforeAnyProviderWrite()
     {
         if (!OperatingSystem.IsLinux()) return;
@@ -497,7 +536,7 @@ public sealed class RcloneCloudConflictRecoveryHostTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Commands.Add(arguments.ToArray());
-            if (arguments[0] == "version") return Task.FromResult(Success("rclone v1.74.4\n"));
+            if (arguments[0] == "version") return Task.FromResult(Success("rclone v1.74.4\n- go/version: go1.26.5\n"));
             if (arguments[0] == "lsjson" && arguments[1].Contains(".slipmat-probe-", StringComparison.Ordinal))
                 return Task.FromResult(arguments.Contains("--stat") ? Success("null") : MissingDirectory());
             if (arguments[0] == "lsjson" && arguments.Contains("--stat") && _rootListing is not null)
@@ -530,7 +569,7 @@ public sealed class RcloneCloudConflictRecoveryHostTests
             var result = arguments[0] switch
             {
                 "listremotes" => Success("[{\"name\":\"cloud\",\"type\":\"jottacloud\"}]"),
-                "version" => Success("rclone v1.74.4\n"),
+                "version" => Success("rclone v1.74.4\n- go/version: go1.26.5\n"),
                 "backend" => Success("{\"Features\":{\"CaseInsensitive\":true}}"),
                 "lsjson" when arguments.Contains("--stat") => Stat(arguments[1]),
                 "lsjson" when arguments.Contains("--max-depth") => Files.Keys.Any(key => key.StartsWith(arguments[1].TrimEnd('/') + "/", StringComparison.Ordinal)) ? Success(Listing(arguments[1])) : MissingDirectory(),

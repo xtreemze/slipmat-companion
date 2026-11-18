@@ -618,15 +618,24 @@ public sealed partial class RcloneCliHost
     public Task<RcloneCommandResult> CheckRemoteSubsetByDownloadAsync(
         string remoteName, string remotePath, string localPath,
         CancellationToken cancellationToken = default)
+        => CheckRemoteSubsetByDownloadAsync(remoteName, remotePath, localPath, cancellationToken, useVerifiedCaseAliases: false);
+
+    internal Task<RcloneCommandResult> CheckRemoteSubsetByDownloadAsync(
+        string remoteName, string remotePath, string localPath,
+        CancellationToken cancellationToken, bool useVerifiedCaseAliases)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(localPath);
         if (!Path.IsPathFullyQualified(localPath))
             throw new ArgumentException("Verification path must be absolute.", nameof(localPath));
-        return RunAsync([
+        List<string> args = [
             "check", BuildRemoteSpec(remoteName, remotePath), Path.GetFullPath(localPath),
             "--one-way", "--download", "--stats=30s", "--stats-log-level=ERROR",
             "--use-json-log", "--log-level=ERROR",
-        ], MigrationCommandTimeout, cancellationToken);
+        ];
+        // Rclone normally derives case folding from the destination. Here the
+        // destination is the original local tree, even for a case-folded remote.
+        if (useVerifiedCaseAliases) args.Add("--ignore-case-sync");
+        return RunAsync(args, MigrationCommandTimeout, cancellationToken);
     }
 
     public async Task<RcloneCommandResult> CheckLocalAndRemoteByDownloadAsync(

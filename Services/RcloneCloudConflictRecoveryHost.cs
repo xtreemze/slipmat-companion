@@ -6,7 +6,7 @@ using Jellyfin.Plugin.AudioGateway.Models;
 namespace Jellyfin.Plugin.AudioGateway.Services;
 
 /// <summary>Provider operations for content-verified archive and metadata recovery.</summary>
-public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost, ICloudConflictRecoveryProgressHost
+public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost, ICloudConflictRecoveryProgressHost, ICloudConflictHandoffHost
 {
     private const int MaxListingBytes = 2 * 1024 * 1024;
     private const long MaxCachedBytes = 16L * 1024 * 1024 * 1024;
@@ -70,6 +70,20 @@ public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost
         CloudConflictRecoveryState state,
         CancellationToken cancellationToken)
         => _lease.RunAsync(() => ObserveCoreAsync(plan, state, cancellationToken));
+
+    Task<bool> ICloudConflictHandoffHost.ValidateNamespaceAsync(CloudConflictRecoveryBinding binding,
+        string sourceManifestSha256, string? knownArchivePath, CancellationToken cancellationToken)
+        => _lease.RunAsync(async () =>
+        {
+            ValidateBinding(binding);
+            if (!CloudConflictRecoveryPlanner.Digest(sourceManifestSha256)) throw Invalid("conflict-binding-invalid");
+            await RequireJottacloudAsync(binding.RemoteName, cancellationToken).ConfigureAwait(false);
+            await RequireCaseInsensitiveAsync(binding, cancellationToken).ConfigureAwait(false);
+            var current = binding with { SourceManifestSha256 = sourceManifestSha256 };
+            var matched = await ValidateCurrentNamespaceAsync(current, cancellationToken, knownArchivePath).ConfigureAwait(false);
+            return matched.Any(pair => pair.LocalPath is not null && pair.RemotePath is not null
+                && pair.LocalPath != pair.RemotePath);
+        });
 
     /// <inheritdoc />
     public Task ArchiveAsync(CloudConflictRecoveryPlan plan, int index, CancellationToken cancellationToken)
@@ -738,7 +752,8 @@ public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost
         return null;
     }
 
-    private async Task ValidateCurrentNamespaceAsync(CloudConflictRecoveryBinding binding, CancellationToken cancellationToken, string? knownArchivePath)
+    private async Task<IReadOnlyList<CloudConflictNamespacePair>> ValidateCurrentNamespaceAsync(
+        CloudConflictRecoveryBinding binding, CancellationToken cancellationToken, string? knownArchivePath)
     {
         var local = await CloudConflictLocalContent.CaptureNamespaceAsync(binding.LocalPath, cancellationToken).ConfigureAwait(false);
         foreach (var entry in local.Entries) ValidateRelative(entry.Path);
@@ -746,13 +761,14 @@ public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost
         if (!CloudConflictRecoveryPlanner.EqualDigest(metadata.SourceManifestSha256, binding.SourceManifestSha256))
             throw Invalid("conflict-local-source-changed");
         var remote = await ListRemoteTreeAsync(binding, binding.ActiveRoot, cancellationToken).ConfigureAwait(false);
-        CloudConflictNamespace.Match(local.Entries, remote.Entries, true);
+        var matched = CloudConflictNamespace.Match(local.Entries, remote.Entries, true);
         await ValidateUnmatchedLocalNodesAsync(binding, local.Entries, remote.Entries, cancellationToken, knownArchivePath).ConfigureAwait(false);
         var after = await CloudConflictLocalContent.CaptureNamespaceAsync(binding.LocalPath, cancellationToken).ConfigureAwait(false);
         var afterMetadata = await CaptureLocalMetadataAsync(binding.LocalPath, cancellationToken, after.Files).ConfigureAwait(false);
         if (!local.Entries.OrderBy(entry => entry.Path, StringComparer.Ordinal).SequenceEqual(after.Entries.OrderBy(entry => entry.Path, StringComparer.Ordinal))
             || !CloudConflictRecoveryPlanner.EqualDigest(afterMetadata.SourceManifestSha256, binding.SourceManifestSha256))
             throw Invalid("conflict-local-source-changed");
+        return matched;
     }
 
     private async Task ValidateUnmatchedLocalNodesAsync(CloudConflictRecoveryBinding binding,
@@ -849,9 +865,12 @@ public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost
     private async Task RequireCaseInsensitiveAsync(CloudConflictRecoveryBinding binding, CancellationToken cancellationToken)
     {
         var version = await RunAsync(["version"], ListingTimeout, cancellationToken).ConfigureAwait(false);
+        var versionLines = version.StandardOutput.Split('\n', StringSplitOptions.TrimEntries);
         if (!version.StartSucceeded || version.ExitCode != 0 || version.TimedOut || version.OutputTruncated
-            || version.StandardOutput.Split('\n')[0].TrimEnd('\r') != "rclone v1.74.4")
+            || versionLines[0] != "rclone v1.74.4"
+            || !versionLines.Contains("- go/version: " + CloudConflictNamespace.RcloneGoVersion, StringComparer.Ordinal))
             throw Invalid("conflict-provider-version-unsupported");
+        CloudConflictNamespace.RequireVerifiedRcloneCaseMapping();
         var result = await RunAsync(["backend", "features", RcloneCliHost.BuildRemoteSpec(binding.RemoteName, binding.ActiveRoot)], ListingTimeout, cancellationToken).ConfigureAwait(false);
         RequireSuccess(result, "conflict-provider-features-unavailable");
         if (Encoding.UTF8.GetByteCount(result.StandardOutput) > MaxListingBytes) throw Invalid("conflict-provider-features-unavailable");

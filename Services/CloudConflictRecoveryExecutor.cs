@@ -44,22 +44,8 @@ public sealed class CloudConflictRecoveryExecutor
             var inventoryPath = Path.Combine(directory, "inventory.json");
             CloudConflictRecoveryPlan? storedPlan = null;
             failureStage = "validating-plan";
-            if (snapshot.Job.ConflictRecovery!.Plan is { } storedReference)
-            {
-                if (storedReference.Path != planPath || !CloudConflictRecoveryPlanner.Digest(storedReference.Sha256)
-                    || !CloudConflictRecoveryPlanner.Digest(storedReference.Fingerprint)) throw Invalid();
-                var bytes = await ReadBoundedAsync(planPath, cancellationToken).ConfigureAwait(false);
-                if (!CloudConflictRecoveryPlanner.EqualDigest(Hash(bytes), storedReference.Sha256)) throw Invalid();
-                storedPlan = JsonSerializer.Deserialize<CloudConflictRecoveryPlan>(bytes, JsonOptions) ?? throw Invalid();
-                if (storedPlan.Binding != binding || storedPlan.Items is null || storedPlan.Items.Count != storedReference.Count
-                    || !CloudConflictRecoveryPlanner.EqualDigest(storedPlan.Fingerprint, storedReference.Fingerprint)
-                    || !CloudConflictRecoveryPlanner.EqualDigest(storedPlan.Fingerprint, CloudConflictRecoveryPlanner.Fingerprint(storedPlan))) throw Invalid();
-                var inventoryBytes = await ValidateManifestFileAsync(inventoryPath, storedPlan.Manifest, cancellationToken).ConfigureAwait(false);
-                var document = JsonSerializer.Deserialize<CloudConflictInventoryDocument>(inventoryBytes, JsonOptions) ?? throw Invalid();
-                if (document.Binding != binding || document.Entries is null || document.Entries.Count != storedPlan.Manifest.Count) throw Invalid();
-                var rebuilt = CloudConflictRecoveryPlanner.Create(binding, new(binding, storedPlan.Manifest, document.Entries));
-                if (!CloudConflictRecoveryPlanner.EqualDigest(rebuilt.Fingerprint, storedPlan.Fingerprint)) throw Invalid();
-            }
+            if (snapshot.Job.ConflictRecovery!.Plan is not null)
+                storedPlan = await ReadVerifiedPlanAsync(snapshot.Job, directory, binding.SourceManifestSha256, cancellationToken).ConfigureAwait(false);
             var fenceDigest = CloudConflictRecoveryPlanner.BindingFingerprint(binding);
             failureStage = "waiting-for-writer";
             await using var fence = await CloudConflictRecoveryFence.Shared.AcquireAsync(jobId, fenceDigest, cancellationToken).ConfigureAwait(false);
@@ -216,6 +202,45 @@ public sealed class CloudConflictRecoveryExecutor
         => new(job.Id, job.ProfileId, job.LibraryName, job.LocalPath, job.RemoteName, job.RemotePath,
             job.ConflictRecovery!.ArchiveRoot, digest, job.ConflictRecovery.AttemptId);
 
+    internal static async Task<CloudConflictRecoveryPlan> ReadCompletedPlanAsync(
+        CloudMigrationStore store, CloudMigrationJob job, CancellationToken cancellationToken)
+    {
+        var session = job.ConflictRecovery;
+        if (session?.Status != "completed" || session.WriterPolicy != CloudConflictRecoverySession.CompanionOnlyWriter
+            || session.Cursor is not { Intent: null } cursor || job.Direction != CloudMigrationDirections.LocalToVfs
+            || job.BackupPath is not null || job.StagingPath is not null
+            || job.Maintenance is not null || job.MaintenanceAdmission is not null) throw Invalid();
+        var directory = store.ConflictRecoveryDirectory(job.Id, session.AttemptId);
+        CloudMigrationStore.RejectRecoverySourceOverlap(job.LocalPath, directory);
+        CreateDirectory(directory, allowCreate: false);
+        var plan = await ReadVerifiedPlanAsync(job, directory, null, cancellationToken).ConfigureAwait(false);
+        if (cursor.Archived != plan.Items.Count || cursor.Resolved != plan.Items.Count) throw Invalid();
+        return plan;
+    }
+
+    private static async Task<CloudConflictRecoveryPlan> ReadVerifiedPlanAsync(
+        CloudMigrationJob job, string directory, string? expectedSourceDigest, CancellationToken cancellationToken)
+    {
+        var planPath = Path.Combine(directory, "plan.json");
+        var inventoryPath = Path.Combine(directory, "inventory.json");
+        if (job.ConflictRecovery?.Plan is not { } reference || reference.Path != planPath
+            || !CloudConflictRecoveryPlanner.Digest(reference.Sha256)
+            || !CloudConflictRecoveryPlanner.Digest(reference.Fingerprint)) throw Invalid();
+        var bytes = await ReadBoundedAsync(planPath, cancellationToken).ConfigureAwait(false);
+        if (!CloudConflictRecoveryPlanner.EqualDigest(Hash(bytes), reference.Sha256)) throw Invalid();
+        var plan = JsonSerializer.Deserialize<CloudConflictRecoveryPlan>(bytes, JsonOptions) ?? throw Invalid();
+        if (plan.Binding is not { } binding || binding != Binding(job, expectedSourceDigest ?? binding.SourceManifestSha256)
+            || plan.Items is null || plan.Items.Count != reference.Count
+            || !CloudConflictRecoveryPlanner.EqualDigest(plan.Fingerprint, reference.Fingerprint)
+            || !CloudConflictRecoveryPlanner.EqualDigest(plan.Fingerprint, CloudConflictRecoveryPlanner.Fingerprint(plan))) throw Invalid();
+        var inventoryBytes = await ValidateManifestFileAsync(inventoryPath, plan.Manifest, cancellationToken).ConfigureAwait(false);
+        var document = JsonSerializer.Deserialize<CloudConflictInventoryDocument>(inventoryBytes, JsonOptions) ?? throw Invalid();
+        if (document.Binding != binding || document.Entries is null || document.Entries.Count != plan.Manifest.Count) throw Invalid();
+        var rebuilt = CloudConflictRecoveryPlanner.Create(binding, new(binding, plan.Manifest, document.Entries));
+        if (!CloudConflictRecoveryPlanner.EqualDigest(rebuilt.Fingerprint, plan.Fingerprint)) throw Invalid();
+        return plan;
+    }
+
     private async Task EnsureCurrentAsync(CloudMigrationJob job, CloudConflictRecoveryBinding binding, CancellationToken ct)
     {
         if (!_bindingsMatch(job)) throw Invalid();
@@ -300,7 +325,7 @@ public sealed class CloudConflictRecoveryExecutor
         }
         CloudMigrationJournalLease.FlushDirectory(Path.GetDirectoryName(path)!);
     }
-    private static void CreateDirectory(string directory)
+    private static void CreateDirectory(string directory, bool allowCreate = true)
     {
         var full = Path.GetFullPath(directory);
         var root = Path.GetPathRoot(full) ?? throw Invalid();
@@ -311,6 +336,7 @@ public sealed class CloudConflictRecoveryExecutor
             CloudMigrationJournal.RejectLink(current);
             if (!Directory.Exists(current))
             {
+                if (!allowCreate) throw Invalid();
                 if (OperatingSystem.IsWindows()) Directory.CreateDirectory(current);
                 else Directory.CreateDirectory(current, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
                 CloudMigrationJournalLease.FlushDirectory(Path.GetDirectoryName(current)!);
