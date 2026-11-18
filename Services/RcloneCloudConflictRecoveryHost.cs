@@ -32,6 +32,7 @@ public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost
     private bool _observationInitialized;
     private bool _providerVerified;
     private bool _allArchivesVerified;
+    private bool _mutationNamespaceChecked;
 
     /// <inheritdoc />
     public Func<CloudConflictPreflightProgress, CancellationToken, Task>? ReportProgress { get; set; }
@@ -75,7 +76,8 @@ public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost
         => _lease.RunAsync(async () =>
         {
             var item = RequireObservedIntent(plan, index, CloudConflictItemStage.ArchiveIntent);
-            var active = await ObserveRemoteFileAsync(plan.Binding, plan.Binding.ActiveRoot, item.RelativePath, cancellationToken).ConfigureAwait(false);
+            if (item.Local is null) CloudConflictLocalContent.RequireAbsent(plan.Binding.LocalPath, item.RelativePath, cancellationToken);
+            var active = await ObserveRemoteFileAsync(plan.Binding, plan.Binding.ActiveRoot, item.RemoteRelativePath ?? item.RelativePath, cancellationToken).ConfigureAwait(false);
             if (active is null || !SameContent(active, item.Remote)) throw Invalid("conflict-source-changed");
 
             var archiveParts = SplitArchivePath(plan.Binding, item.ArchivePath);
@@ -89,7 +91,7 @@ public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost
                 return true;
             }
 
-            var sourceSpec = RemoteSpec(plan.Binding, plan.Binding.ActiveRoot, item.RelativePath);
+            var sourceSpec = RemoteSpec(plan.Binding, plan.Binding.ActiveRoot, item.RemoteRelativePath ?? item.RelativePath);
             var destinationSpec = RcloneCliHost.BuildRemoteSpec(plan.Binding.RemoteName, item.ArchivePath);
             await RunSuccessAsync(
                 ["copyto", sourceSpec, destinationSpec, "--immutable", "--checksum", "--jottacloud-no-versions=false"],
@@ -97,8 +99,8 @@ public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost
                 cancellationToken).ConfigureAwait(false);
 
             var archived = await HashRemoteFileAsync(plan.Binding, "", item.ArchivePath, cancellationToken).ConfigureAwait(false);
-            var original = await HashRemoteFileAsync(plan.Binding, plan.Binding.ActiveRoot, item.RelativePath, cancellationToken).ConfigureAwait(false);
-            if (!SameContent(archived, item.Remote) || !SameContent(original, item.Remote)) throw Invalid("conflict-archive-verification-failed");
+            var original = await ObserveRemoteFileAsync(plan.Binding, plan.Binding.ActiveRoot, item.RemoteRelativePath ?? item.RelativePath, cancellationToken).ConfigureAwait(false);
+            if (!SameContent(archived, item.Remote) || original is null || !SameContent(original, item.Remote)) throw Invalid("conflict-archive-verification-failed");
             _archiveObjects[item.RelativePath] = archived;
             return true;
         });
@@ -108,13 +110,18 @@ public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost
         => _lease.RunAsync(async () =>
         {
             var item = RequireObservedIntent(plan, index, CloudConflictItemStage.MutationIntent);
+            if (!_mutationNamespaceChecked)
+            {
+                await ValidateCurrentNamespaceAsync(plan.Binding, cancellationToken, KnownArchive(plan, _observedState!)).ConfigureAwait(false);
+            }
+            if (item.Local is null) CloudConflictLocalContent.RequireAbsent(plan.Binding.LocalPath, item.RelativePath, cancellationToken);
             if (!_allArchivesVerified)
             {
                 ValidateAllArchives(plan);
                 _allArchivesVerified = true;
             }
 
-            var active = await ObserveRemoteFileAsync(plan.Binding, plan.Binding.ActiveRoot, item.RelativePath, cancellationToken).ConfigureAwait(false);
+            var active = await ObserveRemoteFileAsync(plan.Binding, plan.Binding.ActiveRoot, item.RemoteRelativePath ?? item.RelativePath, cancellationToken).ConfigureAwait(false);
             if (active is null || !SameContent(active, item.Remote)) throw Invalid("conflict-active-object-changed");
 
             if (item.Operation == CloudConflictOperation.ReplaceWithLocal)
@@ -127,28 +134,29 @@ public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost
                 var cached = await CloudConflictLocalContent.ReadCacheAsync(cachePath, cancellationToken).ConfigureAwait(false);
                 if (!SameContent(cached, item.Local) || cached.Kind != item.Local.Kind) throw Invalid("conflict-local-cache-verification-failed");
                 await RunSuccessAsync(
-                    ["copyto", cachePath, RemoteSpec(plan.Binding, plan.Binding.ActiveRoot, item.RelativePath),
+                    ["copyto", cachePath, RemoteSpec(plan.Binding, plan.Binding.ActiveRoot, item.RemoteRelativePath ?? item.RelativePath),
                         "--checksum", "--jottacloud-no-versions=false"],
                     ObjectTimeout,
                     cancellationToken).ConfigureAwait(false);
-                var target = await HashRemoteFileAsync(plan.Binding, plan.Binding.ActiveRoot, item.RelativePath, cancellationToken).ConfigureAwait(false);
-                if (!SameContent(target, item.Local)) throw Invalid("conflict-mutation-verification-failed");
+                var target = await ObserveRemoteFileAsync(plan.Binding, plan.Binding.ActiveRoot, item.RemoteRelativePath ?? item.RelativePath, cancellationToken).ConfigureAwait(false);
+                if (target is null || !SameContent(target, item.Local)) throw Invalid("conflict-mutation-verification-failed");
                 _activeObjects[item.RelativePath] = target;
             }
             else if (item.Operation == CloudConflictOperation.RemoveRemoteOnly)
             {
                 if (item.Local is not null) throw Invalid("conflict-delete-has-local-object");
                 await RunSuccessAsync(
-                    ["deletefile", RemoteSpec(plan.Binding, plan.Binding.ActiveRoot, item.RelativePath),
+                    ["deletefile", RemoteSpec(plan.Binding, plan.Binding.ActiveRoot, item.RemoteRelativePath ?? item.RelativePath),
                         "--jottacloud-hard-delete=false", "--jottacloud-no-versions=false"],
                     ObjectTimeout,
                     cancellationToken).ConfigureAwait(false);
-                var target = await ObserveRemoteFileAsync(plan.Binding, plan.Binding.ActiveRoot, item.RelativePath, cancellationToken).ConfigureAwait(false);
+                var target = await ObserveRemoteFileAsync(plan.Binding, plan.Binding.ActiveRoot, item.RemoteRelativePath ?? item.RelativePath, cancellationToken).ConfigureAwait(false);
                 if (target is not null) throw Invalid("conflict-delete-verification-failed");
                 _activeObjects.Remove(item.RelativePath);
             }
             else throw Invalid("conflict-operation-unsupported");
 
+            _mutationNamespaceChecked = true;
             _observed = null;
             return true;
         });
@@ -163,20 +171,21 @@ public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost
         if (!Path.IsPathFullyQualified(manifestPath)) throw Invalid("conflict-manifest-path-invalid");
         EnsureCache(binding);
         await RequireJottacloudAsync(binding.RemoteName, cancellationToken).ConfigureAwait(false);
+        await RequireCaseInsensitiveAsync(binding, cancellationToken).ConfigureAwait(false);
         _providerVerified = true;
 
-        var local = await CaptureLocalInventoryAsync(binding.LocalPath, cancellationToken).ConfigureAwait(false);
-        if (!CloudConflictRecoveryPlanner.EqualDigest(local.SourceManifestSha256, binding.SourceManifestSha256))
+        var localSnapshot = await CloudConflictLocalContent.CaptureNamespaceAsync(binding.LocalPath, cancellationToken).ConfigureAwait(false);
+        foreach (var entry in localSnapshot.Entries) ValidateRelative(entry.Path);
+        var metadata = await CaptureLocalMetadataAsync(binding.LocalPath, cancellationToken, localSnapshot.Files).ConfigureAwait(false);
+        if (!CloudConflictRecoveryPlanner.EqualDigest(metadata.SourceManifestSha256, binding.SourceManifestSha256))
             throw Invalid("conflict-local-source-changed");
-        var remote = await ListRemoteTreeAsync(binding, binding.ActiveRoot, cancellationToken).ConfigureAwait(false);
-        var allPaths = new SortedSet<string>(local.Files.Keys, StringComparer.Ordinal);
-        foreach (var path in remote.Keys)
-            if (!allPaths.Add(path)) { /* shared path */ }
-        if (allPaths.Count > CloudConflictRecoveryPlanner.MaxCandidates)
-            throw Invalid("conflict-inventory-limit-exceeded");
-        var collisions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var path in allPaths)
-            if (!collisions.Add(path)) throw Invalid("conflict-path-collision");
+        var remoteTree = await ListRemoteTreeAsync(binding, binding.ActiveRoot, cancellationToken).ConfigureAwait(false);
+        var remote = remoteTree.Files;
+        var matched = CloudConflictNamespace.Match(localSnapshot.Entries, remoteTree.Entries, true);
+        await ValidateUnmatchedLocalNodesAsync(binding, localSnapshot.Entries, remoteTree.Entries, cancellationToken).ConfigureAwait(false);
+        if (matched.Count > CloudConflictRecoveryPlanner.MaxCandidates) throw Invalid("conflict-inventory-limit-exceeded");
+        var local = await CaptureLocalInventoryAsync(binding.LocalPath, metadata, cancellationToken).ConfigureAwait(false);
+        var allPaths = matched;
 
         var candidates = new List<CloudConflictCandidate>(allPaths.Count);
         long remoteHashed = 0;
@@ -197,13 +206,15 @@ public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost
         if (remoteHashed != remote.Count) throw Invalid("conflict-remote-hash-unrecognized");
         if (remoteHashed == 0)
             await ReportAsync("hashing-cloud", 0, remote.Count, 0, cancellationToken).ConfigureAwait(false);
-        foreach (var path in allPaths)
+        foreach (var pair in allPaths)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            CloudConflictObject? localObject = local.Files.TryGetValue(path, out var localFile)
+            var path = pair.LocalPath ?? pair.RemotePath!;
+            CloudConflictObject? localObject = pair.LocalPath is not null && local.Files.TryGetValue(pair.LocalPath, out var localFile)
                 ? localFile.Object : null;
-            var remoteObject = remoteObjects.GetValueOrDefault(path);
-            candidates.Add(new(path, localObject, remoteObject));
+            var remoteObject = pair.RemotePath is null ? null : remoteObjects.GetValueOrDefault(pair.RemotePath);
+            var remotePath = pair.LocalPath is not null && pair.RemotePath != pair.LocalPath ? pair.RemotePath : null;
+            candidates.Add(new(path, localObject, remoteObject, remotePath));
         }
 
         // Recheck the complete local namespace after payload reads, then confirm the
@@ -262,7 +273,7 @@ public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost
             if (candidate.Remote is not null)
             {
                 var remoteCache = EnsureRemoteCachePath(binding, candidate.RelativePath);
-                await DownloadRemoteCacheAsync(binding, candidate.RelativePath, candidate.Remote, remoteCache, cancellationToken).ConfigureAwait(false);
+                await DownloadRemoteCacheAsync(binding, candidate.RemoteRelativePath ?? candidate.RelativePath, candidate.Remote, remoteCache, cancellationToken).ConfigureAwait(false);
                 var cachedRemote = await CloudConflictLocalContent.ReadCacheAsync(remoteCache, cancellationToken).ConfigureAwait(false);
                 if (!SameContent(cachedRemote, candidate.Remote) || cachedRemote.Kind != kind)
                     throw Invalid("conflict-remote-type-unverified");
@@ -277,8 +288,10 @@ public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost
         if (verified == 0)
             await ReportAsync("verifying-artwork", 0, verificationTotal, 0, cancellationToken).ConfigureAwait(false);
 
-        var finalLocal = await CaptureLocalMetadataAsync(binding.LocalPath, cancellationToken).ConfigureAwait(false);
-        if (!CloudConflictRecoveryPlanner.EqualDigest(finalLocal.SourceManifestSha256, binding.SourceManifestSha256)
+        var finalSnapshot = await CloudConflictLocalContent.CaptureNamespaceAsync(binding.LocalPath, cancellationToken).ConfigureAwait(false);
+        var finalLocal = await CaptureLocalMetadataAsync(binding.LocalPath, cancellationToken, finalSnapshot.Files).ConfigureAwait(false);
+        if (!localSnapshot.Entries.OrderBy(entry => entry.Path, StringComparer.Ordinal).SequenceEqual(finalSnapshot.Entries.OrderBy(entry => entry.Path, StringComparer.Ordinal))
+            || !CloudConflictRecoveryPlanner.EqualDigest(finalLocal.SourceManifestSha256, binding.SourceManifestSha256)
             || !SameLocalIdentities(local.Files, finalLocal.Files)) throw Invalid("conflict-local-source-changed");
 
         var document = new CloudConflictInventoryDocument(binding, candidates.ToArray());
@@ -329,9 +342,11 @@ public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost
             if (!_providerVerified)
             {
                 await RequireJottacloudAsync(plan.Binding.RemoteName, cancellationToken).ConfigureAwait(false);
+                await RequireCaseInsensitiveAsync(plan.Binding, cancellationToken).ConfigureAwait(false);
                 _providerVerified = true;
             }
             await ValidateInventoryArtifactAsync(plan, cancellationToken).ConfigureAwait(false);
+            await ValidateCurrentNamespaceAsync(plan.Binding, cancellationToken, KnownArchive(plan, state)).ConfigureAwait(false);
             var localMetadata = await CaptureLocalMetadataAsync(plan.Binding.LocalPath, cancellationToken).ConfigureAwait(false);
             if (!CloudConflictRecoveryPlanner.EqualDigest(localMetadata.SourceManifestSha256, plan.Binding.SourceManifestSha256))
                 throw Invalid("conflict-local-source-changed");
@@ -342,13 +357,14 @@ public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost
             {
                 var item = plan.Items[index];
                 var stage = state.Items[index].Stage;
+                if (item.Local is null) CloudConflictLocalContent.RequireAbsent(plan.Binding.LocalPath, item.RelativePath, cancellationToken);
                 if (item.Local is not null)
                 {
                     var observedLocal = await CloudConflictLocalContent.ObserveAsync(plan.Binding.LocalPath, item.RelativePath, cancellationToken).ConfigureAwait(false);
                     if (!SameContentAndIdentity(observedLocal, item.Local)) throw Invalid("conflict-local-source-changed");
                     _localObjects[item.RelativePath] = observedLocal;
                 }
-                var active = await ObserveRemoteFileAsync(plan.Binding, plan.Binding.ActiveRoot, item.RelativePath, cancellationToken).ConfigureAwait(false);
+                var active = await ObserveRemoteFileAsync(plan.Binding, plan.Binding.ActiveRoot, item.RemoteRelativePath ?? item.RelativePath, cancellationToken).ConfigureAwait(false);
                 ValidateActiveForStage(item, stage, active);
                 SetActive(item.RelativePath, CanonicalActive(item, active));
                 if (stage is CloudConflictItemStage.Archived or CloudConflictItemStage.MutationIntent or CloudConflictItemStage.Resolved)
@@ -458,9 +474,8 @@ public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost
         if (!CloudConflictRecoveryPlanner.EqualDigest(rebuilt.Fingerprint, plan.Fingerprint)) throw Invalid("conflict-plan-inventory-mismatch");
     }
 
-    private async Task<LocalInventory> CaptureLocalInventoryAsync(string root, CancellationToken cancellationToken)
+    private async Task<LocalInventory> CaptureLocalInventoryAsync(string root, LocalMetadata metadata, CancellationToken cancellationToken)
     {
-        var metadata = await CaptureLocalMetadataAsync(root, cancellationToken).ConfigureAwait(false);
         var files = new Dictionary<string, LocalFile>(StringComparer.Ordinal);
         long bytesRead = 0;
         foreach (var entry in metadata.Files.Values.OrderBy(file => file.RelativePath, StringComparer.Ordinal))
@@ -481,15 +496,15 @@ public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost
     }
 
     private Task ReportAsync(string phase, long files, long totalFiles, long bytesRead,
-        CancellationToken cancellationToken)
-        => ReportProgress?.Invoke(new(phase, files, totalFiles, bytesRead, DateTimeOffset.UtcNow), cancellationToken)
+        CancellationToken cancellationToken, bool totalIsKnown = true)
+        => ReportProgress?.Invoke(new(phase, files, totalFiles, bytesRead, DateTimeOffset.UtcNow, totalIsKnown), cancellationToken)
             ?? Task.CompletedTask;
 
-    private async Task<LocalMetadata> CaptureLocalMetadataAsync(string root, CancellationToken cancellationToken)
+    private async Task<LocalMetadata> CaptureLocalMetadataAsync(string root, CancellationToken cancellationToken, IReadOnlyList<CloudConflictLocalFileMetadata>? captured = null)
     {
         // The shared Linux-only helper owns descriptor-relative traversal and rejects
         // links, non-regular files, unstable identities and unsupported file systems.
-        var files = await CloudConflictLocalContent.CaptureMetadataAsync(root, cancellationToken).ConfigureAwait(false);
+        var files = captured ?? await CloudConflictLocalContent.CaptureMetadataAsync(root, cancellationToken).ConfigureAwait(false);
         var ordered = files.OrderBy(file => file.RelativePath, StringComparer.Ordinal).ToArray();
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         foreach (var file in ordered)
@@ -504,16 +519,19 @@ public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost
             Convert.ToHexStringLower(hash.GetHashAndReset()));
     }
 
-    private async Task<Dictionary<string, RemoteFile>> ListRemoteTreeAsync(
+    private async Task<(Dictionary<string, RemoteFile> Files, IReadOnlyList<CloudConflictNamespaceEntry> Entries)> ListRemoteTreeAsync(
         CloudConflictRecoveryBinding binding,
         string root,
         CancellationToken cancellationToken)
     {
         var files = new Dictionary<string, RemoteFile>(StringComparer.Ordinal);
+        var entries = new List<CloudConflictNamespaceEntry>();
         var collision = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var pending = new Stack<string>();
         var namespaceEntries = 0;
         pending.Push(string.Empty);
+        var directoriesListed = 0;
+        await ReportAsync("listing-cloud", 0, 0, 0, cancellationToken, totalIsKnown: false).ConfigureAwait(false);
         while (pending.Count > 0)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -544,6 +562,7 @@ public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost
                     || ++namespaceEntries > CloudConflictRecoveryPlanner.MaxCandidates)
                     throw Invalid("conflict-inventory-limit-exceeded");
                 if (!collision.Add(relative)) throw Invalid("conflict-remote-path-collision");
+                entries.Add(new(relative, isDir.Value));
                 if (isDir.Value)
                 {
                     pending.Push(relative);
@@ -556,8 +575,11 @@ public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost
                         throw Invalid("conflict-inventory-limit-exceeded");
                 }
             }
+            directoriesListed++;
+            if (directoriesListed % 100 == 0 || pending.Count == 0)
+                await ReportAsync("listing-cloud", files.Count, 0, 0, cancellationToken, totalIsKnown: false).ConfigureAwait(false);
         }
-        return files;
+        return (files, entries);
     }
 
     private async Task<CloudConflictObject?> ObserveRemoteFileAsync(
@@ -569,10 +591,30 @@ public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost
         var fullPath = root.Length == 0 ? relativePath : JoinRemote(root, relativePath);
         var parent = Parent(fullPath);
         var name = Leaf(fullPath);
+        if (root == binding.ActiveRoot)
+            await RequireExactAncestorsAsync(binding, root, relativePath, cancellationToken).ConfigureAwait(false);
         var listing = await ReadRemoteDirectoryAsync(binding, parent, cancellationToken).ConfigureAwait(false);
-        if (!listing.TryGetValue(name, out var entry)) return null;
+        if (!listing.TryGetValue(name, out var entry))
+        {
+            if (listing.Keys.Any(key => string.Equals(key, name, StringComparison.OrdinalIgnoreCase)))
+                throw Invalid("conflict-remote-spelling-changed");
+            return null;
+        }
         if (entry.IsDir || entry.Size is null) throw Invalid("conflict-remote-entry-invalid");
         return await HashRemoteFileAsync(binding, root, relativePath, cancellationToken, entry.Size).ConfigureAwait(false);
+    }
+
+    private async Task RequireExactAncestorsAsync(CloudConflictRecoveryBinding binding, string root, string relativePath, CancellationToken cancellationToken)
+    {
+        var segments = relativePath.Split('/');
+        var parent = root;
+        for (var i = 0; i < segments.Length - 1; i++)
+        {
+            var entries = await ReadRemoteDirectoryAsync(binding, parent, cancellationToken).ConfigureAwait(false);
+            if (!entries.TryGetValue(segments[i], out var entry) || !entry.IsDir)
+                throw Invalid("conflict-remote-spelling-changed");
+            parent = JoinRemote(parent, segments[i]);
+        }
     }
 
     private async Task<CloudConflictObject> HashRemoteFileAsync(
@@ -686,6 +728,142 @@ public sealed class RcloneCloudConflictRecoveryHost : ICloudConflictRecoveryHost
             cancellationToken).ConfigureAwait(false);
         var downloaded = await CloudConflictLocalContent.ReadCacheAsync(cachePath, cancellationToken).ConfigureAwait(false);
         if (!SameContent(downloaded, expected)) throw Invalid("conflict-remote-cache-mismatch");
+    }
+
+    private static string? KnownArchive(CloudConflictRecoveryPlan plan, CloudConflictRecoveryState state)
+    {
+        for (var i = 0; i < plan.Items.Count; i++)
+            if (state.Items[i].Stage is CloudConflictItemStage.Archived or CloudConflictItemStage.MutationIntent or CloudConflictItemStage.Resolved)
+                return plan.Items[i].ArchivePath;
+        return null;
+    }
+
+    private async Task ValidateCurrentNamespaceAsync(CloudConflictRecoveryBinding binding, CancellationToken cancellationToken, string? knownArchivePath)
+    {
+        var local = await CloudConflictLocalContent.CaptureNamespaceAsync(binding.LocalPath, cancellationToken).ConfigureAwait(false);
+        foreach (var entry in local.Entries) ValidateRelative(entry.Path);
+        var metadata = await CaptureLocalMetadataAsync(binding.LocalPath, cancellationToken, local.Files).ConfigureAwait(false);
+        if (!CloudConflictRecoveryPlanner.EqualDigest(metadata.SourceManifestSha256, binding.SourceManifestSha256))
+            throw Invalid("conflict-local-source-changed");
+        var remote = await ListRemoteTreeAsync(binding, binding.ActiveRoot, cancellationToken).ConfigureAwait(false);
+        CloudConflictNamespace.Match(local.Entries, remote.Entries, true);
+        await ValidateUnmatchedLocalNodesAsync(binding, local.Entries, remote.Entries, cancellationToken, knownArchivePath).ConfigureAwait(false);
+        var after = await CloudConflictLocalContent.CaptureNamespaceAsync(binding.LocalPath, cancellationToken).ConfigureAwait(false);
+        var afterMetadata = await CaptureLocalMetadataAsync(binding.LocalPath, cancellationToken, after.Files).ConfigureAwait(false);
+        if (!local.Entries.OrderBy(entry => entry.Path, StringComparer.Ordinal).SequenceEqual(after.Entries.OrderBy(entry => entry.Path, StringComparer.Ordinal))
+            || !CloudConflictRecoveryPlanner.EqualDigest(afterMetadata.SourceManifestSha256, binding.SourceManifestSha256))
+            throw Invalid("conflict-local-source-changed");
+    }
+
+    private async Task ValidateUnmatchedLocalNodesAsync(CloudConflictRecoveryBinding binding,
+        IReadOnlyList<CloudConflictNamespaceEntry> local, IReadOnlyList<CloudConflictNamespaceEntry> remote,
+        CancellationToken cancellationToken, string? knownArchivePath = null)
+    {
+        var observed = remote.FirstOrDefault(entry => !entry.IsDirectory);
+        var knownPath = observed?.Path ?? knownArchivePath ?? throw Invalid("conflict-provider-probe-selfcheck-failed");
+        var knownRoot = observed is null ? string.Empty : binding.ActiveRoot;
+        var known = await RunAsync(["lsjson", RemoteSpec(binding, knownRoot, knownPath), "--stat", "--files-only", "--no-modtime", "--no-mimetype", "--use-json-log"], ListingTimeout, cancellationToken).ConfigureAwait(false);
+        if (!known.StartSucceeded || known.ExitCode != 0 || known.TimedOut || known.OutputTruncated
+            || !string.IsNullOrWhiteSpace(known.StandardError) || Encoding.UTF8.GetByteCount(known.StandardOutput) > MaxListingBytes)
+            throw Invalid("conflict-provider-probe-selfcheck-failed");
+        try
+        {
+            using var doc = JsonDocument.Parse(known.StandardOutput, new JsonDocumentOptions { MaxDepth = 8 });
+            if (doc.RootElement.ValueKind != JsonValueKind.Object || ReadString(doc.RootElement, "Name") != Leaf(knownPath)
+                || ReadBoolean(doc.RootElement, "IsDir") != false || ReadInt64(doc.RootElement, "Size") is null or < 0)
+                throw Invalid("conflict-provider-probe-selfcheck-failed");
+        }
+        catch (JsonException) { throw Invalid("conflict-provider-probe-selfcheck-failed"); }
+        var nonce = ".slipmat-probe-" + Guid.NewGuid().ToString("N");
+        try { await ProbeUnmatchedPathAsync(binding, nonce, cancellationToken).ConfigureAwait(false); }
+        catch (InvalidOperationException) { throw Invalid("conflict-provider-probe-selfcheck-failed"); }
+
+        var remoteNames = new HashSet<string>(remote.Select(entry => entry.Path), StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in local.Where(entry => !remoteNames.Contains(entry.Path)).OrderBy(entry => entry.Path, StringComparer.Ordinal))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await ProbeUnmatchedPathAsync(binding, entry.Path, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task ProbeUnmatchedPathAsync(CloudConflictRecoveryBinding binding, string path, CancellationToken cancellationToken)
+    {
+        var spec = RemoteSpec(binding, binding.ActiveRoot, path);
+        // With --files-only StatJSON does not suppress non-not-found object errors.
+        var file = await RunAsync(["lsjson", spec, "--stat", "--files-only", "--no-modtime", "--no-mimetype", "--use-json-log"], ListingTimeout, cancellationToken).ConfigureAwait(false);
+        RequireSuccess(file, "conflict-provider-alias-probe-failed");
+        if (Encoding.UTF8.GetByteCount(file.StandardOutput) > MaxListingBytes || !string.IsNullOrWhiteSpace(file.StandardError))
+            throw Invalid("conflict-provider-alias-probe-failed");
+        try
+        {
+            using var doc = JsonDocument.Parse(file.StandardOutput, new JsonDocumentOptions { MaxDepth = 8 });
+            if (doc.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                if (string.IsNullOrEmpty(ReadString(doc.RootElement, "Name")) || ReadBoolean(doc.RootElement, "IsDir") != false)
+                    throw Invalid("conflict-provider-alias-probe-failed");
+                throw Invalid("conflict-provider-alias-unsupported");
+            }
+            if (doc.RootElement.ValueKind != JsonValueKind.Null) throw Invalid("conflict-provider-alias-probe-failed");
+        }
+        catch (JsonException) { throw Invalid("conflict-provider-alias-probe-failed"); }
+
+        // Listing the exact directory invokes the backend's own directory lookup;
+        // StatJSON's directory fallback instead compares using Go EqualFold.
+        var directory = await RunAsync(["lsjson", spec, "--max-depth", "1", "--no-modtime", "--no-mimetype", "--use-json-log"], ListingTimeout, cancellationToken).ConfigureAwait(false);
+        if (!directory.StartSucceeded || directory.TimedOut || directory.OutputTruncated
+            || Encoding.UTF8.GetByteCount(directory.StandardOutput) > MaxListingBytes
+            || Encoding.UTF8.GetByteCount(directory.StandardError) > MaxListingBytes)
+            throw Invalid("conflict-provider-alias-probe-failed");
+        if (directory.ExitCode == 0)
+        {
+            if (!string.IsNullOrWhiteSpace(directory.StandardError)) throw Invalid("conflict-provider-alias-probe-failed");
+            try
+            {
+                using var doc = JsonDocument.Parse(directory.StandardOutput, new JsonDocumentOptions { MaxDepth = 32 });
+                if (doc.RootElement.ValueKind != JsonValueKind.Array) throw Invalid("conflict-provider-alias-probe-failed");
+                throw Invalid("conflict-provider-alias-unsupported");
+            }
+            catch (JsonException) { throw Invalid("conflict-provider-alias-probe-failed"); }
+        }
+        if (!IsProvenDirectoryMissing(directory)) throw Invalid("conflict-provider-alias-probe-failed");
+    }
+
+    private static bool IsProvenDirectoryMissing(RcloneCommandResult result)
+    {
+        if (result.ExitCode != 3 || result.StandardOutput.Trim() != "[") return false;
+        var lines = result.StandardError.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (lines.Length != 2) return false;
+        try
+        {
+            using var first = JsonDocument.Parse(lines[0]);
+            using var second = JsonDocument.Parse(lines[1]);
+            return first.RootElement.ValueKind == JsonValueKind.Object && second.RootElement.ValueKind == JsonValueKind.Object
+                && ReadString(first.RootElement, "level") == "error"
+                && ReadString(first.RootElement, "msg") == "error listing: directory not found"
+                && ReadString(second.RootElement, "level") == "notice"
+                && ReadString(second.RootElement, "msg") == "Failed to lsjson with 2 errors: last error was: error in ListJSON: directory not found";
+        }
+        catch (JsonException) { return false; }
+    }
+
+    private async Task RequireCaseInsensitiveAsync(CloudConflictRecoveryBinding binding, CancellationToken cancellationToken)
+    {
+        var version = await RunAsync(["version"], ListingTimeout, cancellationToken).ConfigureAwait(false);
+        if (!version.StartSucceeded || version.ExitCode != 0 || version.TimedOut || version.OutputTruncated
+            || version.StandardOutput.Split('\n')[0].TrimEnd('\r') != "rclone v1.74.4")
+            throw Invalid("conflict-provider-version-unsupported");
+        var result = await RunAsync(["backend", "features", RcloneCliHost.BuildRemoteSpec(binding.RemoteName, binding.ActiveRoot)], ListingTimeout, cancellationToken).ConfigureAwait(false);
+        RequireSuccess(result, "conflict-provider-features-unavailable");
+        if (Encoding.UTF8.GetByteCount(result.StandardOutput) > MaxListingBytes) throw Invalid("conflict-provider-features-unavailable");
+        try
+        {
+            using var document = JsonDocument.Parse(result.StandardOutput, new JsonDocumentOptions { MaxDepth = 16 });
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("Features", out var features) || features.ValueKind != JsonValueKind.Object
+                || !features.TryGetProperty("CaseInsensitive", out var value) || value.ValueKind != JsonValueKind.True)
+                throw Invalid("conflict-provider-case-unsupported");
+        }
+        catch (JsonException) { throw Invalid("conflict-provider-features-unavailable"); }
     }
 
     private async Task RequireJottacloudAsync(string remoteName, CancellationToken cancellationToken)

@@ -71,12 +71,14 @@ public sealed class CloudConflictRecoveryExecutor
                     CloudConflictPreflightProgress? last = null;
                     progressHost.ReportProgress = async (sample, token) =>
                     {
-                        if (sample.Phase is not ("hashing-local" or "hashing-cloud" or "verifying-artwork")
-                            || sample.Files < 0 || sample.TotalFiles < sample.Files
+                        if (sample.Phase is not ("listing-cloud" or "hashing-local" or "hashing-cloud" or "verifying-artwork")
+                            || sample.Files < 0 || sample.Files > CloudConflictRecoveryPlanner.MaxCandidates
+                            || sample.TotalFiles < 0 || sample.TotalIsKnown && sample.TotalFiles < sample.Files
+                            || !sample.TotalIsKnown && (sample.Phase != "listing-cloud" || sample.TotalFiles != 0)
                             || sample.TotalFiles > CloudConflictRecoveryPlanner.MaxCandidates || sample.BytesRead < 0)
                             throw Invalid();
                         failureStage = sample.Phase;
-                        if (last is not null && last.Phase == sample.Phase && sample.Files < sample.TotalFiles
+                        if (last is not null && last.Phase == sample.Phase && (!sample.TotalIsKnown || sample.Files < sample.TotalFiles)
                             && sample.Files - last.Files < 32 && sample.ObservedAt - last.ObservedAt < TimeSpan.FromSeconds(1)) return;
                         snapshot = await SaveSessionAsync(journal, snapshot, snapshot.Job.ConflictRecovery! with
                         { Status = "preflighting", Progress = sample }, token).ConfigureAwait(false);

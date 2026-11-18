@@ -33,11 +33,28 @@ must work in Jellyfin's service environment, with token refresh allowed to persi
 to its actual rclone configuration. A successful interactive-user rclone command
 alone does not establish service authentication.
 
+The provider absence probes currently require the tested rclone **1.74.4**
+command contract and a typed case-insensitive capability. They check file and
+directory resolution separately: a successful lookup of an otherwise unmatched
+local path blocks recovery as an unproven provider alias. Permission, transport,
+malformed-output and unrecognized missing-result errors never count as absence.
+These metadata requests add work per unmatched local file and directory. A
+read-only existing-file/random-missing-path self-check runs before payloads;
+an initially empty remote cannot supply the positive file check and is rejected.
+This feature does not establish a general Unicode equivalence rule or rename
+unknown aliases. Source and namespace checks run again on resume and before the
+first active-library mutation.
+
 ## Content and archive rules
 
-1. Inventory the complete local and remote namespaces and compute SHA-256 content
-   hashes. Remote preflight downloads content for hashing, grouped by directory;
-   matching file sizes or provider hash presence are not equality evidence.
+1. Inventory and validate the complete local and remote namespaces before reading
+   payloads. For a verified case-insensitive provider, a unique match that differs
+   only in ASCII letter case retains both exact path spellings: local reads use
+   the local path, and cloud operations use the observed remote path. No rename
+   is implied. Same-side aliases, file/directory collisions and unproven Unicode
+   equivalences block recovery. Then compute SHA-256 content hashes on both sides.
+   Remote preflight downloads content for hashing, grouped by directory; matching
+   file sizes or provider hash presence are not equality evidence.
 2. Fail the whole plan before archive or mutation if an overlapping audio file or
    an unsupported, ambiguous, unsafe, or malformed entry conflicts. Supported
    replacements are byte-inspected NFO XML, JPEG, and PNG. Remote-only removal is
@@ -78,9 +95,11 @@ published as diagnostics.
 Progress counters are observations, never verification authority. After repair
 completes, inspect the migration's normal copy/check status as well. A completed
 repair by itself does not establish a verified or mounted cloud library.
-Local hashing is followed by full remote directory enumeration, which can leave
-the last local-hashing counters unchanged. Cloud-hashing progress advances after
-each complete directory command. Quiet counters alone do not establish a hang.
+Cloud listing reports the number of files observed while its total is still
+unknown. It does not invent a percentage or use the safety limit as a total.
+Full local hashing follows namespace validation. Cloud-hashing progress advances
+after each complete directory command. Quiet counters alone do not establish a
+hang. A retry clears the previous attempt's progress observations before starting.
 
 ## Validation boundary
 

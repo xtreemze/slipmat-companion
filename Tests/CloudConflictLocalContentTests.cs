@@ -12,6 +12,17 @@ public sealed class CloudConflictLocalContentTests
     private static readonly byte[] Png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC");
 
     [Fact]
+    public void MissingRemoteOnlyTargetRejectsLocalFileOrDirectoryAlias()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        using var fixture = new Fixture();
+        Directory.CreateDirectory(Path.Combine(fixture.Root, "Album"));
+        CloudConflictLocalContent.RequireAbsent(fixture.Root, "ALBUM/cover.jpg", default);
+        Directory.CreateDirectory(Path.Combine(fixture.Root, "Album", "Cover.jpg"));
+        Assert.Throws<InvalidOperationException>(() => CloudConflictLocalContent.RequireAbsent(fixture.Root, "ALBUM/cover.jpg", default));
+    }
+
+    [Fact]
     public async Task HashesAndClassifiesActualContent()
     {
         if (!OperatingSystem.IsLinux()) return;

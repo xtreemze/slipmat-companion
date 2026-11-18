@@ -38,4 +38,4 @@ public sealed record CloudConflictInventoryDocument(CloudConflictRecoveryBinding
 
 /// <summary>Observed preflight reads; these counters never replace content or custody proofs.</summary>
 public sealed record CloudConflictPreflightProgress(string Phase, long Files, long TotalFiles,
-    long BytesRead, DateTimeOffset ObservedAt);
+    long BytesRead, DateTimeOffset ObservedAt, bool TotalIsKnown = true);

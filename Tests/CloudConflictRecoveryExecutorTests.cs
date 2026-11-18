@@ -13,14 +13,45 @@ public sealed class CloudConflictRecoveryExecutorTests
     private const string A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     private const string B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
-    [Fact]
-    public async Task KnownHostFailurePersistsOnlyAllowlistedCauseAndOperationStage()
+    [Theory]
+    [InlineData("listing-cloud", 4181, 0, false, true)]
+    [InlineData("hashing-cloud", 1, 0, false, false)]
+    [InlineData("listing-cloud", 100001, 0, false, false)]
+    [InlineData("listing-cloud", 2, 1, true, false)]
+    [InlineData("unknown-provider-phase", 0, 0, false, false)]
+    public async Task UnknownTotalProgressIsBoundedAndOnlyAllowedForListing(
+        string phase, long files, long total, bool known, bool accepted)
     {
         using var fixture = await Fixture.CreateAsync();
-        fixture.Host.CaptureFailure = new InvalidOperationException("conflict-remote-hash-failed");
+        var progress = new CloudConflictPreflightProgress(phase, files, total, 0, DateTimeOffset.UtcNow, known);
+        fixture.Host.CaptureProgress = progress;
         var result = await fixture.Executor.ExecuteAsync(fixture.Job.Id);
-        Assert.Equal("conflict-remote-hash-failed", result.Code);
-        Assert.Equal("conflict-remote-hash-failed", result.ConflictRecovery!.Code);
+        Assert.Equal(accepted ? "completed" : "blocked", result.ConflictRecovery!.Status);
+        if (accepted) Assert.Equal(progress, result.ConflictRecovery.Progress);
+        else
+        {
+            Assert.Null(result.ConflictRecovery.Progress);
+            Assert.Equal(0, fixture.Host.ArchiveCount);
+            Assert.Equal(0, fixture.Host.MutationCount);
+        }
+    }
+
+    [Theory]
+    [InlineData("conflict-remote-hash-failed")]
+    [InlineData("conflict-provider-features-unavailable")]
+    [InlineData("conflict-provider-case-unsupported")]
+    [InlineData("conflict-provider-alias-unsupported")]
+    [InlineData("conflict-provider-alias-probe-failed")]
+    [InlineData("conflict-provider-version-unsupported")]
+    [InlineData("conflict-provider-probe-selfcheck-failed")]
+    [InlineData("conflict-remote-spelling-changed")]
+    public async Task KnownHostFailurePersistsOnlyAllowlistedCauseAndOperationStage(string code)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Host.CaptureFailure = new InvalidOperationException(code);
+        var result = await fixture.Executor.ExecuteAsync(fixture.Job.Id);
+        Assert.Equal(code, result.Code);
+        Assert.Equal(code, result.ConflictRecovery!.Code);
         Assert.Equal("preflighting", FailureStage(result));
         Assert.Equal(0, fixture.Host.ArchiveCount);
         Assert.Equal(0, fixture.Host.MutationCount);
@@ -284,7 +315,7 @@ public sealed class CloudConflictRecoveryExecutorTests
     {
         public PluginConfiguration GetCurrent() => new() { StoreRoot = root };
     }
-    private sealed class FakeHost : ICloudConflictRecoveryHost
+    private sealed class FakeHost : ICloudConflictRecoveryHost, ICloudConflictRecoveryProgressHost
     {
         public CloudConflictCandidate[] Entries = [
             new("album.nfo", new(1, A, "local-a", CloudConflictContentKind.XmlMetadata), new(1, B, "remote-a", CloudConflictContentKind.XmlMetadata)),
@@ -293,10 +324,14 @@ public sealed class CloudConflictRecoveryExecutorTests
         public bool CrashAfterArchive, CrashAfterMutation, LoseFirstArchiveAfterSecond, WrongReceipt, CancelAfterArchive, IgnoreArchive;
         public bool ArchivedBeforeFirstMutation;
         public Exception? CaptureFailure, ArchiveFailure;
+        public CloudConflictPreflightProgress? CaptureProgress;
+        public Func<CloudConflictPreflightProgress, CancellationToken, Task>? ReportProgress { get; set; }
         private CloudConflictLiveItem[]? _items;
         public async Task<CloudConflictInventory> CaptureAsync(CloudConflictRecoveryBinding binding, string manifestPath, CancellationToken cancellationToken)
         {
             CaptureCount++;
+            if (CaptureProgress is not null && ReportProgress is not null)
+                await ReportProgress(CaptureProgress, cancellationToken);
             if (CaptureFailure is not null) throw CaptureFailure;
             var bytes = JsonSerializer.SerializeToUtf8Bytes(new CloudConflictInventoryDocument(binding, Entries), new JsonSerializerOptions(JsonSerializerDefaults.Web));
             if (File.Exists(manifestPath))

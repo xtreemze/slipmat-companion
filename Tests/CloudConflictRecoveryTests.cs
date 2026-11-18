@@ -27,6 +27,21 @@ public sealed class CloudConflictRecoveryTests
     }
 
     [Fact]
+    public void PlanFingerprintBindsExactRemoteSpelling()
+    {
+        var binding = Binding();
+        var plan = CloudConflictRecoveryPlanner.Create(binding, Inventory(binding,
+            new CloudConflictCandidate("album.nfo", Content(A), Content(B), "ALBUM.nfo")));
+        var item = Assert.Single(plan.Items);
+        Assert.Equal("ALBUM.nfo", item.RemoteRelativePath);
+        Assert.Equal(binding.ArchiveRoot + "/ALBUM.nfo", item.ArchivePath);
+        var changed = plan with { Items = [item with { RemoteRelativePath = "Album.nfo" }] };
+        Assert.NotEqual(plan.Fingerprint, CloudConflictRecoveryPlanner.Fingerprint(changed));
+        Assert.Throws<InvalidOperationException>(() => CloudConflictRecoveryPlanner.Create(binding, Inventory(binding,
+            new CloudConflictCandidate("ä.nfo", Content(A), Content(B), "Ä.nfo"))));
+    }
+
+    [Fact]
     public void AudioOrUnknownConflictsAndUnknownEvidenceBlockEntirePlan()
     {
         var binding = Binding();

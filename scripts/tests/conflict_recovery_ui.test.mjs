@@ -41,3 +41,16 @@ test('request failure does not expose raw provider error text', async () => {
     assert.match(f.status.textContent, /not accepted/);
     assert.doesNotMatch(f.status.textContent, /private-provider-token/);
 });
+
+test('listing progress does not invent a total or percentage', () => {
+    const formatter = html.match(/^            function formatConflictPreflightProgress\(sample\) \{[\s\S]*?^            }/m)?.[0];
+    assert.ok(formatter);
+    const context = vm.createContext({ formatCloudSize: value => String(value) + ' B' });
+    vm.runInContext(formatter, context);
+    const text = context.formatConflictPreflightProgress({ phase: 'listing-cloud', files: 4181,
+        totalFiles: 0, totalIsKnown: false, bytesRead: 0, observedAt: 'now' });
+    assert.match(text, /4181 files listed; total pending/);
+    assert.doesNotMatch(text, /4181 \/ 0|%/);
+    assert.match(context.formatConflictPreflightProgress({ phase: 'hashing-local', files: 1,
+        totalFiles: 2, bytesRead: 20, observedAt: 'now' }), /1 \/ 2 files/);
+});
