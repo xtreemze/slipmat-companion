@@ -9,11 +9,14 @@ namespace Jellyfin.Plugin.AudioGateway.Tests;
 [Collection("Shared rclone recovery fence")]
 public sealed class CloudConflictRealRcloneTests
 {
-    [Fact]
-    public async Task LocalBackendPreservesOriginalsBeforeApplyingOnlyApprovedMetadataChanges()
+    [Theory]
+    [InlineData("album.nfo")]
+    [InlineData("ALBUM.nfo")]
+    public async Task LocalBackendPreservesOriginalsBeforeApplyingOnlyApprovedMetadataChanges(string remoteName)
     {
         if (!OperatingSystem.IsLinux()) return;
         using var fixture = new Fixture();
+        if (remoteName != "album.nfo") File.Move(fixture.Active("album.nfo"), fixture.Active(remoteName));
         var runner = new LocalBackendRunner(fixture.RemoteRoot);
         var binding = await fixture.BindingAsync();
         await using var lease = await CloudConflictRecoveryFence.Shared.AcquireAsync(binding.JobId,
@@ -49,14 +52,49 @@ public sealed class CloudConflictRealRcloneTests
         }
         Assert.True(complete, "The real rclone command sequence did not complete.");
 
-        Assert.Equal(fixture.RemoteAlbum, await File.ReadAllBytesAsync(fixture.Archived("album.nfo")));
-        Assert.Equal(fixture.LocalAlbum, await File.ReadAllBytesAsync(fixture.Active("album.nfo")));
+        Assert.Equal(fixture.RemoteAlbum, await File.ReadAllBytesAsync(fixture.Archived(remoteName)));
+        Assert.Equal(fixture.LocalAlbum, await File.ReadAllBytesAsync(fixture.Active(remoteName)));
         Assert.Equal(fixture.RemotePng, await File.ReadAllBytesAsync(fixture.Archived("cover.png")));
         Assert.False(File.Exists(fixture.Active("cover.png")));
         Assert.Equal(fixture.Audio, await File.ReadAllBytesAsync(fixture.Active("track.flac")));
         Assert.False(File.Exists(fixture.Active("local-only.flac")));
         Assert.DoesNotContain(runner.Commands, args => args[0] is "sync" or "move" or "purge" or "delete");
         Assert.All(runner.ActualCommands, args => Assert.Contains("--config=/dev/null", args));
+    }
+
+    [Fact]
+    public async Task LocalBackendResumesAfterLastDeletionWithVerifiedArchive()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        using var fixture = new Fixture();
+        File.Delete(Path.Combine(fixture.Source, "album.nfo"));
+        File.Delete(Path.Combine(fixture.Source, "track.flac"));
+        File.Delete(Path.Combine(fixture.Source, "local-only.flac"));
+        File.Delete(fixture.Active("album.nfo"));
+        File.Delete(fixture.Active("track.flac"));
+        var runner = new LocalBackendRunner(fixture.RemoteRoot);
+        var binding = await fixture.BindingAsync();
+        await using var lease = await CloudConflictRecoveryFence.Shared.AcquireAsync(binding.JobId,
+            CloudConflictRecoveryPlanner.BindingFingerprint(binding));
+        RcloneCloudConflictRecoveryHost Host() => new(runner, lease, fixture.Cache,
+            CloudConflictRecoverySession.CompanionOnlyWriter, runner.Executable);
+        var host = Host();
+        var plan = CloudConflictRecoveryPlanner.Create(binding, await host.CaptureAsync(binding, fixture.InventoryPath, default));
+        var item = Assert.Single(plan.Items);
+        var state = CloudConflictRecoveryState.Create(plan).WithStage(0, CloudConflictItemStage.ArchiveIntent);
+        await host.ObserveAsync(plan, state, default);
+        await host.ArchiveAsync(plan, 0, default);
+        state = state.WithStage(0, CloudConflictItemStage.MutationIntent, item.Remote.Sha256);
+        await host.ObserveAsync(plan, state, default);
+        await host.MutateAsync(plan, 0, default);
+        Assert.False(File.Exists(fixture.Active("cover.png")));
+        Assert.Equal(fixture.RemotePng, await File.ReadAllBytesAsync(fixture.Archived("cover.png")));
+
+        var live = await Host().ObserveAsync(plan, state, default);
+        Assert.Equal(CloudConflictAction.PersistResolved, CloudConflictRecoveryTransaction.Decide(plan, state, live).Action);
+        state = state.WithStage(0, CloudConflictItemStage.Resolved, item.Remote.Sha256, Assert.Single(live.Items).MutationReceipt);
+        live = await Host().ObserveAsync(plan, state, default);
+        Assert.Equal(CloudConflictAction.Complete, CloudConflictRecoveryTransaction.Decide(plan, state, live).Action);
     }
 
     [Fact]
@@ -108,6 +146,10 @@ public sealed class CloudConflictRealRcloneTests
             if (arguments.SequenceEqual(["listremotes", "--long", "--json"]))
                 return Task.FromResult(new RcloneCommandResult(true, 0,
                     "[{\"name\":\"cloud\",\"type\":\"jottacloud\"}]", "", false, false));
+            // Explicit fake provider capability: actual local rclone remains case-sensitive.
+            if (arguments.Count > 1 && arguments[0] == "backend" && arguments[1] == "features")
+                return Task.FromResult(new RcloneCommandResult(true, 0,
+                    "{\"Features\":{\"CaseInsensitive\":true}}", "", false, false));
 
             var translated = arguments.Select(Translate).Append("--config=/dev/null").ToArray();
             ActualCommands.Add(translated);

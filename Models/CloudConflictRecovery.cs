@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Jellyfin.Plugin.AudioGateway.Models;
 
 /// <summary>Immutable job and namespace custody, admitted only by the server worker.</summary>
@@ -43,7 +45,9 @@ public sealed record CloudConflictObject(long Size, string Sha256, string Identi
 /// <param name="RelativePath">The relative path.</param>
 /// <param name="Local">The local.</param>
 /// <param name="Remote">The remote.</param>
-public sealed record CloudConflictCandidate(string RelativePath, CloudConflictObject? Local, CloudConflictObject? Remote);
+/// <param name="RemoteRelativePath">Exact remote spelling when it differs from the local spelling.</param>
+public sealed record CloudConflictCandidate(string RelativePath, CloudConflictObject? Local, CloudConflictObject? Remote,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RemoteRelativePath = null);
 
 /// <summary>Complete server-produced observations; never accept this structure from an HTTP caller.</summary>
 /// <param name="Binding">The binding.</param>
@@ -66,8 +70,10 @@ public enum CloudConflictOperation
 /// <param name="Operation">The operation.</param>
 /// <param name="Local">The local.</param>
 /// <param name="Remote">The remote.</param>
+/// <param name="RemoteRelativePath">Exact remote spelling when it differs from the local spelling.</param>
 public sealed record CloudConflictPlanItem(string RelativePath, string ArchivePath, CloudConflictOperation Operation,
-    CloudConflictObject? Local, CloudConflictObject Remote);
+    CloudConflictObject? Local, CloudConflictObject Remote,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RemoteRelativePath = null);
 /// <summary>Job-bound deterministic conflict plan with a content fingerprint.</summary>
 /// <param name="Binding">The binding.</param>
 /// <param name="Manifest">The manifest.</param>

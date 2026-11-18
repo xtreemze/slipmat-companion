@@ -13,7 +13,8 @@ public sealed record CloudConflictRecoverySession(
     CloudConflictPlanReference? Plan = null,
     CloudConflictRecoveryCursor? Cursor = null,
     string? Code = null,
-    CloudConflictPreflightProgress? Progress = null)
+    CloudConflictPreflightProgress? Progress = null,
+    string? FailureStage = null)
 {
     /// <summary>Only this explicit operator declaration permits acquiring the server-side writer fence.</summary>
     public const string CompanionOnlyWriter = "companion-only";
@@ -37,4 +38,4 @@ public sealed record CloudConflictInventoryDocument(CloudConflictRecoveryBinding
 
 /// <summary>Observed preflight reads; these counters never replace content or custody proofs.</summary>
 public sealed record CloudConflictPreflightProgress(string Phase, long Files, long TotalFiles,
-    long BytesRead, DateTimeOffset ObservedAt);
+    long BytesRead, DateTimeOffset ObservedAt, bool TotalIsKnown = true);

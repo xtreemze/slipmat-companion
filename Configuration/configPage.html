@@ -1962,6 +1962,15 @@
                 return button;
             }
 
+            function formatConflictPreflightProgress(sample) {
+                const files = sample.totalIsKnown === false
+                    ? Number(sample.files) + ' files listed; total pending'
+                    : Number(sample.files) + ' / ' + Number(sample.totalFiles) + ' files';
+                return 'Content preflight: ' + sample.phase + ' · ' + files + ' · ' +
+                    formatCloudSize(sample.bytesRead) + ' read · observed ' + sample.observedAt +
+                    '. Refresh to see current progress.';
+            }
+
             function renderMigrationJobs(response) {
                 const container = document.querySelector('#CloudMigrationJobs');
                 container.replaceChildren();
@@ -2126,10 +2135,7 @@
                         if (session.progress) {
                             const progress = document.createElement('div');
                             progress.className = 'fieldDescription';
-                            progress.textContent = 'Content preflight: ' + session.progress.phase + ' · ' +
-                                Number(session.progress.files) + ' / ' + Number(session.progress.totalFiles) +
-                                ' files · ' + formatCloudSize(session.progress.bytesRead) + ' read · observed ' +
-                                session.progress.observedAt + '. Refresh to see current progress.';
+                            progress.textContent = formatConflictPreflightProgress(session.progress);
                             row.appendChild(progress);
                         }
                     }

@@ -19,17 +19,45 @@ The request binds the selected job's existing manifest digest and the explicit
 `companion-only` writer policy. Clients cannot submit inventories, archive paths,
 hash evidence, or mutation receipts.
 
+After updating Companion, verify that the Jellyfin Linux service actually
+restarted; an installed-version label alone does not prove the running assembly
+changed. Open a fresh settings tab if an already-open page still has the old
+controls. When handing a confirmation to an operator, retain that browser tab
+and read the canonical journal before submitting again. A queued attempt or
+preflight progress confirms admission; do not duplicate the request because a
+browser action timed out.
+
 The source must remain available and unchanged during recovery. The profile must
 remain disabled and the original library binding must still match. Authentication
 must work in Jellyfin's service environment, with token refresh allowed to persist
 to its actual rclone configuration. A successful interactive-user rclone command
 alone does not establish service authentication.
 
+The provider absence probes currently require the tested rclone **1.74.4**
+command contract, its Go **1.26.5** build and a typed case-insensitive capability.
+A generated Go scalar lowercase table makes matching independent of the host's
+ICU version. Its exhaustive mapping fingerprint is checked before namespace
+comparisons; a mismatch blocks recovery. They check file and
+directory resolution separately: a successful lookup of an otherwise unmatched
+local path blocks recovery as an unproven provider alias. Permission, transport,
+malformed-output and unrecognized missing-result errors never count as absence.
+These metadata requests add work per unmatched local file and directory. A
+read-only existing-file/random-missing-path self-check runs before payloads;
+an initially empty remote cannot supply the positive file check and is rejected.
+This feature does not establish a general Unicode equivalence rule or rename
+unknown aliases. Source and namespace checks run again on resume and before the
+first active-library mutation.
+
 ## Content and archive rules
 
-1. Inventory the complete local and remote namespaces and compute SHA-256 content
-   hashes. Remote preflight downloads content for hashing, grouped by directory;
-   matching file sizes or provider hash presence are not equality evidence.
+1. Inventory and validate the complete local and remote namespaces before reading
+   payloads. For a verified case-insensitive provider, a unique match that differs
+   only in ASCII letter case retains both exact path spellings: local reads use
+   the local path, and cloud operations use the observed remote path. No rename
+   is implied. Same-side aliases, file/directory collisions and unproven Unicode
+   equivalences block recovery. Then compute SHA-256 content hashes on both sides.
+   Remote preflight downloads content for hashing, grouped by directory; matching
+   file sizes or provider hash presence are not equality evidence.
 2. Fail the whole plan before archive or mutation if an overlapping audio file or
    an unsupported, ambiguous, unsafe, or malformed entry conflicts. Supported
    replacements are byte-inspected NFO XML, JPEG, and PNG. Remote-only removal is
@@ -46,6 +74,18 @@ alone does not establish service authentication.
    content verification. Local-only files, including audio, are handled by that
    canonical migration path. Only successful verification can reach
    `ready-for-cutover`.
+
+The canonical handoff reopens and verifies the completed plan and inventory, then
+holds the Companion writer fence through fresh provider/namespace validation,
+baseline verification, copy and full verification. Automatic handoff requires
+the source observed by the recovery plan. A later explicit current-source
+rebaseline may adopt a fresh source after validation; restart and copy retry
+retain that adopted manifest. Source drift never authorizes automatic adoption.
+Only the remote-to-local subset download check uses `--ignore-case-sync`, and
+only when validated ASCII aliases require it. Copy and full verification retain
+their existing arguments. Names that collide under rclone's pinned lowercase
+mapping block before handoff, including collisions that its normal command
+logging could silently skip.
 
 Content preflight may read the full library from both local storage and cloud.
 Normal verification afterward adds another cloud content-read pass. Budget time,
@@ -70,6 +110,11 @@ published as diagnostics.
 Progress counters are observations, never verification authority. After repair
 completes, inspect the migration's normal copy/check status as well. A completed
 repair by itself does not establish a verified or mounted cloud library.
+Cloud listing reports the number of files observed while its total is still
+unknown. It does not invent a percentage or use the safety limit as a total.
+Full local hashing follows namespace validation. Cloud-hashing progress advances
+after each complete directory command. Quiet counters alone do not establish a
+hang. A retry clears the previous attempt's progress observations before starting.
 
 ## Validation boundary
 

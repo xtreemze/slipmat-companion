@@ -28,6 +28,7 @@ public static class CloudConflictLocalContent
     private static readonly int O_DIRECTORY = RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? 0x4000 : 0x10000;
     private static readonly int O_NOFOLLOW = RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? 0x8000 : 0x20000;
     private const int O_CLOEXEC = 0x80000;
+    private const int O_PATH = 0x200000;
     private const int AT_EMPTY_PATH = 0x1000;
     private const int STATX_BASIC_STATS = 0x7ff;
     private const int S_IFMT = 0xf000;
@@ -61,8 +62,66 @@ public static class CloudConflictLocalContent
         using var rootFd = OpenAbsoluteDirectory(root);
         var rootStat = Stat(rootFd);
         var result = new List<CloudConflictLocalFileMetadata>();
-        Visit(rootFd, string.Empty, rootStat, 0, result, cancellationToken);
+        Visit(rootFd, string.Empty, rootStat, 0, result, null, cancellationToken);
         return Task.FromResult<IReadOnlyList<CloudConflictLocalFileMetadata>>(result);
+    }
+
+    /// <summary>Capture files and all directories in the same descriptor-relative walk.</summary>
+    public static Task<(IReadOnlyList<CloudConflictLocalFileMetadata> Files, IReadOnlyList<CloudConflictNamespaceEntry> Entries)> CaptureNamespaceAsync(string root, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        using var rootFd = OpenAbsoluteDirectory(root);
+        var result = new List<CloudConflictLocalFileMetadata>();
+        var entries = new List<CloudConflictNamespaceEntry>();
+        Visit(rootFd, string.Empty, Stat(rootFd), 0, result, entries, cancellationToken);
+        return Task.FromResult<(IReadOnlyList<CloudConflictLocalFileMetadata>, IReadOnlyList<CloudConflictNamespaceEntry>)>((result, entries));
+    }
+
+    /// <summary>Reject any file or directory at a remote-only target, including ASCII case aliases.</summary>
+    public static void RequireAbsent(string root, string relativePath, CancellationToken cancellationToken)
+    {
+        var parts = relativePath.Split('/');
+        if (parts.Length == 0 || parts.Any(part => string.IsNullOrEmpty(part) || part is "." or ".." || part.Contains('\\')))
+            throw new InvalidOperationException("conflict-local-source-changed");
+        using var rootFd = OpenAbsoluteDirectory(root);
+        var rootStat = Stat(rootFd);
+        var current = rootFd;
+        var owned = new List<SafeFileHandle>();
+        try
+        {
+            for (var i = 0; i < parts.Length; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var probe = openat(current.DangerousGetHandle().ToInt32(), parts[i], O_PATH | O_NOFOLLOW | O_CLOEXEC, 0);
+                string actual;
+                if (probe >= 0)
+                {
+                    using var probeFd = new SafeFileHandle((IntPtr)probe, ownsHandle: true);
+                    var observed = Stat(probeFd);
+                    RequireSameDevice(rootStat, observed);
+                    if (i == parts.Length - 1 || (observed.Mode & S_IFMT) != S_IFDIR)
+                        throw new InvalidOperationException("conflict-local-source-changed");
+                    actual = parts[i];
+                }
+                else
+                {
+                    var error = Marshal.GetLastPInvokeError();
+                    if (error != 2) throw IoError(parts[i]);
+                    var matches = Directory.EnumerateFileSystemEntries("/proc/self/fd/" + current.DangerousGetHandle().ToInt64().ToString(CultureInfo.InvariantCulture))
+                        .Select(Path.GetFileName)
+                        .Where(name => string.Equals(name, parts[i], StringComparison.OrdinalIgnoreCase)).Take(2).ToArray();
+                    if (matches.Length == 0) return;
+                    if (matches.Length != 1 || !CloudConflictNamespace.AsciiEqual(matches[0]!, parts[i]) || i == parts.Length - 1)
+                        throw new InvalidOperationException("conflict-local-source-changed");
+                    actual = matches[0]!;
+                }
+                var next = OpenChild(current, actual, O_RDONLY | O_DIRECTORY, true);
+                owned.Add(next);
+                RequireSameDevice(rootStat, Stat(next));
+                current = next;
+            }
+        }
+        finally { foreach (var fd in owned) fd.Dispose(); }
     }
 
     /// <summary>Copy an unchanged source into a new private cache file, or verify an existing copy.</summary>
@@ -375,7 +434,7 @@ public static class CloudConflictLocalContent
         return crc;
     }
 
-    private static void Visit(SafeFileHandle directory, string relative, Statx root, int depth, List<CloudConflictLocalFileMetadata> result, CancellationToken token)
+    private static void Visit(SafeFileHandle directory, string relative, Statx root, int depth, List<CloudConflictLocalFileMetadata> result, List<CloudConflictNamespaceEntry>? entries, CancellationToken token)
     {
         if (depth > MaxDepth) throw new IOException("Local source tree exceeds maximum depth.");
         foreach (var path in Directory.EnumerateFileSystemEntries("/proc/self/fd/" + directory.DangerousGetHandle().ToInt64().ToString(CultureInfo.InvariantCulture)))
@@ -387,7 +446,12 @@ public static class CloudConflictLocalContent
             var stat = Stat(fd);
             RequireSameDevice(root, stat);
             var child = relative.Length == 0 ? name : relative + "/" + name;
-            if ((stat.Mode & S_IFMT) == S_IFDIR) Visit(fd, child, root, depth + 1, result, token);
+            if (entries is not null)
+            {
+                if (entries.Count >= MaxEntries) throw new IOException("Local source tree exceeds maximum entries.");
+                entries.Add(new(child, (stat.Mode & S_IFMT) == S_IFDIR));
+            }
+            if ((stat.Mode & S_IFMT) == S_IFDIR) Visit(fd, child, root, depth + 1, result, entries, token);
             else
             {
                 RequireRegular(stat);

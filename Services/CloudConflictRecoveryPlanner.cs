@@ -34,7 +34,11 @@ public static class CloudConflictRecoveryPlanner
         foreach (var item in inventory.Entries)
         {
             if (item is null || !ValidPath(item.RelativePath) || !seen.Add(item.RelativePath)
-                || item.Local is null && item.Remote is null || !ValidObject(item.Local) || !ValidObject(item.Remote)) throw Invalid();
+                || item.Local is null && item.Remote is null
+                || item.RemoteRelativePath is not null && (item.Local is null || item.Remote is null
+                    || !ValidPath(item.RemoteRelativePath) || !CloudConflictNamespace.AsciiEqual(item.RelativePath, item.RemoteRelativePath)
+                    || string.Equals(item.RelativePath, item.RemoteRelativePath, StringComparison.Ordinal))
+                || !ValidObject(item.Local) || !ValidObject(item.Remote)) throw Invalid();
             if (item.Remote is null) { deferred++; continue; }
             if (item.Local is not null && EqualDigest(item.Local.Sha256, item.Remote.Sha256))
             {
@@ -50,8 +54,8 @@ public static class CloudConflictRecoveryPlanner
             };
             if (requiredKind == CloudConflictContentKind.Unknown || item.Remote.Kind != requiredKind
                 || item.Local is not null && item.Local.Kind != requiredKind) throw Invalid();
-            conflicts.Add(new(item.RelativePath, binding.ArchiveRoot + "/" + item.RelativePath,
-                item.Local is null ? CloudConflictOperation.RemoveRemoteOnly : CloudConflictOperation.ReplaceWithLocal, item.Local, item.Remote));
+            conflicts.Add(new(item.RelativePath, binding.ArchiveRoot + "/" + (item.RemoteRelativePath ?? item.RelativePath),
+                item.Local is null ? CloudConflictOperation.RemoveRemoteOnly : CloudConflictOperation.ReplaceWithLocal, item.Local, item.Remote, item.RemoteRelativePath));
             if (conflicts.Count > MaxConflicts) throw Invalid();
         }
         foreach (var path in seen)
