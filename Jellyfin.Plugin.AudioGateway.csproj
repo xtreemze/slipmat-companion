@@ -31,6 +31,7 @@
   <ItemGroup>
     <None Remove="Configuration/configPage.html" />
     <EmbeddedResource Include="Configuration/configPage.html" />
+    <EmbeddedResource Include="THIRD-PARTY-NOTICES.txt" LogicalName="Jellyfin.Plugin.AudioGateway.ThirdPartyNotices.txt" />
 
     <Compile Remove="Tests/**/*.cs" />
     <EmbeddedResource Remove="Tests/**" />

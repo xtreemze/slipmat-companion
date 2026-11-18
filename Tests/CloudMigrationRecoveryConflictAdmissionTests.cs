@@ -82,10 +82,13 @@ public partial class CloudMigrationRecoveryTests
     [InlineData("ascii-case")]
     [InlineData("changed-audio")]
     [InlineData("source-drift")]
+    [InlineData("stable-new-baseline")]
     [InlineData("corrupt-inventory")]
     public async Task ConflictRecoveryWorkerRunsCanonicalVerificationAndNeverCutsOver(string scenario)
     {
         using var fixture = await Fixture.CreateAsync();
+        if (scenario == "stable-new-baseline")
+            await File.WriteAllTextAsync(Path.Combine(fixture.Root, "already-approved.flac"), "approved current source");
         var runner = new ProgressRunner
         {
             ExitFor = args => scenario == "ascii-case" && args.Contains("--one-way")
@@ -123,6 +126,13 @@ public partial class CloudMigrationRecoveryTests
         else
         {
             Assert.Equal(CloudMigrationPhases.ReadyForCutover, result.Phase);
+            if (scenario == "stable-new-baseline")
+            {
+                var current = await CloudMigrationManifestBuilder.CaptureAsync(fixture.Root);
+                Assert.NotEqual(fixture.Job.ManifestDigestSha256, current.DigestSha256);
+                Assert.Equal(current.DigestSha256, result.ManifestDigestSha256);
+                Assert.Single(result.BaselineHistory!);
+            }
             Assert.Equal("completed", result.ConflictRecovery!.Status);
             Assert.Equal(1, result.ConflictRecovery.Progress!.Files);
             var subset = Assert.Single(runner.Commands, command => command.Contains("--one-way"));

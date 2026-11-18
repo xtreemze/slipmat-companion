@@ -35,8 +35,9 @@ alone does not establish service authentication.
 
 The provider absence probes currently require the tested rclone **1.74.4**
 command contract, its Go **1.26.5** build and a typed case-insensitive capability.
-The runtime's scalar lowercase mapping is checked against the pinned Go mapping
-before namespace comparisons; unsupported mappings block recovery. They check file and
+A generated Go scalar lowercase table makes matching independent of the host's
+ICU version. Its exhaustive mapping fingerprint is checked before namespace
+comparisons; a mismatch blocks recovery. They check file and
 directory resolution separately: a successful lookup of an otherwise unmatched
 local path blocks recovery as an unproven provider alias. Permission, transport,
 malformed-output and unrecognized missing-result errors never count as absence.

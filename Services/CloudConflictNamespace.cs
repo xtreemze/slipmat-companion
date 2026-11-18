@@ -11,7 +11,7 @@ public sealed record CloudConflictNamespaceEntry(string Path, bool IsDirectory);
 public sealed record CloudConflictNamespacePair(string? LocalPath, string? RemotePath);
 
 /// <summary>Validate namespace identity before reading payloads or planning mutations.</summary>
-public static class CloudConflictNamespace
+public static partial class CloudConflictNamespace
 {
     internal const string RcloneGoVersion = "go1.26.5";
     // SHA-256 of unicode.ToLower(r) as uint32 little-endian for every scalar in
@@ -88,9 +88,26 @@ public static class CloudConflictNamespace
         return map;
     }
 
-    // rclone's March uses Go strings.ToLower. Go maps U+0130 to plain i,
-    // while .NET invariant casing leaves it unchanged.
-    private static Rune RcloneLower(Rune rune) => rune.Value == 0x130 ? new Rune('i') : Rune.ToLowerInvariant(rune);
+    // rclone's March uses Go strings.ToLower. Use its pinned simple lowercase
+    // table so provider matching does not depend on the host's Unicode version.
+    internal static Rune RcloneLower(Rune rune)
+    {
+        var value = rune.Value;
+        var first = 0;
+        var last = RcloneLowerRanges.Length - 1;
+        while (first <= last)
+        {
+            var middle = first + (last - first) / 2;
+            var range = RcloneLowerRanges[middle];
+            if (value < range.First)
+                last = middle - 1;
+            else if (value > range.Last)
+                first = middle + 1;
+            else
+                return (value - range.First) % range.Stride == 0 ? new Rune(value + range.Delta) : rune;
+        }
+        return rune;
+    }
 
     private static bool VerifyRcloneCaseMapping()
     {

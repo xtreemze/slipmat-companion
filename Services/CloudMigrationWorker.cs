@@ -316,8 +316,12 @@ public sealed class CloudMigrationWorker : BackgroundService
             {
                 source = await CloudMigrationManifestBuilder.CaptureAsync(job.LocalPath, cancellationToken).ConfigureAwait(false);
                 var explicitAdoption = rebaseline && IsExplicitRecoveryBaseline(job);
-                if (!explicitAdoption && (!CloudMigrationRecovery.ManifestMatches(job, source)
-                    || (rebaseline && !CloudConflictRecoveryPlanner.EqualDigest(plan.Binding.SourceManifestSha256, source.DigestSha256))))
+                // Before adoption, recovery's verified observation owns the source
+                // baseline; after adoption, the canonical job manifest owns it.
+                var sourceMatches = rebaseline
+                    ? CloudConflictRecoveryPlanner.EqualDigest(plan.Binding.SourceManifestSha256, source.DigestSha256)
+                    : CloudMigrationRecovery.ManifestMatches(job, source);
+                if (!explicitAdoption && !sourceMatches)
                 {
                     await FailAsync(job, rebaseline ? "baseline-conflict-source-changed" : "migration-source-changed",
                         cancellationToken).ConfigureAwait(false);

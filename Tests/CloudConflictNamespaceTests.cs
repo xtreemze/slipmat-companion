@@ -1,3 +1,4 @@
+using System.Text;
 using Jellyfin.Plugin.AudioGateway.Services;
 using Xunit;
 
@@ -5,6 +6,33 @@ namespace Jellyfin.Plugin.AudioGateway.Tests;
 
 public sealed class CloudConflictNamespaceTests
 {
+    [Fact]
+    public void MatchesThePinnedRcloneLowercaseFingerprint()
+        => CloudConflictNamespace.RequireVerifiedRcloneCaseMapping();
+
+    [Fact]
+    public void DistributesTheGoAndUnicodeNoticesInThePluginAssembly()
+    {
+        using var resource = typeof(CloudConflictNamespace).Assembly
+            .GetManifestResourceStream("Jellyfin.Plugin.AudioGateway.ThirdPartyNotices.txt");
+        Assert.NotNull(resource);
+        using var reader = new StreamReader(resource);
+        var notice = reader.ReadToEnd();
+        Assert.Contains("Copyright 2009 The Go Authors.", notice);
+        Assert.Contains("Copyright © 1991-2022 Unicode, Inc.", notice);
+    }
+
+    [Theory]
+    [InlineData(0x0041, 0x0061)] // ASCII
+    [InlineData(0x0100, 0x0101)] // Alternating uppercase and lowercase
+    [InlineData(0x0101, 0x0101)] // Gap in an alternating range
+    [InlineData(0x0130, 0x0069)] // Go simple lowercase for dotted I
+    [InlineData(0x10400, 0x10428)] // Supplementary-plane Deseret
+    [InlineData(0x10D50, 0x10D50)] // Unicode 16.0 mapping absent from pinned Go
+    [InlineData(0x16EA0, 0x16EA0)] // Unicode 17.0 mapping absent from pinned Go
+    public void UsesGoSimpleLowercaseRegardlessOfHostUnicodeVersion(int input, int expected)
+        => Assert.Equal(expected, CloudConflictNamespace.RcloneLower(new Rune(input)).Value);
+
     [Fact]
     public void MatchesAsciiCaseDifferencesAtLeafAndAncestorWithoutLosingSpellings()
     {
