@@ -384,7 +384,7 @@ def _partial_archive_children(directory_fd, prefix, wanted, partial):
                 os.close(child_fd)
 
 
-def _copy_archive_tree(source_fd, archive_fd, prefix, children, source_observed, archive_mount):
+def _copy_archive_tree(source_fd, archive_fd, prefix, children, source_observed, archive_observed, archive_mount):
     source_before = _archive_snapshot(source_fd)
     archive_before = _archive_snapshot(archive_fd)
     if not set(children[prefix]).issubset(_archive_names(source_fd)):
@@ -409,7 +409,7 @@ def _copy_archive_tree(source_fd, archive_fd, prefix, children, source_observed,
                     archive_info = _archive_snapshot(archive_child)
                     if archive_info[3] != 0 or archive_info[2] & 0o022 or archive_info[7] != archive_mount:
                         raise CustodyError('source-repair-archive-tree-invalid')
-                    _copy_archive_tree(source_child, archive_child, path, children, source_observed, archive_mount)
+                    _copy_archive_tree(source_child, archive_child, path, children, source_observed, archive_observed, archive_mount)
                 finally:
                     os.close(archive_child)
             finally:
@@ -454,6 +454,18 @@ def _copy_archive_tree(source_fd, archive_fd, prefix, children, source_observed,
                 existing.add(name)
             finally:
                 os.close(source_child)
+        else:
+            # Resume can encounter a complete file written just before a crash,
+            # before the previous helper flushed it or its parent directory.
+            target_fd = os.open(name, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW,
+                                dir_fd=archive_fd)
+            try:
+                if _archive_snapshot(target_fd) != archive_observed.get(path):
+                    raise CustodyError('source-repair-archive-changed')
+                os.fsync(target_fd)
+            finally:
+                os.close(target_fd)
+    os.fsync(archive_fd)
     if _archive_snapshot(source_fd) != source_before:
         raise CustodyError('source-repair-source-changed')
     archive_after = _archive_snapshot(archive_fd)
@@ -534,7 +546,7 @@ def create_or_resume_source_repair_archive(source_root, expected_source_root, ar
                 observed = {}
                 _verify_archive_tree(archive_fd, '', partial, archive[7], observed, False)
                 _verify_archive_tree(archive_fd, '', partial, archive[7], observed, True)
-                _copy_archive_tree(source_fd, archive_fd, '', children, source_observed, archive[7])
+                _copy_archive_tree(source_fd, archive_fd, '', children, source_observed, observed, archive[7])
             finally:
                 os.close(archive_fd)
         finally:
