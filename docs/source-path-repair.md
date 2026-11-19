@@ -89,10 +89,11 @@ metadata pass. Its caller must establish exclusive archive custody.
 The custody helper can reserve a new empty archive directory, then copy using
 the reserved identity. A subsequent request revalidates completed files before
 continuing. An unknown directory or incomplete file blocks resume without
-overwriting it. This path currently requires the manifest to describe the whole
-input tree. Before it can handle Music, the offline runner must bind the
-selected paths and complete moved subtrees, persist the reservation identity
-before copy, and record verified readback before authorizing moves.
+overwriting it. The copy can select a subset of the source. Before it can handle
+Music, the offline runner must bind the selected paths and verify that the
+manifest includes every descendant of each moved directory. The runner must
+persist the reservation identity before copy and record verified readback
+before authorizing moves.
 
 Tests exercise write-ahead ordering, preservation before moves, every synthetic
 forward/restore journal-effect crash boundary, pending rollback outcomes, foreign
