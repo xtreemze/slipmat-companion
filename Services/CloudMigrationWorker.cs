@@ -69,7 +69,7 @@ public sealed class CloudMigrationWorker : BackgroundService
             cancellationToken.ThrowIfCancellationRequested();
             // Offline transactions are owned by the supervised runner. A plugin
             // restart must never replay their path effects through the online worker.
-            if (job.Maintenance is not null) continue;
+            if (job.SourcePathRepairOwnsJob == true || job.Maintenance is not null) continue;
             if (job.ConflictRecovery?.OwnsJob == true)
             {
                 if (job.Phase == CloudMigrationPhases.QueuedConflictRecovery) QueueRestoredJob(job.Id);
@@ -156,7 +156,7 @@ public sealed class CloudMigrationWorker : BackgroundService
             try
             {
                 var job = await _store.GetAsync(jobId, stoppingToken).ConfigureAwait(false);
-                if (job is null || job.Maintenance is not null
+                if (job is null || job.SourcePathRepairOwnsJob == true || job.Maintenance is not null
                     || job.ConflictRecovery?.OwnsJob == true && job.Phase != CloudMigrationPhases.QueuedConflictRecovery)
                 {
                     continue;
@@ -195,7 +195,7 @@ public sealed class CloudMigrationWorker : BackgroundService
             {
                 _logger.LogWarning(ex, "Cloud migration job {JobId} failed unexpectedly", jobId);
                 var job = await _store.GetAsync(jobId, CancellationToken.None).ConfigureAwait(false);
-                if (job is not null && job.ConflictRecovery?.OwnsJob != true)
+                if (job is not null && job.SourcePathRepairOwnsJob != true && job.ConflictRecovery?.OwnsJob != true)
                 {
                     await SaveAsync(
                         job with

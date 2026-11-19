@@ -249,6 +249,7 @@ try
         throw new Exception("stale snapshot accepted");
 }
 finally { Directory.Delete(root, recursive: true); }
+await SourcePathRepairStartupGuardTests.Run(leasedJob);
 Console.WriteLine("Leased adapter tests passed");
 
 sealed class FakeLease(MaintenanceSnapshot initial) : IMaintenanceLease

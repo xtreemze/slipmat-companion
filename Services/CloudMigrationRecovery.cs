@@ -10,7 +10,7 @@ public static class CloudMigrationRecovery
 
     /// <summary>Offer explicit conflict disposition only for uncut local-source jobs.</summary>
     public static bool CanRecoverConflicts(CloudMigrationJob job)
-        => job.Maintenance is null && job.MaintenanceAdmission is null
+        => job.SourcePathRepairOwnsJob != true && job.Maintenance is null && job.MaintenanceAdmission is null
             && job.Direction == CloudMigrationDirections.LocalToVfs && job.Phase == CloudMigrationPhases.Failed
             && job.BackupPath is null && job.StagingPath is null
             && job.ManifestVersion == CloudMigrationManifestBuilder.CurrentVersion
@@ -25,7 +25,7 @@ public static class CloudMigrationRecovery
                 || job.Code.StartsWith("baseline-", StringComparison.Ordinal)));
 
     private static bool IsPrecutoverFailure(CloudMigrationJob job)
-        => job.Phase == CloudMigrationPhases.Failed
+        => job.SourcePathRepairOwnsJob != true && job.Phase == CloudMigrationPhases.Failed
             && job.ConflictRecovery?.OwnsJob != true
             && job.Direction == CloudMigrationDirections.LocalToVfs
             && job.BackupPath is null && job.StagingPath is null
