@@ -101,7 +101,13 @@ public sealed record CloudMigrationJob(
     [property: JsonPropertyName("diagnosticProgress")] CloudMigrationProgress? DiagnosticProgress = null,
     [property: JsonPropertyName("maintenance")] CloudMaintenanceIntent? Maintenance = null,
     [property: JsonPropertyName("maintenanceAdmission")] CloudMaintenanceAdmission? MaintenanceAdmission = null,
-    [property: JsonPropertyName("conflictRecovery")] CloudConflictRecoverySession? ConflictRecovery = null);
+    [property: JsonPropertyName("conflictRecovery")] CloudConflictRecoverySession? ConflictRecovery = null,
+    [property: JsonPropertyName("sourcePathRepair"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CloudSourcePathRepairState? SourcePathRepair = null)
+{
+    /// <summary>Whether repair custody, including an invalid job binding, excludes ordinary migration writers.</summary>
+    [JsonIgnore]
+    public bool SourcePathRepairOwnsJob => Services.CloudSourcePathRepairTransaction.OwnsJob(this);
+}
 
 public sealed record CloudMigrationProgress(
     [property: JsonPropertyName("bytes")] long Bytes,

@@ -4,7 +4,7 @@ using Xunit;
 
 namespace Jellyfin.Plugin.AudioGateway.Tests;
 
-public sealed class CloudMigrationJournalTests
+public sealed partial class CloudMigrationJournalTests
 {
     [Fact]
     public async Task CompareExchangeRejectsStaleRevisionAndPreservesWinner()

@@ -47,16 +47,32 @@ internal static class Program
                     var snapshot = await lease.ReadAsync(args[2], cancellation.Token);
                     Console.WriteLine(JsonSerializer.Serialize(new
                     {
-                        status = snapshot?.Job.Maintenance is null ? "no-maintenance-intent" : "inspection-only",
+                        status = snapshot?.Job.SourcePathRepair is not null ? "source-repair-inspection-only"
+                            : snapshot?.Job.Maintenance is null ? "no-maintenance-intent" : "inspection-only",
                         jobId = snapshot?.Job.Id,
                         phase = snapshot?.Job.Maintenance?.Phase.ToString(),
                         direction = snapshot?.Job.Maintenance?.Direction.ToString(),
                         journalRevision = snapshot?.Revision,
+                        sourceRepairPhase = snapshot?.Job.SourcePathRepair?.Phase.ToString(),
+                        sourceRepairOwned = snapshot?.Job.SourcePathRepairOwnsJob,
                         execution = "not-requested",
                     }));
                     return snapshot is null ? 2 : 0;
                 }
 
+                var repairGuard = await lease.ReadAsync(args[2], cancellation.Token).ConfigureAwait(false);
+                if (repairGuard is null) throw new InvalidOperationException("migration-not-found");
+                if (repairGuard.Job.SourcePathRepairOwnsJob == true)
+                {
+                    Console.WriteLine(JsonSerializer.Serialize(new
+                    {
+                        status = "blocked",
+                        code = "migration-source-repair-owned",
+                        jobId = repairGuard.Job.Id,
+                        execution = "not-requested",
+                    }));
+                    return 1;
+                }
                 var barrier = new LinuxMaintenanceBarrier(
                     new LinuxSystemdBarrierQuery(), startup ? Environment.ProcessId : 0);
                 var specifications = new LinuxHostSpecificationProvider(args[3]);

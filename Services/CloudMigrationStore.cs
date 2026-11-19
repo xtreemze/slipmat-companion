@@ -134,6 +134,7 @@ public sealed class CloudMigrationStore
             await using var lease = await new CloudMigrationJournal(ResolveRoot())
                 .AcquireAsync(cancellationToken).ConfigureAwait(false);
             var current = await lease.ReadAsync(job.Id, cancellationToken).ConfigureAwait(false);
+            RequireUnchangedSourceRepair(current?.Job, job);
             if (current?.Job.Maintenance is not null)
                 throw new InvalidOperationException("migration-maintenance-owned");
             if (current?.Job.MaintenanceAdmission is not null)
@@ -162,6 +163,7 @@ public sealed class CloudMigrationStore
         CloudMigrationJournalSnapshot expected, CloudMigrationJob replacement,
         CancellationToken cancellationToken = default)
     {
+        RequireUnchangedSourceRepair(expected.Job, replacement);
         if (expected.Job.Maintenance is not null)
             throw new InvalidOperationException("migration-maintenance-owned");
         if (expected.Job.ConflictRecovery?.OwnsJob == true)
@@ -169,6 +171,14 @@ public sealed class CloudMigrationStore
         await using var lease = await new CloudMigrationJournal(ResolveRoot())
             .AcquireAsync(cancellationToken).ConfigureAwait(false);
         await lease.CompareExchangeAsync(expected, replacement, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static void RequireUnchangedSourceRepair(CloudMigrationJob? current, CloudMigrationJob replacement)
+    {
+        if (current?.SourcePathRepairOwnsJob == true || replacement.SourcePathRepairOwnsJob
+            || !JsonSerializer.SerializeToUtf8Bytes(current?.SourcePathRepair, JsonOptions)
+                .AsSpan().SequenceEqual(JsonSerializer.SerializeToUtf8Bytes(replacement.SourcePathRepair, JsonOptions)))
+            throw new InvalidOperationException("migration-source-repair-owned");
     }
 
     private string ResolveRoot()

@@ -166,7 +166,8 @@ public sealed class CloudConflictRecoveryExecutor
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             var current = await journal.ReadAsync(jobId, CancellationToken.None).ConfigureAwait(false);
-            if (current?.Revision == snapshot.Revision && current.Job.ConflictRecovery is { } session
+            if (current?.Revision == snapshot.Revision && current.Job.SourcePathRepairOwnsJob != true
+                && current.Job.ConflictRecovery is { } session
                 && session.AttemptId == originalAttempt && session.OwnsJob)
             {
                 snapshot = await journal.CompareExchangeAsync(current, current.Job with
@@ -184,7 +185,7 @@ public sealed class CloudConflictRecoveryExecutor
     private void ValidateJob(CloudMigrationJob job)
     {
         var session = job.ConflictRecovery;
-        if (session is null || !session.OwnsJob || session.WriterPolicy != CloudConflictRecoverySession.CompanionOnlyWriter
+        if (job.SourcePathRepairOwnsJob == true || session is null || !session.OwnsJob || session.WriterPolicy != CloudConflictRecoverySession.CompanionOnlyWriter
             || session.Status is not ("queued" or "preflighting" or "archiving" or "repairing" or "blocked")
             || !Guid.TryParseExact(job.Id, "N", out var jobId) || jobId == Guid.Empty
             || !Guid.TryParseExact(session.AttemptId, "N", out var attemptId) || attemptId == Guid.Empty

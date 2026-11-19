@@ -9,6 +9,7 @@
     <Compile Remove="Tests/**/*.cs" />
     <Compile Include="../Models/CloudMaintenance.cs" Link="Shared/CloudMaintenance.cs" />
     <Compile Include="../Models/CloudMigration.cs" Link="Shared/CloudMigration.cs" />
+    <Compile Include="../Models/CloudSourcePathRepair.cs" Link="Shared/CloudSourcePathRepair.cs" />
     <Compile Include="../Models/CloudConflictRecovery.cs" Link="Shared/CloudConflictRecovery.cs" />
     <Compile Include="../Models/CloudConflictRecoverySession.cs" Link="Shared/CloudConflictRecoverySession.cs" />
     <Compile Include="../Models/CloudProjection.cs" Link="Shared/CloudProjection.cs" />
@@ -17,5 +18,6 @@
     <Compile Include="../Services/CloudMaintenanceConfiguration.cs" Link="Shared/CloudMaintenanceConfiguration.cs" />
     <Compile Include="../Services/CloudMaintenanceProfileConfiguration.cs" Link="Shared/CloudMaintenanceProfileConfiguration.cs" />
     <Compile Include="../Services/CloudMaintenanceTransaction.cs" Link="Shared/CloudMaintenanceTransaction.cs" />
+    <Compile Include="../Services/CloudSourcePathRepairTransaction.cs" Link="Shared/CloudSourcePathRepairTransaction.cs" />
   </ItemGroup>
 </Project>

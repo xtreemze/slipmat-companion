@@ -102,6 +102,8 @@ public sealed class CloudMigrationCoordinator
             var localPath = Path.GetFullPath(folder.Locations[0]);
             var currentJobs = await _store.LoadAllAsync(cancellationToken).ConfigureAwait(false);
             CloudLibraryScanPolicy? previousScanPolicy = null;
+            if (currentJobs.Any(job => job.SourcePathRepairOwnsJob == true && PathsOverlap(job.LocalPath, localPath)))
+                throw new InvalidOperationException("migration-source-repair-owned");
             if (currentJobs.Any(job =>
                     string.Equals(job.ProfileId, profile.Id, StringComparison.OrdinalIgnoreCase)
                     && (job.ConflictRecovery?.OwnsJob == true || !IsTerminal(job.Phase) || _queue.IsPending(job.Id))))
@@ -287,7 +289,7 @@ public sealed class CloudMigrationCoordinator
                 ?? throw new InvalidOperationException("migration-not-found");
             var job = snapshot.Job;
             var existing = job.ConflictRecovery;
-            if (job.Maintenance is not null || job.MaintenanceAdmission is not null
+            if (job.SourcePathRepairOwnsJob == true || job.Maintenance is not null || job.MaintenanceAdmission is not null
                 || job.BackupPath is not null || job.StagingPath is not null
                 || job.Direction != CloudMigrationDirections.LocalToVfs
                 || (existing is null ? !CloudMigrationRecovery.CanRebaseline(job)
@@ -437,7 +439,8 @@ public sealed class CloudMigrationCoordinator
     {
         var jobs = await _store.LoadAllAsync(cancellationToken).ConfigureAwait(false);
         if (_queue.IsPending(job.Id) || jobs.Any(other => other.Id != job.Id &&
-            (string.Equals(other.ProfileId, job.ProfileId, StringComparison.OrdinalIgnoreCase)
+            (other.SourcePathRepairOwnsJob == true && PathsOverlap(other.LocalPath, job.LocalPath)
+                || string.Equals(other.ProfileId, job.ProfileId, StringComparison.OrdinalIgnoreCase)
                 || (other.RemoteName == job.RemoteName && other.RemotePath == job.RemotePath))))
             throw new InvalidOperationException("migration-recovery-conflict");
         var profile = FindProfile(_configurationSource.GetCurrent(), job.ProfileId);
@@ -464,7 +467,7 @@ public sealed class CloudMigrationCoordinator
             var snapshot = await _store.GetSnapshotAsync(jobId, cancellationToken).ConfigureAwait(false)
                 ?? throw new InvalidOperationException("migration-not-found");
             var job = snapshot.Job;
-            if (job.Maintenance is not null || job.Phase != CloudMigrationPhases.ReadyForCutover
+            if (job.SourcePathRepairOwnsJob == true || job.Maintenance is not null || job.Phase != CloudMigrationPhases.ReadyForCutover
                 || job.Direction != CloudMigrationDirections.LocalToVfs
                 || job.Verification != "rclone-check-download-content"
                 || job.ManifestDigestSha256 is not { Length: 64 }
@@ -520,7 +523,7 @@ public sealed class CloudMigrationCoordinator
             var snapshot = await _store.GetSnapshotAsync(jobId, cancellationToken).ConfigureAwait(false)
                 ?? throw new InvalidOperationException("migration-not-found");
             var job = snapshot.Job;
-            if (job.Maintenance is not null || job.Phase != CloudMigrationPhases.ReadyForCutover
+            if (job.SourcePathRepairOwnsJob == true || job.Maintenance is not null || job.Phase != CloudMigrationPhases.ReadyForCutover
                 || job.MaintenanceAdmission is null || _queue.IsPending(job.Id))
                 throw new InvalidOperationException("maintenance-admission-not-cancelable");
             var canceled = job with { MaintenanceAdmission = null, UpdatedAt = DateTimeOffset.UtcNow };
@@ -562,7 +565,7 @@ public sealed class CloudMigrationCoordinator
             var job = await _store.GetAsync(jobId, cancellationToken).ConfigureAwait(false)
                 ?? throw new InvalidOperationException("migration-not-found");
 
-            if (job.Phase != CloudMigrationPhases.ReadyToFinalize)
+            if (job.SourcePathRepairOwnsJob == true || job.Phase != CloudMigrationPhases.ReadyToFinalize)
             {
                 throw new InvalidOperationException("migration-not-ready-to-finalize");
             }
@@ -624,7 +627,7 @@ public sealed class CloudMigrationCoordinator
                 throw new InvalidOperationException("migration-invalid-phase");
             }
 
-            if (job.MaintenanceAdmission is not null || job.Maintenance is not null)
+            if (job.SourcePathRepairOwnsJob == true || job.MaintenanceAdmission is not null || job.Maintenance is not null)
                 throw new InvalidOperationException("maintenance-offline-runner-required");
             if (nextPhase == CloudMigrationPhases.QueuedCutover && job.ConflictRecovery is not null)
                 throw new InvalidOperationException("maintenance-offline-runner-required");
@@ -828,6 +831,23 @@ public sealed class CloudMigrationCoordinator
         catch
         {
             return false;
+        }
+    }
+
+    private static bool PathsOverlap(string left, string right)
+    {
+        try
+        {
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            var a = Path.TrimEndingDirectorySeparator(Path.GetFullPath(left));
+            var b = Path.TrimEndingDirectorySeparator(Path.GetFullPath(right));
+            return string.Equals(a, b, comparison)
+                || a.StartsWith(Path.EndsInDirectorySeparator(b) ? b : b + Path.DirectorySeparatorChar, comparison)
+                || b.StartsWith(Path.EndsInDirectorySeparator(a) ? a : a + Path.DirectorySeparatorChar, comparison);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return true;
         }
     }
 }
