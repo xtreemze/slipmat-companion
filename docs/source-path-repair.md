@@ -84,9 +84,15 @@ plan-bound SHA-256 digest, plus pinned identities for the archive and its parent
 Schema 1 records the complete tree, including empty directories, with file
 sizes, SHA-256 digests and aggregate counts. Readback checks exact stored names,
 rejects links and special entries, and verifies every file after a complete
-metadata pass. Its caller must establish exclusive archive custody. The runner
-still needs to create the preservation copy and bind the verifier's result to
-the journal before authorizing moves.
+metadata pass. Its caller must establish exclusive archive custody.
+
+The custody helper can reserve a new empty archive directory, then copy using
+the reserved identity. A subsequent request revalidates completed files before
+continuing. An unknown directory or incomplete file blocks resume without
+overwriting it. This path currently requires the manifest to describe the whole
+input tree. Before it can handle Music, the offline runner must bind the
+selected paths and complete moved subtrees, persist the reservation identity
+before copy, and record verified readback before authorizing moves.
 
 Tests exercise write-ahead ordering, preservation before moves, every synthetic
 forward/restore journal-effect crash boundary, pending rollback outcomes, foreign

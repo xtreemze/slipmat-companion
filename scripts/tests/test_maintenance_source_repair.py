@@ -1,5 +1,6 @@
 """Disposable Linux custody proof for one exact source-path rename primitive."""
 import importlib.util
+import base64
 import contextlib
 import errno
 import hashlib
@@ -7,6 +8,7 @@ import json
 import os
 import pathlib
 import stat
+import subprocess
 import sys
 import tempfile
 import types
@@ -361,6 +363,139 @@ class PreservationReadbackTests(unittest.TestCase):
                 with mock.patch.object(custody.os, 'read', side_effect=AssertionError('payload read')):
                     with self.assertRaises(custody.CustodyError):
                         self.verify(data, hashlib.sha256(data).hexdigest())
+
+    def test_reserve_then_copy_and_independent_readback(self):
+        self.archive.rmdir()
+        source = self.parent / 'source'
+        source.mkdir()
+        (source / 'empty').mkdir()
+        (source / 'Track.flac').write_bytes(b'upper')
+        (source / 'track.flac').write_bytes(b'lower')
+        (source / 'unrelated.flac').write_bytes(b'outside the preservation subset')
+        (source / 'other').mkdir()
+        entries = [{'path': 'empty', 'kind': 'directory'},
+                   {'path': 'Track.flac', 'kind': 'file', 'size': 5,
+                    'sha256': hashlib.sha256(b'upper').hexdigest()},
+                   {'path': 'track.flac', 'kind': 'file', 'size': 5,
+                    'sha256': hashlib.sha256(b'lower').hexdigest()}]
+        data, digest = self.manifest(entries)
+        reserve = custody.create_or_resume_source_repair_archive(
+            str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
+            None, data, digest)
+        self.assertEqual(reserve, self.identity(self.archive))
+        self.assertEqual(list(self.archive.iterdir()), [])
+        with self.assertRaises(custody.CustodyError):
+            custody.create_or_resume_source_repair_archive(
+                str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
+                None, data, digest)
+        copied = custody.create_or_resume_source_repair_archive(
+            str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
+            reserve, data, digest)
+        self.assertEqual(copied, reserve)
+        self.assertEqual(self.verify(data, digest, archive=reserve), reserve)
+        self.assertEqual((source / 'Track.flac').read_bytes(), b'upper')
+        self.assertFalse((self.archive / 'unrelated.flac').exists())
+
+    def test_interrupted_copy_resumes_completed_files_without_replacing_them(self):
+        source = self.parent / 'source'
+        source.mkdir()
+        (source / 'one').write_bytes(b'one')
+        (source / 'two').write_bytes(b'two')
+        entries = [{'path': name, 'kind': 'file', 'size': len(name),
+                    'sha256': hashlib.sha256(name.encode()).hexdigest()} for name in ('one', 'two')]
+        data, digest = self.manifest(entries)
+        archive_id = self.identity(self.archive)
+        real_open = custody.os.open
+
+        def fail_before_second(path, flags, *args, **kwargs):
+            if path == 'two' and flags & os.O_CREAT:
+                raise OSError('injected interruption')
+            return real_open(path, flags, *args, **kwargs)
+
+        with mock.patch.object(custody.os, 'open', side_effect=fail_before_second):
+            with self.assertRaises(OSError):
+                custody.create_or_resume_source_repair_archive(
+                    str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
+                    archive_id, data, digest)
+        first = self.archive / 'one'
+        self.assertEqual(first.read_bytes(), b'one')
+        first_id = self.identity(first)
+        custody.create_or_resume_source_repair_archive(
+            str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
+            archive_id, data, digest)
+        self.assertEqual(self.identity(first), first_id)
+        self.assertEqual(self.verify(data, digest, archive=archive_id), archive_id)
+
+    def test_foreign_partial_file_blocks_without_overwrite(self):
+        source = self.parent / 'source'
+        source.mkdir()
+        (source / 'track').write_bytes(b'original')
+        (self.archive / 'track').write_bytes(b'foreign!')
+        entries = [{'path': 'track', 'kind': 'file', 'size': 8,
+                    'sha256': hashlib.sha256(b'original').hexdigest()}]
+        data, digest = self.manifest(entries)
+        with self.assertRaises(custody.CustodyError):
+            custody.create_or_resume_source_repair_archive(
+                str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
+                self.identity(self.archive), data, digest)
+        self.assertEqual((self.archive / 'track').read_bytes(), b'foreign!')
+        self.assertEqual((source / 'track').read_bytes(), b'original')
+
+    def test_mid_file_write_stall_keeps_partial_and_blocks_resume(self):
+        source = self.parent / 'source'
+        source.mkdir()
+        payload = b'a' * (1024 * 1024 + 1)
+        (source / 'track').write_bytes(payload)
+        data, digest = self.manifest([{'path': 'track', 'kind': 'file', 'size': len(payload),
+                                      'sha256': hashlib.sha256(payload).hexdigest()}])
+        archive_id = self.identity(self.archive)
+        actual_write = custody.os.write
+        writes = 0
+
+        def stalled_write(fd, chunk):
+            nonlocal writes
+            writes += 1
+            return 0 if writes == 2 else actual_write(fd, chunk)
+
+        with mock.patch.object(custody.os, 'write', side_effect=stalled_write):
+            with self.assertRaises(OSError):
+                custody.create_or_resume_source_repair_archive(
+                    str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
+                    archive_id, data, digest)
+        partial = self.archive / 'track'
+        self.assertEqual(partial.stat().st_size, 1024 * 1024)
+        with self.assertRaises(custody.CustodyError):
+            custody.create_or_resume_source_repair_archive(
+                str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
+                archive_id, data, digest)
+        self.assertEqual(partial.stat().st_size, 1024 * 1024)
+
+    def test_archive_dispatch_rejects_extra_fields_and_verifies_exact_request(self):
+        source = self.parent / 'source'
+        source.mkdir()
+        (source / 'track').write_bytes(b'kept')
+        data, digest = self.manifest([{'path': 'track', 'kind': 'file', 'size': 4,
+                                      'sha256': hashlib.sha256(b'kept').hexdigest()}])
+        request = {'action': 'source-repair-archive-create-or-resume', 'sourceRoot': str(source),
+                   'sourceIdentity': self.identity(source), 'archiveParent': str(self.parent),
+                   'archiveLeaf': 'archive', 'archiveParentIdentity': self.identity(self.parent),
+                   'archiveIdentity': self.identity(self.archive),
+                   'manifestBase64': base64.b64encode(data).decode('ascii'), 'manifestSha256': digest}
+
+        def invoke(value):
+            completed = subprocess.run([sys.executable, str(MODULE)], input=json.dumps(value).encode(),
+                                       capture_output=True, check=False)
+            return completed.returncode, json.loads(completed.stdout)
+
+        invalid = request | {'unreviewed': True}
+        self.assertEqual(invoke(invalid), (2, {'status': 'blocked'}))
+        self.assertFalse((self.archive / 'track').exists())
+        code, output = invoke(request)
+        self.assertEqual(code, 0)
+        self.assertEqual(output['identity'], request['archiveIdentity'])
+        verify = {key: value for key, value in request.items() if key not in ('sourceRoot', 'sourceIdentity')}
+        verify['action'] = 'source-repair-archive-verify'
+        self.assertEqual(invoke(verify), (0, {'status': 'ok', 'identity': request['archiveIdentity']}))
 
 
 if __name__ == '__main__':

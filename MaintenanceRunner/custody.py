@@ -257,13 +257,15 @@ def _archive_names(directory_fd):
         os.close(scan_fd)
 
 
-def _verify_archive_tree(directory_fd, prefix, children, mount_id, observed, read_payloads):
+def _verify_archive_tree(directory_fd, prefix, children, mount_id, observed, read_payloads,
+                         require_single_link=True, allow_extra=False):
     before = _archive_snapshot(directory_fd)
     if (not stat.S_ISDIR(before[2]) or before[3] != 0 or before[2] & 0o022
             or before[7] != mount_id):
         raise CustodyError('source-repair-archive-tree-invalid')
     wanted = children[prefix]
-    if _archive_names(directory_fd) != set(wanted):
+    names = _archive_names(directory_fd)
+    if not (set(wanted).issubset(names) if allow_extra else names == set(wanted)):
         raise CustodyError('source-repair-archive-tree-invalid')
     for name, item in wanted.items():
         path = prefix + '/' + name if prefix else name
@@ -273,7 +275,7 @@ def _verify_archive_tree(directory_fd, prefix, children, mount_id, observed, rea
             if (snapshot[3] != 0 or snapshot[2] & 0o022 or snapshot[7] != mount_id
                     or not (stat.S_ISDIR(snapshot[2]) if item['kind'] == 'directory'
                             else stat.S_ISREG(snapshot[2]))
-                    or (item['kind'] == 'file' and snapshot[8] != 1)):
+                    or (item['kind'] == 'file' and require_single_link and snapshot[8] != 1)):
                 raise CustodyError('source-repair-archive-tree-invalid')
             if read_payloads and observed.get(path) != snapshot:
                 raise CustodyError('source-repair-archive-changed')
@@ -286,7 +288,8 @@ def _verify_archive_tree(directory_fd, prefix, children, mount_id, observed, rea
                 if _archive_snapshot(entry_fd) != snapshot:
                     raise CustodyError('source-repair-archive-changed')
                 if item['kind'] == 'directory':
-                    _verify_archive_tree(entry_fd, path, children, mount_id, observed, read_payloads)
+                    _verify_archive_tree(entry_fd, path, children, mount_id, observed, read_payloads,
+                                         require_single_link, allow_extra)
                 elif read_payloads:
                     if snapshot[4] != item['size']:
                         raise CustodyError('source-repair-archive-content-mismatch')
@@ -363,6 +366,183 @@ def verify_source_repair_archive(archive_parent, archive_leaf, expected_parent, 
             os.close(archive_fd)
     finally:
         os.close(parent_fd)
+
+
+def _partial_archive_children(directory_fd, prefix, wanted, partial):
+    actual = _archive_names(directory_fd)
+    if not actual.issubset(wanted[prefix]):
+        raise CustodyError('source-repair-archive-tree-invalid')
+    partial[prefix] = {name: wanted[prefix][name] for name in actual}
+    for name, item in partial[prefix].items():
+        if item['kind'] == 'directory':
+            child_fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                               dir_fd=directory_fd)
+            try:
+                path = prefix + '/' + name if prefix else name
+                _partial_archive_children(child_fd, path, wanted, partial)
+            finally:
+                os.close(child_fd)
+
+
+def _copy_archive_tree(source_fd, archive_fd, prefix, children, source_observed, archive_mount):
+    source_before = _archive_snapshot(source_fd)
+    archive_before = _archive_snapshot(archive_fd)
+    if not set(children[prefix]).issubset(_archive_names(source_fd)):
+        raise CustodyError('source-repair-source-changed')
+    existing = _archive_names(archive_fd)
+    if not existing.issubset(children[prefix]):
+        raise CustodyError('source-repair-archive-tree-invalid')
+    for name, item in children[prefix].items():
+        path = prefix + '/' + name if prefix else name
+        if item['kind'] == 'directory':
+            if name not in existing:
+                os.mkdir(name, 0o700, dir_fd=archive_fd)
+                os.fsync(archive_fd)
+                existing.add(name)
+            flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+            source_child = os.open(name, flags, dir_fd=source_fd)
+            try:
+                if _archive_snapshot(source_child) != source_observed[path]:
+                    raise CustodyError('source-repair-source-changed')
+                archive_child = os.open(name, flags, dir_fd=archive_fd)
+                try:
+                    archive_info = _archive_snapshot(archive_child)
+                    if archive_info[3] != 0 or archive_info[2] & 0o022 or archive_info[7] != archive_mount:
+                        raise CustodyError('source-repair-archive-tree-invalid')
+                    _copy_archive_tree(source_child, archive_child, path, children, source_observed, archive_mount)
+                finally:
+                    os.close(archive_child)
+            finally:
+                os.close(source_child)
+        elif name not in existing:
+            flags = os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW
+            source_child = os.open(name, flags, dir_fd=source_fd)
+            try:
+                if _archive_snapshot(source_child) != source_observed[path]:
+                    raise CustodyError('source-repair-source-changed')
+                target_fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+                                    0o600, dir_fd=archive_fd)
+                try:
+                    target = _archive_snapshot(target_fd)
+                    if (not stat.S_ISREG(target[2]) or target[3] != 0 or target[2] & 0o022
+                            or target[7] != archive_mount or target[8] != 1):
+                        raise CustodyError('source-repair-archive-tree-invalid')
+                    digest = hashlib.sha256()
+                    remaining = item['size']
+                    while True:
+                        chunk = os.read(source_child, min(1024 * 1024, remaining + 1))
+                        if not chunk:
+                            break
+                        remaining -= len(chunk)
+                        if remaining < 0:
+                            raise CustodyError('source-repair-source-content-mismatch')
+                        digest.update(chunk)
+                        view = memoryview(chunk)
+                        while view:
+                            written = os.write(target_fd, view)
+                            if written <= 0:
+                                raise OSError(errno.EIO, 'source-repair-archive-write-stalled')
+                            view = view[written:]
+                    if remaining != 0 or digest.hexdigest() != item['sha256']:
+                        raise CustodyError('source-repair-source-content-mismatch')
+                    if _archive_snapshot(source_child) != source_observed[path]:
+                        raise CustodyError('source-repair-source-changed')
+                    os.fsync(target_fd)
+                finally:
+                    os.close(target_fd)
+                os.fsync(archive_fd)
+                existing.add(name)
+            finally:
+                os.close(source_child)
+    if _archive_snapshot(source_fd) != source_before:
+        raise CustodyError('source-repair-source-changed')
+    archive_after = _archive_snapshot(archive_fd)
+    if (archive_after[0:4] != archive_before[0:4] or archive_after[7] != archive_before[7]
+            or _archive_names(archive_fd) != set(children[prefix])):
+        raise CustodyError('source-repair-archive-changed')
+
+
+def create_or_resume_source_repair_archive(source_root, expected_source_root, archive_parent,
+                                            archive_leaf, expected_archive_parent, expected_archive,
+                                            manifest_bytes, expected_manifest_sha256):
+    """Reserve an archive, then on a later identity-bound call copy or resume it.
+
+    A null expected_archive only creates an empty directory and returns its durable
+    identity. The caller must persist that identity before requesting any file copy.
+    Existing unbound directories and partial/foreign files are never adopted or removed.
+    The caller must hold the journal lease and persistent writer/service barrier.
+    """
+    if sys.platform != 'linux' or os.geteuid() != 0:
+        raise CustodyError('linux-root-required')
+    _source_repair_leaf(archive_leaf)
+    _expected_identity(expected_source_root)
+    _expected_identity(expected_archive_parent)
+    if expected_archive is not None:
+        _expected_identity(expected_archive)
+    children = _preservation_manifest(manifest_bytes, expected_manifest_sha256)
+    if (not isinstance(source_root, str) or not isinstance(archive_parent, str)
+            or not os.path.isabs(source_root) or not os.path.isabs(archive_parent)
+            or os.path.realpath(source_root) != source_root
+            or os.path.realpath(archive_parent) != archive_parent):
+        raise CustodyError('invalid-parent-or-target')
+    archive_path = os.path.join(archive_parent, archive_leaf)
+    if (os.path.commonpath((source_root, archive_path)) in (source_root, archive_path)):
+        raise CustodyError('source-repair-archive-overlaps-source')
+    source_fd = _open_source_repair_parent(source_root)
+    try:
+        source = _archive_snapshot(source_fd)
+        if (source[0:2] != (expected_source_root['device'], expected_source_root['inode'])
+                or source[7] != expected_source_root['mountId']):
+            raise CustodyError('source-repair-source-identity-changed')
+        source_observed = {}
+        _verify_archive_tree(source_fd, '', children, source[7], source_observed, False, False, True)
+        _verify_archive_tree(source_fd, '', children, source[7], source_observed, True, False, True)
+        parent_fd = _open_source_repair_parent(archive_parent)
+        try:
+            parent = _archive_snapshot(parent_fd)
+            if (parent[0:2] != (expected_archive_parent['device'], expected_archive_parent['inode'])
+                    or parent[7] != expected_archive_parent['mountId']):
+                raise CustodyError('source-repair-parent-identity-changed')
+            if expected_archive is None:
+                try:
+                    os.mkdir(archive_leaf, 0o700, dir_fd=parent_fd)
+                except FileExistsError:
+                    raise CustodyError('source-repair-archive-already-present') from None
+                archive_fd = os.open(archive_leaf, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                                     dir_fd=parent_fd)
+                try:
+                    archive = _archive_snapshot(archive_fd)
+                    if (archive[3] != 0 or archive[2] & 0o022 or _archive_names(archive_fd)
+                            or archive[7] != parent[7]):
+                        raise CustodyError('source-repair-archive-tree-invalid')
+                    os.fsync(archive_fd)
+                    os.fsync(parent_fd)
+                    return {'device': archive[0], 'inode': archive[1], 'mountId': archive[7]}
+                finally:
+                    os.close(archive_fd)
+            if not _exact_name_in_directory(parent_fd, archive_leaf):
+                raise CustodyError('source-repair-archive-spelling-changed')
+            archive_fd = os.open(archive_leaf, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                                 dir_fd=parent_fd)
+            try:
+                archive = _archive_snapshot(archive_fd)
+                if (archive[0:2] != (expected_archive['device'], expected_archive['inode'])
+                        or archive[7] != expected_archive['mountId']):
+                    raise CustodyError('source-repair-archive-identity-changed')
+                partial = {}
+                _partial_archive_children(archive_fd, '', children, partial)
+                observed = {}
+                _verify_archive_tree(archive_fd, '', partial, archive[7], observed, False)
+                _verify_archive_tree(archive_fd, '', partial, archive[7], observed, True)
+                _copy_archive_tree(source_fd, archive_fd, '', children, source_observed, archive[7])
+            finally:
+                os.close(archive_fd)
+        finally:
+            os.close(parent_fd)
+    finally:
+        os.close(source_fd)
+    return verify_source_repair_archive(archive_parent, archive_leaf, expected_archive_parent,
+                                        expected_archive, manifest_bytes, expected_manifest_sha256)
 
 
 def inspect_empty_mountpoint(parent, source, expected_device, expected_mount_id, expected_inode=None):
@@ -602,7 +782,10 @@ def main():
     import base64
     import json
     try:
-        request = json.loads(sys.stdin.buffer.read(6 * 1024 * 1024 + 1))
+        raw_request = sys.stdin.buffer.read(6 * 1024 * 1024 + 1)
+        if len(raw_request) > 6 * 1024 * 1024:
+            raise CustodyError('request-too-large')
+        request = json.loads(raw_request)
         action = request['action']
         result = {'status': 'ok'}
         if action == 'rename':
@@ -618,6 +801,26 @@ def main():
             if len(replacement) > 4 * 1024 * 1024:
                 raise CustodyError('config-too-large')
             replace_config(request['parent'], request['name'], request['beforeHash'], replacement, request['afterHash'])
+        elif action in ('source-repair-archive-create-or-resume', 'source-repair-archive-verify'):
+            common = {'action', 'archiveParent', 'archiveLeaf', 'archiveParentIdentity',
+                      'archiveIdentity', 'manifestBase64', 'manifestSha256'}
+            expected = common | ({'sourceRoot', 'sourceIdentity'} if action.endswith('create-or-resume') else set())
+            if (not isinstance(request, dict) or set(request) != expected
+                    or not isinstance(request['manifestBase64'], str)
+                    or len(request['manifestBase64']) > 5_600_000):
+                raise CustodyError('source-repair-archive-request-invalid')
+            manifest_bytes = base64.b64decode(request['manifestBase64'], validate=True)
+            if len(manifest_bytes) > 4 * 1024 * 1024:
+                raise CustodyError('source-repair-preservation-manifest-too-large')
+            args = (request['archiveParent'], request['archiveLeaf'], request['archiveParentIdentity'],
+                    request['archiveIdentity'], manifest_bytes, request['manifestSha256'])
+            if action == 'source-repair-archive-verify':
+                if request['archiveIdentity'] is None:
+                    raise CustodyError('source-repair-archive-request-invalid')
+                result['identity'] = verify_source_repair_archive(*args)
+            else:
+                result['identity'] = create_or_resume_source_repair_archive(
+                    request['sourceRoot'], request['sourceIdentity'], *args)
         else:
             raise CustodyError('unknown-action')
         print(json.dumps(result, separators=(',', ':')))

@@ -4,6 +4,8 @@ using Jellyfin.Plugin.AudioGateway.Services;
 using System.Security.Cryptography;
 using System.Text.Json;
 
+await ArchiveAdapterTests.RunAsync();
+
 var jobId = Guid.NewGuid().ToString("N");
 if (HostSpecification.IsValidHash("bad")) throw new Exception("invalid hash accepted");
 if (!HostSpecification.IsValidHash(new string('a', 64))) throw new Exception("valid hash rejected");

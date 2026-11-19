@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Jellyfin.Plugin.AudioGateway.Models;
 
 namespace Slipmat.MaintenanceRunner;
 
@@ -84,21 +85,76 @@ public static class CustodyProcess
             throw new InvalidOperationException("mountpoint-identity-mismatch");
     }
 
-    private static async Task<string> InvokeAsync(HostSpecification spec, object request, CancellationToken cancellationToken)
+    // The offline transaction must bind these inputs to the journal and hold the host barrier.
+    internal static async Task<CloudSourcePathRepairIdentity> ArchiveAsync(
+        string pythonPath, string pythonSha256, string helperPath, string helperSha256,
+        string archiveParent, string archiveLeaf, CloudSourcePathRepairIdentity archiveParentIdentity,
+        CloudSourcePathRepairIdentity? archiveIdentity, byte[] manifest, string manifestSha256,
+        string? sourceRoot, CloudSourcePathRepairIdentity? sourceIdentity, CancellationToken cancellationToken)
     {
-        CheckHash(spec.PythonPath, spec.PythonSha256, 128 * 1024 * 1024);
-        CheckHash(spec.CustodyHelperPath, spec.CustodyHelperSha256, 1024 * 1024);
-        var info = new ProcessStartInfo(spec.PythonPath) { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        var copy = sourceRoot is not null;
+        if (copy != sourceIdentity.HasValue || (!copy && archiveIdentity is null)
+            || manifest.Length is 0 or > 4 * 1024 * 1024 || !HostSpecification.IsValidHash(manifestSha256)
+            || !Convert.ToHexString(SHA256.HashData(manifest)).Equals(manifestSha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("source-repair-archive-request-invalid");
+
+        var request = new Dictionary<string, object?>
+        {
+            ["action"] = copy ? "source-repair-archive-create-or-resume" : "source-repair-archive-verify",
+            ["archiveParent"] = archiveParent,
+            ["archiveLeaf"] = archiveLeaf,
+            ["archiveParentIdentity"] = archiveParentIdentity,
+            ["archiveIdentity"] = archiveIdentity,
+            ["manifestBase64"] = Convert.ToBase64String(manifest),
+            ["manifestSha256"] = manifestSha256,
+        };
+        if (copy)
+        {
+            request["sourceRoot"] = sourceRoot;
+            request["sourceIdentity"] = sourceIdentity;
+        }
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var payload = JsonSerializer.SerializeToUtf8Bytes(request, options);
+        if (payload.Length > 6 * 1024 * 1024)
+            throw new InvalidOperationException("source-repair-archive-request-too-large");
+        var output = await InvokeAsync(pythonPath, pythonSha256, helperPath, helperSha256, payload,
+            cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var document = JsonDocument.Parse(output);
+            if (document.RootElement.GetProperty("status").GetString() != "ok") throw new JsonException();
+            var actual = document.RootElement.GetProperty("identity").Deserialize<CloudSourcePathRepairIdentity>(options);
+            if (actual.Inode == 0 || actual.MountId <= 0 || (archiveIdentity.HasValue && archiveIdentity.Value != actual))
+                throw new JsonException();
+            return actual;
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException)
+        {
+            throw new InvalidOperationException("source-repair-archive-identity-invalid", ex);
+        }
+    }
+
+    private static Task<string> InvokeAsync(HostSpecification spec, object request, CancellationToken cancellationToken)
+        => InvokeAsync(spec.PythonPath, spec.PythonSha256, spec.CustodyHelperPath, spec.CustodyHelperSha256,
+            JsonSerializer.SerializeToUtf8Bytes(request), cancellationToken);
+
+    private static async Task<string> InvokeAsync(string pythonPath, string pythonSha256, string helperPath,
+        string helperSha256, byte[] request, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        CheckHash(pythonPath, pythonSha256, 128 * 1024 * 1024);
+        CheckHash(helperPath, helperSha256, 1024 * 1024);
+        var info = new ProcessStartInfo(pythonPath) { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
         info.Environment.Clear();
         info.Environment["PATH"] = "/usr/bin:/bin";
         info.ArgumentList.Add("-I");
-        info.ArgumentList.Add(spec.CustodyHelperPath);
+        info.ArgumentList.Add(helperPath);
         using var process = Process.Start(info) ?? throw new InvalidOperationException("custody-helper-start-failed");
         try
         {
             var output = process.StandardOutput.ReadToEndAsync(cancellationToken);
             var error = process.StandardError.BaseStream.CopyToAsync(Stream.Null, cancellationToken);
-            await JsonSerializer.SerializeAsync(process.StandardInput.BaseStream, request, cancellationToken: cancellationToken).ConfigureAwait(false);
+            await process.StandardInput.BaseStream.WriteAsync(request, cancellationToken).ConfigureAwait(false);
             process.StandardInput.Close();
             await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
             await Task.WhenAll(output, error).ConfigureAwait(false);
@@ -108,6 +164,9 @@ public static class CustodyProcess
         catch
         {
             try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+            // The caller may release the journal lease when we return. Wait for the
+            // helper to exit even if the original request was canceled.
+            await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
             throw;
         }
     }
