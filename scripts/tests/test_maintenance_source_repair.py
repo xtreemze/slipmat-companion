@@ -2,6 +2,8 @@
 import importlib.util
 import contextlib
 import errno
+import hashlib
+import json
 import os
 import pathlib
 import stat
@@ -247,6 +249,118 @@ class SourceRepairRenameTests(unittest.TestCase):
                 self.move()
         self.assertFalse((self.parent / 'source').exists())
         self.assertEqual((self.parent / 'target').read_bytes(), b'kept')
+
+
+@unittest.skipUnless(sys.platform == 'linux' and os.geteuid() == 0, 'requires disposable Linux root')
+class PreservationReadbackTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory(dir='/root')
+        self.addCleanup(self.directory.cleanup)
+        self.parent = pathlib.Path(self.directory.name)
+        self.archive = self.parent / 'archive'
+        self.archive.mkdir(mode=0o700)
+
+    def identity(self, path):
+        fd = os.open(path, os.O_PATH | os.O_CLOEXEC | os.O_NOFOLLOW)
+        try:
+            info = os.fstat(fd)
+            return {'device': info.st_dev, 'inode': info.st_ino, 'mountId': custody._fd_mount_id(fd)}
+        finally:
+            os.close(fd)
+
+    def manifest(self, entries):
+        files = [item for item in entries if item['kind'] == 'file']
+        value = {'schemaVersion': 1, 'fileCount': len(files),
+                 'totalBytes': sum(item['size'] for item in files), 'entries': entries}
+        data = json.dumps(value, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
+        return data, hashlib.sha256(data).hexdigest()
+
+    def verify(self, data, digest, *, parent=None, archive=None):
+        return custody.verify_source_repair_archive(str(self.parent), 'archive',
+                                                    parent or self.identity(self.parent),
+                                                    archive or self.identity(self.archive), data, digest)
+
+    def test_complete_readback_including_empty_directory_and_case_distinct_files(self):
+        (self.archive / 'empty').mkdir()
+        (self.archive / 'Track.flac').write_bytes(b'upper')
+        (self.archive / 'track.flac').write_bytes(b'lower')
+        entries = [{'path': 'empty', 'kind': 'directory'},
+                   {'path': 'Track.flac', 'kind': 'file', 'size': 5,
+                    'sha256': hashlib.sha256(b'upper').hexdigest()},
+                   {'path': 'track.flac', 'kind': 'file', 'size': 5,
+                    'sha256': hashlib.sha256(b'lower').hexdigest()}]
+        data, digest = self.manifest(entries)
+        self.assertEqual(self.verify(data, digest), self.identity(self.archive))
+
+    def test_nested_tree_and_empty_file_read_back_exactly(self):
+        (self.archive / 'Artist').mkdir()
+        (self.archive / 'Artist' / 'Album').mkdir()
+        (self.archive / 'Artist' / 'Album' / 'empty.nfo').write_bytes(b'')
+        entries = [{'path': 'Artist', 'kind': 'directory'},
+                   {'path': 'Artist/Album', 'kind': 'directory'},
+                   {'path': 'Artist/Album/empty.nfo', 'kind': 'file', 'size': 0,
+                    'sha256': hashlib.sha256(b'').hexdigest()}]
+        self.assertEqual(self.verify(*self.manifest(entries)), self.identity(self.archive))
+        (self.archive / 'Artist' / 'Album' / 'unexpected').write_bytes(b'extra')
+        with mock.patch.object(custody.os, 'read', side_effect=AssertionError('payload read before tree check')):
+            with self.assertRaisesRegex(custody.CustodyError, 'source-repair-archive-tree-invalid'):
+                self.verify(*self.manifest(entries))
+
+    def test_missing_extra_and_wrong_payload_refuse(self):
+        (self.archive / 'track.flac').write_bytes(b'actual')
+        good = {'path': 'track.flac', 'kind': 'file', 'size': 6,
+                'sha256': hashlib.sha256(b'actual').hexdigest()}
+        for entries in ([], [good, {'path': 'missing', 'kind': 'directory'}],
+                        [good | {'sha256': hashlib.sha256(b'wrong!').hexdigest()}]):
+            with self.subTest(entries=entries), self.assertRaises(custody.CustodyError):
+                self.verify(*self.manifest(entries))
+        self.assertEqual((self.archive / 'track.flac').read_bytes(), b'actual')
+
+    def test_special_entries_and_alias_names_refuse(self):
+        (self.archive / 'actual').write_bytes(b'data')
+        item = {'path': 'Actual', 'kind': 'file', 'size': 4, 'sha256': hashlib.sha256(b'data').hexdigest()}
+        with self.assertRaises(custody.CustodyError):
+            self.verify(*self.manifest([item]))
+        (self.archive / 'actual').unlink()
+        (self.archive / 'actual').symlink_to('elsewhere')
+        with self.assertRaises(custody.CustodyError):
+            self.verify(*self.manifest([item | {'path': 'actual'}]))
+        (self.archive / 'actual').unlink()
+        os.mkfifo(self.archive / 'actual')
+        with self.assertRaises(custody.CustodyError):
+            self.verify(*self.manifest([item | {'path': 'actual'}]))
+
+    def test_hardlinked_archive_file_is_not_independent(self):
+        source = self.parent / 'source.flac'
+        source.write_bytes(b'original')
+        os.link(source, self.archive / 'track.flac')
+        item = {'path': 'track.flac', 'kind': 'file', 'size': 8,
+                'sha256': hashlib.sha256(b'original').hexdigest()}
+        with self.assertRaisesRegex(custody.CustodyError, 'source-repair-archive-tree-invalid'):
+            self.verify(*self.manifest([item]))
+        self.assertEqual(source.read_bytes(), b'original')
+
+    def test_manifest_and_archive_identity_fail_before_payload_read(self):
+        (self.archive / 'track.flac').write_bytes(b'data')
+        item = {'path': 'track.flac', 'kind': 'file', 'size': 4, 'sha256': hashlib.sha256(b'data').hexdigest()}
+        data, digest = self.manifest([item])
+        with mock.patch.object(custody.os, 'read', side_effect=AssertionError('payload read')):
+            with self.assertRaises(custody.CustodyError):
+                self.verify(data, '0' * 64)
+            with self.assertRaises(custody.CustodyError):
+                self.verify(data, digest, archive=self.identity(self.archive) | {'inode': 1})
+            with self.assertRaises(custody.CustodyError):
+                self.verify(data, digest, parent=self.identity(self.parent) | {'mountId': 1})
+
+    def test_malformed_manifest_refuses_before_payload_read(self):
+        duplicate = b'{"schemaVersion":1,"schemaVersion":1,"fileCount":0,"totalBytes":0,"entries":[]}'
+        oversized = b'{' + b' ' * (32 * 1024 * 1024) + b'}'
+        for data in (duplicate, oversized,
+                     self.manifest([{'path': 'missing/child', 'kind': 'directory'}])[0]):
+            with self.subTest(length=len(data)):
+                with mock.patch.object(custody.os, 'read', side_effect=AssertionError('payload read')):
+                    with self.assertRaises(custody.CustodyError):
+                        self.verify(data, hashlib.sha256(data).hexdigest())
 
 
 if __name__ == '__main__':

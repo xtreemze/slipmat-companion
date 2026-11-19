@@ -22,10 +22,14 @@ public sealed class LinuxMaintenanceBarrier(ILinuxBarrierQuery query, int startu
             : VerifyMaintenanceAsync(spec, cancellationToken);
 
     /// <summary>Verify the persistently masked, stopped maintenance state.</summary>
-    public async Task VerifyMaintenanceAsync(HostSpecification spec, CancellationToken cancellationToken)
+    public Task VerifyMaintenanceAsync(HostSpecification spec, CancellationToken cancellationToken)
+        => VerifyMaintenanceAsync(spec.Unit, spec.BootId, spec.MountNamespace, cancellationToken);
+
+    internal async Task VerifyMaintenanceAsync(string unit, string bootId, string mountNamespace,
+        CancellationToken cancellationToken)
     {
         var state = await query.ReadAsync(cancellationToken).ConfigureAwait(false);
-        Common(spec, state);
+        Common(unit, bootId, mountNamespace, state);
         if (!state.PersistentMaskTrusted || state.ActiveState != "inactive" || state.MainPid != 0 || state.ControlPid != 0 || state.CgroupPids.Length != 0)
             throw new InvalidOperationException("maintenance-service-barrier-failed");
     }
@@ -34,16 +38,16 @@ public sealed class LinuxMaintenanceBarrier(ILinuxBarrierQuery query, int startu
     public async Task VerifyStartupAsync(HostSpecification spec, int guardPid, CancellationToken cancellationToken)
     {
         var state = await query.ReadAsync(cancellationToken).ConfigureAwait(false);
-        Common(spec, state);
+        Common(spec.Unit, spec.BootId, spec.MountNamespace, state);
         if (guardPid <= 0 || state.ActiveState != "activating" || state.MainPid != 0 || state.ControlPid != guardPid
             || state.CgroupPids.Any(pid => pid != guardPid) || !state.CgroupPids.Contains(guardPid))
             throw new InvalidOperationException("startup-service-barrier-failed");
     }
 
-    private static void Common(HostSpecification spec, LinuxBarrierSnapshot state)
+    private static void Common(string unit, string bootId, string mountNamespace, LinuxBarrierSnapshot state)
     {
-        if (!state.IsLinuxRoot || spec.Unit != "jellyfin.service" || state.BootId != spec.BootId
-            || state.RunnerNamespace != spec.MountNamespace || state.Pid1Namespace != spec.MountNamespace)
+        if (!state.IsLinuxRoot || unit != "jellyfin.service" || state.BootId != bootId
+            || state.RunnerNamespace != mountNamespace || state.Pid1Namespace != mountNamespace)
             throw new InvalidOperationException("host-identity-barrier-failed");
     }
 }

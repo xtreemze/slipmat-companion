@@ -79,6 +79,15 @@ failure reports an uncertain committed outcome for journal reconciliation; it
 never guesses a rollback. This primitive does not create or verify preservation
 copies, establish service isolation or authorize a planned move.
 
+The archive readback verifier takes the reviewed manifest bytes and their
+plan-bound SHA-256 digest, plus pinned identities for the archive and its parent.
+Schema 1 records the complete tree, including empty directories, with file
+sizes, SHA-256 digests and aggregate counts. Readback checks exact stored names,
+rejects links and special entries, and verifies every file after a complete
+metadata pass. Its caller must establish exclusive archive custody. The runner
+still needs to create the preservation copy and bind the verifier's result to
+the journal before authorizing moves.
+
 Tests exercise write-ahead ordering, preservation before moves, every synthetic
 forward/restore journal-effect crash boundary, pending rollback outcomes, foreign
 replacements, lost barriers, stale revisions, plan tampering and terminal proofs.
