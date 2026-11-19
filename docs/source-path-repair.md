@@ -63,6 +63,22 @@ fallback, merge trees, delete data, or patch unrelated job state.
 
 ## Evidence and remaining gates
 
+The next host primitives remain unwired. `CloudMigrationJournalLease.ReadAllAsync`
+provides an exclusive-lease, bounded complete inventory: unusable job files,
+missing/non-null custody fields, duplicate JSON properties and mismatched IDs
+block the whole read. Optional legacy fields may remain absent. It returns raw
+whole-job revisions, not proof of adversarial directory custody. The dashboard's
+permissive `LoadAllAsync` behavior is unchanged.
+
+`custody.rename_source_entry` supports one regular file or directory under an
+exact parent/entry device, inode and mount identity. It requires root-controlled
+parents and source entries, pins no-follow descriptors, checks the exact stored
+spelling of each parent component and source entry, uses only no-replace rename
+and flushes the parent directory. It has no new CLI dispatch. A flush
+failure reports an uncertain committed outcome for journal reconciliation; it
+never guesses a rollback. This primitive does not create or verify preservation
+copies, establish service isolation or authorize a planned move.
+
 Tests exercise write-ahead ordering, preservation before moves, every synthetic
 forward/restore journal-effect crash boundary, pending rollback outcomes, foreign
 replacements, lost barriers, stale revisions, plan tampering and terminal proofs.
@@ -72,17 +88,25 @@ invokes the actual `startup` and `run` entry point with unknown repair state and
 no VFS maintenance intent, requires the explicit owned-repair refusal before
 host-spec access, and checks unchanged journal bytes.
 
-These are model, ownership and entry-point tests. They do not prove real file
-movement, source preservation copies, NTFS, service-control lifecycle, reboot,
-catalog identity retention or production readiness.
+The primitive tests perform real file and populated/empty directory moves on
+isolated Linux fixtures, preserve occupied targets and exercise uncertain fsync
+outcomes. A disposable ext4 casefold reproduction first demonstrated the inode-only
+source/parent alias bug, then refused both aliases after exact spelling checks;
+its exact-spelling positive control still moved. That proof covers the ext4
+fixture, not NTFS.
+
+These remain model, ownership, entry-point and isolated primitive tests. They do
+not prove a complete source-repair execution, preservation copies, NTFS,
+service-control lifecycle, reboot, catalog identity retention or production readiness.
 
 Before any admission or effect producer can be enabled:
 
 - Implement and review canonical admission, rollback request and completion,
   including bounded prior-attempt history and conflict-owner exclusion.
-- Resolve the pre-existing `LoadAllAsync` behavior that omits corrupt/unreadable
-  jobs: incomplete inventory cannot prove that a source is unowned. This candidate
-  does not change that shared-store policy and must not be used to admit repairs.
+- Admission must use the complete lease-scoped inventory rather than the
+  permissive UI listing, validate the returned job addresses and bind physical
+  root identities. An inventory read alone cannot prove that a source is unowned.
+  No admission producer is enabled by these primitives.
 - Install and prove a source-repair-aware persistent startup barrier and exact
   runner version. Old binaries can ignore a new JSON field; PID or on-disk plugin
   version alone does not prove active guard support.

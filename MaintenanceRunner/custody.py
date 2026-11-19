@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Linux descriptor-pinned directory rename; caller must hold journal lease and barrier."""
+"""Linux descriptor-pinned renames; caller must hold journal lease and barrier."""
 import ctypes
 import errno
 import os
 import stat
 import sys
+import unicodedata
 
 class CustodyError(Exception):
     pass
@@ -35,6 +36,136 @@ def _fd_mount_id(fd):
                 except ValueError:
                     break
     raise CustodyError('mount-identity-unavailable')
+
+
+def _rename_noreplace(parent_fd, source, destination):
+    libc = ctypes.CDLL(None, use_errno=True)
+    fn = getattr(libc, 'renameat2', None)
+    if fn is None:
+        raise CustodyError('renameat2-unavailable')
+    fn.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    fn.restype = ctypes.c_int
+    if fn(parent_fd, os.fsencode(source), parent_fd, os.fsencode(destination), 1) != 0:
+        error = ctypes.get_errno()
+        if error == errno.EEXIST:
+            raise CustodyError('destination-exists')
+        raise OSError(error, os.strerror(error))
+
+
+def _expected_identity(value, include_kind=False):
+    if not isinstance(value, dict) or set(value) != ({'device', 'inode', 'mountId', 'kind'} if include_kind
+                                                   else {'device', 'inode', 'mountId'}):
+        raise CustodyError('source-repair-identity-invalid')
+    if any(type(value[field]) is not int or value[field] <= 0 for field in ('device', 'inode', 'mountId')):
+        raise CustodyError('source-repair-identity-invalid')
+    if include_kind and value['kind'] not in ('file', 'directory'):
+        raise CustodyError('source-repair-kind-invalid')
+
+
+def _source_repair_leaf(value):
+    if not isinstance(value, str):
+        raise CustodyError('source-repair-leaf-invalid')
+    _leaf(value)
+    if ('\\' in value or ':' in value or value[-1] in (' ', '.')
+            or not unicodedata.is_normalized('NFC', value)
+            or any(unicodedata.category(character) == 'Cc' for character in value)):
+        raise CustodyError('source-repair-leaf-invalid')
+
+
+def _exact_name_in_directory(directory_fd, name):
+    # A descriptor-relative listing exposes the stored spelling even on casefold mounts.
+    # Bound the scan instead of allocating an arbitrarily large directory listing.
+    scan_fd = os.open('.', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                      dir_fd=directory_fd)
+    try:
+        with os.scandir(scan_fd) as entries:
+            for index, entry in enumerate(entries):
+                if index >= 100_000:
+                    raise CustodyError('source-repair-directory-too-large')
+                if entry.name == name:
+                    return True
+        return False
+    finally:
+        os.close(scan_fd)
+
+
+def _open_source_repair_parent(parent):
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+    current_fd = os.open('/', flags)
+    try:
+        for component in parent.split('/')[1:]:
+            info = os.fstat(current_fd)
+            if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+                raise CustodyError('parent-not-exclusively-root-controlled')
+            if not component:
+                continue
+            if not _exact_name_in_directory(current_fd, component):
+                raise CustodyError('source-repair-parent-spelling-changed')
+            next_fd = os.open(component, flags, dir_fd=current_fd)
+            os.close(current_fd)
+            current_fd = next_fd
+        return current_fd
+    except BaseException:
+        os.close(current_fd)
+        raise
+
+
+def rename_source_entry(parent, source, destination, expected_parent, expected_entry):
+    """Atomically move one regular file or directory under one pinned root-controlled parent.
+
+    Caller owns the whole-job journal lease and persistent stopped-service barrier. The
+    expected identities must come from a separately reviewed plan, not this function.
+    A failed parent fsync leaves an uncertain physical outcome for journal reconciliation.
+    """
+    if sys.platform != 'linux' or os.geteuid() != 0:
+        raise CustodyError('linux-root-required')
+    _source_repair_leaf(source); _source_repair_leaf(destination)
+    _expected_identity(expected_parent)
+    _expected_identity(expected_entry, include_kind=True)
+    if (source == destination or not isinstance(parent, str)
+            or not os.path.isabs(parent) or os.path.realpath(parent) != parent):
+        raise CustodyError('invalid-parent-or-target')
+    parent_fd = _open_source_repair_parent(parent)
+    try:
+        parent_stat = os.fstat(parent_fd)
+        parent_mount = _fd_mount_id(parent_fd)
+        if (not stat.S_ISDIR(parent_stat.st_mode) or parent_stat.st_uid != 0 or parent_stat.st_mode & 0o022):
+            raise CustodyError('parent-not-exclusively-root-controlled')
+        if ((parent_stat.st_dev, parent_stat.st_ino, parent_mount) !=
+                (expected_parent['device'], expected_parent['inode'], expected_parent['mountId'])):
+            raise CustodyError('source-repair-parent-identity-changed')
+        if not _exact_name_in_directory(parent_fd, source):
+            raise CustodyError('source-repair-source-spelling-changed')
+
+        # O_PATH opens even a FIFO without blocking; O_NOFOLLOW pins a symlink itself,
+        # which fails the regular-file/directory type check below.
+        source_fd = os.open(source, os.O_PATH | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=parent_fd)
+        try:
+            info = os.fstat(source_fd)
+            mount = _fd_mount_id(source_fd)
+            kind = expected_entry['kind']
+            if not (stat.S_ISREG(info.st_mode) if kind == 'file' else stat.S_ISDIR(info.st_mode)):
+                raise CustodyError('source-repair-kind-changed')
+            if info.st_uid != 0 or info.st_mode & 0o022:
+                raise CustodyError('source-not-exclusively-root-controlled')
+            if (info.st_dev, info.st_ino, mount) != (expected_entry['device'], expected_entry['inode'], expected_entry['mountId']):
+                raise CustodyError('source-repair-entry-identity-changed')
+            if info.st_dev != parent_stat.st_dev or mount != parent_mount:
+                raise CustodyError('cross-device-move-forbidden')
+            named = os.stat(source, dir_fd=parent_fd, follow_symlinks=False)
+            if (named.st_dev, named.st_ino, stat.S_IFMT(named.st_mode)) != (info.st_dev, info.st_ino, stat.S_IFMT(info.st_mode)):
+                raise CustodyError('source-name-changed')
+            if not _exact_name_in_directory(parent_fd, source):
+                raise CustodyError('source-repair-source-spelling-changed')
+            _rename_noreplace(parent_fd, source, destination)
+            try:
+                os.fsync(parent_fd)
+            except OSError as exc:
+                raise CustodyError('source-repair-commit-uncertain') from exc
+        finally:
+            os.close(source_fd)
+    finally:
+        os.close(parent_fd)
 
 
 def inspect_empty_mountpoint(parent, source, expected_device, expected_mount_id, expected_inode=None):
@@ -136,17 +267,7 @@ def rename_directory(parent, source, destination, expected_device, expected_inod
         current = os.stat(source, dir_fd=parent_fd, follow_symlinks=False)
         if (current.st_dev, current.st_ino) != (expected_device, expected_inode):
             raise CustodyError('source-name-changed')
-        libc = ctypes.CDLL(None, use_errno=True)
-        fn = getattr(libc, 'renameat2', None)
-        if fn is None:
-            raise CustodyError('renameat2-unavailable')
-        fn.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
-        fn.restype = ctypes.c_int
-        if fn(parent_fd, os.fsencode(source), parent_fd, os.fsencode(destination), 1) != 0:
-            error = ctypes.get_errno()
-            if error == errno.EEXIST:
-                raise CustodyError('destination-exists')
-            raise OSError(error, os.strerror(error))
+        _rename_noreplace(parent_fd, source, destination)
         # Failure here means the outcome is uncertain; never roll back automatically.
         os.fsync(parent_fd)
     finally:

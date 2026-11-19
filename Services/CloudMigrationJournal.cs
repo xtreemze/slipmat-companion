@@ -82,6 +82,71 @@ public sealed class CloudMigrationJournalLease : IAsyncDisposable
         return new(job, Convert.ToHexStringLower(SHA256.HashData(bytes)));
     }
 
+    private static readonly JsonSerializerOptions InventoryJsonOptions = new(JsonOptions)
+    {
+        RespectRequiredConstructorParameters = true,
+        RespectNullableAnnotations = true,
+        AllowDuplicateProperties = false,
+    };
+
+    /// <summary>
+    /// Read a complete bounded custody inventory under this lease. Unlike UI listing, any
+    /// unreadable, malformed, oversized or mismatched job blocks the entire inventory.
+    /// This cooperative lease is not a substitute for trusted host directory custody.
+    /// </summary>
+    public async Task<IReadOnlyList<CloudMigrationJournalSnapshot>> ReadAllAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        cancellationToken.ThrowIfCancellationRequested();
+        const int maxJobs = 4096;
+        const int maxJobBytes = 4 * 1024 * 1024;
+        const long maxInventoryBytes = 64L * 1024 * 1024;
+        var paths = new List<string>();
+        var entryCount = 0;
+        foreach (var path in Directory.EnumerateFileSystemEntries(_root))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (++entryCount > 16384) throw new IOException("migration-journal-inventory-limit");
+            if (!string.Equals(Path.GetExtension(path), ".json", StringComparison.OrdinalIgnoreCase)) continue;
+            if (paths.Count == maxJobs) throw new IOException("migration-journal-inventory-limit");
+            paths.Add(path);
+        }
+        var result = new List<CloudMigrationJournalSnapshot>(paths.Count);
+        long totalBytes = 0;
+        foreach (var path in paths.OrderBy(path => path, StringComparer.Ordinal))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var id = Path.GetFileNameWithoutExtension(path);
+            if (!Guid.TryParseExact(id, "N", out var parsed) || parsed == Guid.Empty
+                || Path.GetFileName(path) != parsed.ToString("N") + ".json")
+                throw new JsonException("migration-journal-id-invalid");
+            CloudMigrationJournal.RejectLink(path);
+            // Reject empty entries before opening: FIFOs/devices must never make custody
+            // inventory wait for another process. Host admission must also pin directory custody.
+            var advertisedLength = new FileInfo(path).Length;
+            if (advertisedLength <= 0 || advertisedLength > maxJobBytes || advertisedLength > maxInventoryBytes - totalBytes)
+                throw new IOException("migration-journal-inventory-limit");
+            await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            var length = stream.Length;
+            if (length != advertisedLength || length > maxJobBytes || length > maxInventoryBytes - totalBytes)
+                throw new IOException("migration-journal-inventory-limit");
+            var bytes = new byte[(int)length];
+            await stream.ReadExactlyAsync(bytes, cancellationToken).ConfigureAwait(false);
+            if (stream.ReadByte() != -1 || stream.Length != length)
+                throw new IOException("migration-journal-inventory-changed");
+            totalBytes += length;
+            var job = JsonSerializer.Deserialize<CloudMigrationJob>(bytes, InventoryJsonOptions)
+                ?? throw new JsonException("migration-journal-empty");
+            if (!string.Equals(job.Id, id, StringComparison.Ordinal))
+                throw new JsonException("migration-journal-id-mismatch");
+            if (new[] { job.ProfileId, job.LibraryName, job.Direction, job.Phase, job.RemoteName }
+                    .Any(string.IsNullOrWhiteSpace) || !Path.IsPathFullyQualified(job.LocalPath))
+                throw new JsonException("migration-journal-custody-invalid");
+            result.Add(new(job, Convert.ToHexStringLower(SHA256.HashData(bytes))));
+        }
+        return result.AsReadOnly();
+    }
+
     /// <summary>Replace exactly the expected revision and flush file and Linux directory metadata.</summary>
     public async Task<CloudMigrationJournalSnapshot> CompareExchangeAsync(
         CloudMigrationJournalSnapshot? expected, CloudMigrationJob replacement,
