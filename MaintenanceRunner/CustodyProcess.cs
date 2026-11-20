@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Jellyfin.Plugin.AudioGateway.Models;
+using Jellyfin.Plugin.AudioGateway.Services;
 
 namespace Slipmat.MaintenanceRunner;
 
@@ -90,10 +91,13 @@ public static class CustodyProcess
         string pythonPath, string pythonSha256, string helperPath, string helperSha256,
         string archiveParent, string archiveLeaf, CloudSourcePathRepairIdentity archiveParentIdentity,
         CloudSourcePathRepairIdentity? archiveIdentity, byte[] manifest, string manifestSha256,
-        string? sourceRoot, CloudSourcePathRepairIdentity? sourceIdentity, CancellationToken cancellationToken)
+        CloudSourcePathRepairPlan? plan, CancellationToken cancellationToken)
     {
-        var copy = sourceRoot is not null;
-        if (copy != sourceIdentity.HasValue || (!copy && archiveIdentity is null)
+        var copy = plan is not null;
+        if (copy && !CloudSourcePathRepairTransaction.ValidPlan(plan))
+            throw new InvalidOperationException("source-repair-archive-plan-invalid");
+        if ((!copy && archiveIdentity is null)
+            || (plan is not null && !string.Equals(plan.PreservationManifestSha256, manifestSha256, StringComparison.OrdinalIgnoreCase))
             || manifest.Length is 0 or > 4 * 1024 * 1024 || !HostSpecification.IsValidHash(manifestSha256)
             || !Convert.ToHexString(SHA256.HashData(manifest)).Equals(manifestSha256, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("source-repair-archive-request-invalid");
@@ -108,10 +112,21 @@ public static class CustodyProcess
             ["manifestBase64"] = Convert.ToBase64String(manifest),
             ["manifestSha256"] = manifestSha256,
         };
-        if (copy)
+        if (plan is not null)
         {
-            request["sourceRoot"] = sourceRoot;
-            request["sourceIdentity"] = sourceIdentity;
+            request["sourceRoot"] = plan.Binding.LocalRoot;
+            request["sourceIdentity"] = plan.Binding.RootIdentity;
+            request["moves"] = plan.Moves.Select(move => new
+            {
+                move.Source,
+                kind = move.Kind switch
+                {
+                    CloudSourcePathRepairKind.File => "file",
+                    CloudSourcePathRepairKind.Directory => "directory",
+                    _ => throw new InvalidOperationException("source-repair-archive-request-invalid"),
+                },
+                move.Identity,
+            }).ToArray();
         }
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         var payload = JsonSerializer.SerializeToUtf8Bytes(request, options);

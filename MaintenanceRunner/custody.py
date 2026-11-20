@@ -258,7 +258,7 @@ def _archive_names(directory_fd):
 
 
 def _verify_archive_tree(directory_fd, prefix, children, mount_id, observed, read_payloads,
-                         require_single_link=True, allow_extra=False):
+                         require_single_link=True, allow_extra=False, complete_subtrees=()):
     before = _archive_snapshot(directory_fd)
     if (not stat.S_ISDIR(before[2]) or before[3] != 0 or before[2] & 0o022
             or before[7] != mount_id):
@@ -289,7 +289,7 @@ def _verify_archive_tree(directory_fd, prefix, children, mount_id, observed, rea
                     raise CustodyError('source-repair-archive-changed')
                 if item['kind'] == 'directory':
                     _verify_archive_tree(entry_fd, path, children, mount_id, observed, read_payloads,
-                                         require_single_link, allow_extra)
+                                         require_single_link, allow_extra and path not in complete_subtrees, complete_subtrees)
                 elif read_payloads:
                     if snapshot[4] != item['size']:
                         raise CustodyError('source-repair-archive-content-mismatch')
@@ -474,9 +474,28 @@ def _copy_archive_tree(source_fd, archive_fd, prefix, children, source_observed,
         raise CustodyError('source-repair-archive-changed')
 
 
+def _preservation_move_roots(children, moves):
+    if not isinstance(moves, list) or not 1 <= len(moves) <= 32:
+        raise CustodyError('source-repair-preservation-moves-invalid')
+    roots = {}
+    for move in moves:
+        if not isinstance(move, dict) or set(move) != {'source', 'kind', 'identity'}:
+            raise CustodyError('source-repair-preservation-moves-invalid')
+        path = move['source']
+        if not isinstance(path, str) or path in roots:
+            raise CustodyError('source-repair-preservation-moves-invalid')
+        parent, _, leaf = path.rpartition('/')
+        entry = children.get(parent, {}).get(leaf)
+        if entry is None or entry['path'] != path or entry['kind'] != move['kind']:
+            raise CustodyError('source-repair-preservation-move-missing')
+        _expected_identity(move['identity'])
+        roots[path] = move
+    return roots
+
+
 def create_or_resume_source_repair_archive(source_root, expected_source_root, archive_parent,
                                             archive_leaf, expected_archive_parent, expected_archive,
-                                            manifest_bytes, expected_manifest_sha256):
+                                            manifest_bytes, expected_manifest_sha256, moves):
     """Reserve an archive, then on a later identity-bound call copy or resume it.
 
     A null expected_archive only creates an empty directory and returns its durable
@@ -492,6 +511,8 @@ def create_or_resume_source_repair_archive(source_root, expected_source_root, ar
     if expected_archive is not None:
         _expected_identity(expected_archive)
     children = _preservation_manifest(manifest_bytes, expected_manifest_sha256)
+    roots = _preservation_move_roots(children, moves)
+    complete_subtrees = {path for path, move in roots.items() if move['kind'] == 'directory'}
     if (not isinstance(source_root, str) or not isinstance(archive_parent, str)
             or not os.path.isabs(source_root) or not os.path.isabs(archive_parent)
             or os.path.realpath(source_root) != source_root
@@ -507,8 +528,17 @@ def create_or_resume_source_repair_archive(source_root, expected_source_root, ar
                 or source[7] != expected_source_root['mountId']):
             raise CustodyError('source-repair-source-identity-changed')
         source_observed = {}
-        _verify_archive_tree(source_fd, '', children, source[7], source_observed, False, False, True)
-        _verify_archive_tree(source_fd, '', children, source[7], source_observed, True, False, True)
+        _verify_archive_tree(source_fd, '', children, source[7], source_observed,
+                             False, False, True, complete_subtrees)
+        for path, move in roots.items():
+            entry = source_observed[path]
+            identity = move['identity']
+            if (entry[0], entry[1], entry[7]) != (identity['device'], identity['inode'], identity['mountId']):
+                raise CustodyError('source-repair-preservation-move-identity-changed')
+        _verify_archive_tree(source_fd, '', children, source[7], source_observed,
+                             True, False, True, complete_subtrees)
+        if _archive_snapshot(source_fd) != source:
+            raise CustodyError('source-repair-source-changed')
         parent_fd = _open_source_repair_parent(archive_parent)
         try:
             parent = _archive_snapshot(parent_fd)
@@ -547,6 +577,10 @@ def create_or_resume_source_repair_archive(source_root, expected_source_root, ar
                 _verify_archive_tree(archive_fd, '', partial, archive[7], observed, False)
                 _verify_archive_tree(archive_fd, '', partial, archive[7], observed, True)
                 _copy_archive_tree(source_fd, archive_fd, '', children, source_observed, observed, archive[7])
+                _verify_archive_tree(source_fd, '', children, source[7], source_observed,
+                                     True, False, True, complete_subtrees)
+                if _archive_snapshot(source_fd) != source:
+                    raise CustodyError('source-repair-source-changed')
             finally:
                 os.close(archive_fd)
         finally:
@@ -816,7 +850,7 @@ def main():
         elif action in ('source-repair-archive-create-or-resume', 'source-repair-archive-verify'):
             common = {'action', 'archiveParent', 'archiveLeaf', 'archiveParentIdentity',
                       'archiveIdentity', 'manifestBase64', 'manifestSha256'}
-            expected = common | ({'sourceRoot', 'sourceIdentity'} if action.endswith('create-or-resume') else set())
+            expected = common | ({'sourceRoot', 'sourceIdentity', 'moves'} if action.endswith('create-or-resume') else set())
             if (not isinstance(request, dict) or set(request) != expected
                     or not isinstance(request['manifestBase64'], str)
                     or len(request['manifestBase64']) > 5_600_000):
@@ -832,7 +866,7 @@ def main():
                 result['identity'] = verify_source_repair_archive(*args)
             else:
                 result['identity'] = create_or_resume_source_repair_archive(
-                    request['sourceRoot'], request['sourceIdentity'], *args)
+                    request['sourceRoot'], request['sourceIdentity'], *args, request['moves'])
         else:
             raise CustodyError('unknown-action')
         print(json.dumps(result, separators=(',', ':')))

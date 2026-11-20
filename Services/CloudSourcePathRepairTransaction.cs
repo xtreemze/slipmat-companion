@@ -288,7 +288,7 @@ public static class CloudSourcePathRepairTransaction
         };
     }
 
-    private static bool ValidPlan(CloudSourcePathRepairPlan? plan)
+    internal static bool ValidPlan(CloudSourcePathRepairPlan? plan)
     {
         if (plan is null || plan.SchemaVersion != 1 || plan.Binding is not { } binding
             || !Guid.TryParseExact(binding.JobId, "N", out var jobId) || jobId == Guid.Empty

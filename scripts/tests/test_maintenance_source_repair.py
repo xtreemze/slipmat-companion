@@ -364,6 +364,58 @@ class PreservationReadbackTests(unittest.TestCase):
                     with self.assertRaises(custody.CustodyError):
                         self.verify(data, hashlib.sha256(data).hexdigest())
 
+    def planned_moves(self, source, data):
+        return [{'source': entry['path'], 'kind': entry['kind'],
+                 'identity': self.identity(source / entry['path'])}
+                for entry in json.loads(data)['entries'] if '/' not in entry['path']]
+
+    def test_move_requires_complete_subtree_and_pinned_identity_before_reservation(self):
+        self.archive.rmdir()
+        source = self.parent / 'source'
+        album = source / 'artist' / 'album'
+        (album / 'nested').mkdir(parents=True)
+        (album / 'nested' / 'track').write_bytes(b'kept')
+        (source / 'artist' / 'unrelated').mkdir()
+        entries = [{'path': path, 'kind': 'directory'} for path in
+                   ('artist', 'artist/album', 'artist/album/nested')]
+        move = {'source': 'artist/album', 'kind': 'directory', 'identity': self.identity(album)}
+
+        def reserve(manifest_entries, moves):
+            data, digest = self.manifest(manifest_entries)
+            return custody.create_or_resume_source_repair_archive(
+                str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
+                None, data, digest, moves)
+
+        with self.assertRaises(custody.CustodyError):
+            reserve(entries, [move])
+        entries.append({'path': 'artist/album/nested/track', 'kind': 'file', 'size': 4,
+                        'sha256': hashlib.sha256(b'kept').hexdigest()})
+        with self.assertRaises(custody.CustodyError):
+            reserve(entries, [move | {'identity': move['identity'] | {'inode': move['identity']['inode'] + 1}}])
+        with self.assertRaises(custody.CustodyError):
+            reserve(entries, [move | {'source': 'artist/missing'}])
+        self.assertFalse(self.archive.exists())
+        self.assertEqual(reserve(entries, [move]), self.identity(self.archive))
+
+    def test_moved_subtree_drift_after_copy_revokes_receipt(self):
+        source = self.parent / 'source'
+        album = source / 'album'
+        album.mkdir(parents=True)
+        data, digest = self.manifest([{'path': 'album', 'kind': 'directory'}])
+        copy = custody._copy_archive_tree
+
+        def add_unreviewed_child(*args):
+            copy(*args)
+            if args[2] == '':
+                (album / 'new-file').write_bytes(b'unreviewed')
+
+        with mock.patch.object(custody, '_copy_archive_tree', side_effect=add_unreviewed_child):
+            with self.assertRaises(custody.CustodyError):
+                custody.create_or_resume_source_repair_archive(
+                    str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
+                    self.identity(self.archive), data, digest, self.planned_moves(source, data))
+        self.assertEqual((album / 'new-file').read_bytes(), b'unreviewed')
+
     def test_reserve_then_copy_and_independent_readback(self):
         self.archive.rmdir()
         source = self.parent / 'source'
@@ -381,16 +433,16 @@ class PreservationReadbackTests(unittest.TestCase):
         data, digest = self.manifest(entries)
         reserve = custody.create_or_resume_source_repair_archive(
             str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
-            None, data, digest)
+            None, data, digest, self.planned_moves(source, data))
         self.assertEqual(reserve, self.identity(self.archive))
         self.assertEqual(list(self.archive.iterdir()), [])
         with self.assertRaises(custody.CustodyError):
             custody.create_or_resume_source_repair_archive(
                 str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
-                None, data, digest)
+                None, data, digest, self.planned_moves(source, data))
         copied = custody.create_or_resume_source_repair_archive(
             str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
-            reserve, data, digest)
+            reserve, data, digest, self.planned_moves(source, data))
         self.assertEqual(copied, reserve)
         self.assertEqual(self.verify(data, digest, archive=reserve), reserve)
         self.assertEqual((source / 'Track.flac').read_bytes(), b'upper')
@@ -416,13 +468,13 @@ class PreservationReadbackTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 custody.create_or_resume_source_repair_archive(
                     str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
-                    archive_id, data, digest)
+                    archive_id, data, digest, self.planned_moves(source, data))
         first = self.archive / 'one'
         self.assertEqual(first.read_bytes(), b'one')
         first_id = self.identity(first)
         custody.create_or_resume_source_repair_archive(
             str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
-            archive_id, data, digest)
+            archive_id, data, digest, self.planned_moves(source, data))
         self.assertEqual(self.identity(first), first_id)
         self.assertEqual(self.verify(data, digest, archive=archive_id), archive_id)
 
@@ -437,7 +489,7 @@ class PreservationReadbackTests(unittest.TestCase):
         with self.assertRaises(custody.CustodyError):
             custody.create_or_resume_source_repair_archive(
                 str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
-                self.identity(self.archive), data, digest)
+                self.identity(self.archive), data, digest, self.planned_moves(source, data))
         self.assertEqual((self.archive / 'track').read_bytes(), b'foreign!')
         self.assertEqual((source / 'track').read_bytes(), b'original')
 
@@ -461,13 +513,13 @@ class PreservationReadbackTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 custody.create_or_resume_source_repair_archive(
                     str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
-                    archive_id, data, digest)
+                    archive_id, data, digest, self.planned_moves(source, data))
         partial = self.archive / 'track'
         self.assertEqual(partial.stat().st_size, 1024 * 1024)
         with self.assertRaises(custody.CustodyError):
             custody.create_or_resume_source_repair_archive(
                 str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
-                archive_id, data, digest)
+                archive_id, data, digest, self.planned_moves(source, data))
         self.assertEqual(partial.stat().st_size, 1024 * 1024)
 
     def test_archive_dispatch_rejects_extra_fields_and_verifies_exact_request(self):
@@ -477,7 +529,7 @@ class PreservationReadbackTests(unittest.TestCase):
         data, digest = self.manifest([{'path': 'track', 'kind': 'file', 'size': 4,
                                       'sha256': hashlib.sha256(b'kept').hexdigest()}])
         request = {'action': 'source-repair-archive-create-or-resume', 'sourceRoot': str(source),
-                   'sourceIdentity': self.identity(source), 'archiveParent': str(self.parent),
+                   'sourceIdentity': self.identity(source), 'moves': self.planned_moves(source, data), 'archiveParent': str(self.parent),
                    'archiveLeaf': 'archive', 'archiveParentIdentity': self.identity(self.parent),
                    'archiveIdentity': self.identity(self.archive),
                    'manifestBase64': base64.b64encode(data).decode('ascii'), 'manifestSha256': digest}
@@ -493,7 +545,7 @@ class PreservationReadbackTests(unittest.TestCase):
         code, output = invoke(request)
         self.assertEqual(code, 0)
         self.assertEqual(output['identity'], request['archiveIdentity'])
-        verify = {key: value for key, value in request.items() if key not in ('sourceRoot', 'sourceIdentity')}
+        verify = {key: value for key, value in request.items() if key not in ('sourceRoot', 'sourceIdentity', 'moves')}
         verify['action'] = 'source-repair-archive-verify'
         self.assertEqual(invoke(verify), (0, {'status': 'ok', 'identity': request['archiveIdentity']}))
 

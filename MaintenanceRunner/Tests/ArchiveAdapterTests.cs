@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Jellyfin.Plugin.AudioGateway.Models;
 using Slipmat.MaintenanceRunner;
+using Jellyfin.Plugin.AudioGateway.Services;
 
 internal static class ArchiveAdapterTests
 {
@@ -18,32 +19,45 @@ internal static class ArchiveAdapterTests
             File.Copy(Path.GetFullPath("MaintenanceRunner/custody.py"), helper);
             var source = Directory.CreateDirectory(Path.Combine(root.FullName, "source"));
             byte[] contents = [1, 2, 3];
-            await File.WriteAllBytesAsync(Path.Combine(source.FullName, "Track.flac"), contents);
+            var album = Directory.CreateDirectory(Path.Combine(source.FullName, "Album"));
+            await File.WriteAllBytesAsync(Path.Combine(album.FullName, "Track.flac"), contents);
             var manifest = JsonSerializer.SerializeToUtf8Bytes(new
             {
                 schemaVersion = 1,
                 fileCount = 1,
                 totalBytes = contents.Length,
-                entries = new[] { new { path = "Track.flac", kind = "file", size = contents.Length,
-                    sha256 = Hash(contents) } },
+                entries = new object[] { new { path = "Album", kind = "directory" },
+                    new { path = "Album/Track.flac", kind = "file", size = contents.Length, sha256 = Hash(contents) } },
             });
             var method = typeof(CustodyProcess).GetMethod("ArchiveAsync", BindingFlags.Static | BindingFlags.NonPublic)
                 ?? throw new Exception("archive adapter unavailable");
             var parentId = Identify(root.FullName);
-            var sourceId = Identify(source.FullName);
+            var binding = new CloudSourcePathRepairBinding(Guid.NewGuid().ToString("N"), Guid.NewGuid(), Guid.NewGuid(), "Music",
+                "profile", source.FullName, "remote", "Music", Identify(source.FullName),
+                new(1, Hash(manifest), 1, contents.Length, Hash(manifest)), Hash(manifest));
+            var plan = new CloudSourcePathRepairPlan(1, binding,
+                [new(CloudSourcePathRepairKind.Directory, "Album", "Album-preserved", Identify(album.FullName))],
+                Hash(manifest), Hash([42]), "");
+            plan = plan with { Fingerprint = CloudSourcePathRepairTransaction.Fingerprint(plan) };
             var pythonHash = Hash(await File.ReadAllBytesAsync(python));
             var helperHash = Hash(await File.ReadAllBytesAsync(helper));
-            Task<CloudSourcePathRepairIdentity> Invoke(CloudSourcePathRepairIdentity? archive, bool copy)
+            Task<CloudSourcePathRepairIdentity> Invoke(CloudSourcePathRepairIdentity? archive, CloudSourcePathRepairPlan? requestedPlan)
                 => (Task<CloudSourcePathRepairIdentity>)method.Invoke(null,
                     [python, pythonHash, helper, helperHash, root.FullName, "archive", parentId, archive,
-                     manifest, Hash(manifest), copy ? source.FullName : null, copy ? sourceId : null,
+                     manifest, Hash(manifest), requestedPlan,
                      CancellationToken.None])!;
-            var reserved = await Invoke(null, true);
+            try
+            {
+                await Invoke(null, plan with { Moves = [plan.Moves[0] with { Destination = "Different" }] });
+                throw new Exception("modified plan accepted with a stale fingerprint");
+            }
+            catch (InvalidOperationException ex) when (ex.Message == "source-repair-archive-plan-invalid") { }
+            var reserved = await Invoke(null, plan);
             if (Directory.EnumerateFileSystemEntries(Path.Combine(root.FullName, "archive")).Any())
                 throw new Exception("archive reservation copied files before its identity could be recorded");
-            if (await Invoke(reserved, true) != reserved || await Invoke(reserved, false) != reserved)
+            if (await Invoke(reserved, plan) != reserved || await Invoke(reserved, null) != reserved)
                 throw new Exception("archive adapter did not preserve the reserved identity");
-            var archivePath = Path.Combine(root.FullName, "archive", "Track.flac");
+            var archivePath = Path.Combine(root.FullName, "archive", "Album", "Track.flac");
             if (!(await File.ReadAllBytesAsync(archivePath)).SequenceEqual(contents))
                 throw new Exception("archive payload did not match source");
         }

@@ -90,10 +90,12 @@ The custody helper can reserve a new empty archive directory, then copy using
 the reserved identity. A subsequent request revalidates completed files before
 continuing. An unknown directory or incomplete file blocks resume without
 overwriting it. The copy can select a subset of the source. Before it can handle
-Music, the offline runner must bind the selected paths and verify that the
-manifest includes every descendant of each moved directory. The runner must
-persist the reservation identity before copy and record verified readback
-before authorizing moves.
+Music, the offline runner must supply the admitted repair plan. The adapter
+derives the source root, pinned move identities, and manifest digest from that
+plan. The helper requires the manifest to include every descendant of each
+moved directory while allowing unrelated siblings outside those subtrees.
+It checks the source again after copying. The runner must persist the reservation
+identity before copy and record verified readback before authorizing moves.
 
 Tests exercise write-ahead ordering, preservation before moves, every synthetic
 forward/restore journal-effect crash boundary, pending rollback outcomes, foreign
