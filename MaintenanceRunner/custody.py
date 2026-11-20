@@ -112,16 +112,11 @@ def _open_source_repair_parent(parent):
         raise
 
 
-def rename_source_entry(parent, source, destination, expected_parent, expected_entry):
-    """Atomically move one regular file or directory under one pinned root-controlled parent.
-
-    Caller owns the whole-job journal lease and persistent stopped-service barrier. The
-    expected identities must come from a separately reviewed plan, not this function.
-    A failed parent fsync leaves an uncertain physical outcome for journal reconciliation.
-    """
+def _open_source_repair_move_parent(parent, source, destination, expected_parent, expected_entry):
     if sys.platform != 'linux' or os.geteuid() != 0:
         raise CustodyError('linux-root-required')
-    _source_repair_leaf(source); _source_repair_leaf(destination)
+    _source_repair_leaf(source)
+    _source_repair_leaf(destination)
     _expected_identity(expected_parent)
     _expected_identity(expected_entry, include_kind=True)
     if (source == destination or not isinstance(parent, str)
@@ -136,6 +131,64 @@ def rename_source_entry(parent, source, destination, expected_parent, expected_e
         if ((parent_stat.st_dev, parent_stat.st_ino, parent_mount) !=
                 (expected_parent['device'], expected_parent['inode'], expected_parent['mountId'])):
             raise CustodyError('source-repair-parent-identity-changed')
+        return parent_fd, parent_stat, parent_mount
+    except BaseException:
+        os.close(parent_fd)
+        raise
+
+
+def _observe_source_repair_leaf(parent_fd, name, expected_parent, expected_entry):
+    exact = _exact_name_in_directory(parent_fd, name)
+    try:
+        entry_fd = os.open(name, os.O_PATH | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=parent_fd)
+    except FileNotFoundError:
+        if exact:
+            raise CustodyError('source-repair-move-observation-changed') from None
+        return 'missing'
+    try:
+        if not exact:
+            # A non-exact spelling may still resolve on a case-insensitive mount.
+            return 'foreign'
+        info = os.fstat(entry_fd)
+        mount = _fd_mount_id(entry_fd)
+        valid_kind = stat.S_ISREG(info.st_mode) if expected_entry['kind'] == 'file' else stat.S_ISDIR(info.st_mode)
+        if (valid_kind and info.st_uid == 0 and not info.st_mode & 0o022
+                and info.st_dev == expected_entry['device'] == expected_parent['device']
+                and info.st_ino == expected_entry['inode']
+                and mount == expected_entry['mountId'] == expected_parent['mountId']):
+            return 'expected'
+        return 'foreign'
+    finally:
+        os.close(entry_fd)
+
+
+def observe_source_repair_move(parent, source, destination, expected_parent, expected_entry):
+    """Observe both exact names under the same pinned parent while the caller holds exclusion."""
+    parent_fd, before, _ = _open_source_repair_move_parent(parent, source, destination,
+                                                          expected_parent, expected_entry)
+    try:
+        paths = {
+            'source': _observe_source_repair_leaf(parent_fd, source, expected_parent, expected_entry),
+            'destination': _observe_source_repair_leaf(parent_fd, destination, expected_parent, expected_entry),
+        }
+        after = os.fstat(parent_fd)
+        if (before.st_mtime_ns, before.st_ctime_ns) != (after.st_mtime_ns, after.st_ctime_ns):
+            raise CustodyError('source-repair-move-observation-changed')
+        return paths
+    finally:
+        os.close(parent_fd)
+
+
+def rename_source_entry(parent, source, destination, expected_parent, expected_entry):
+    """Atomically move one regular file or directory under one pinned root-controlled parent.
+
+    Caller owns the whole-job journal lease and persistent stopped-service barrier. The
+    expected identities must come from a separately reviewed plan, not this function.
+    A failed parent fsync leaves an uncertain physical outcome for journal reconciliation.
+    """
+    parent_fd, parent_stat, parent_mount = _open_source_repair_move_parent(
+        parent, source, destination, expected_parent, expected_entry)
+    try:
         if not _exact_name_in_directory(parent_fd, source):
             raise CustodyError('source-repair-source-spelling-changed')
 
@@ -847,6 +900,15 @@ def main():
             if len(replacement) > 4 * 1024 * 1024:
                 raise CustodyError('config-too-large')
             replace_config(request['parent'], request['name'], request['beforeHash'], replacement, request['afterHash'])
+        elif action in ('source-repair-observe-move', 'source-repair-rename-move'):
+            if set(request) != {'action', 'parent', 'source', 'destination', 'parentIdentity', 'entryIdentity'}:
+                raise CustodyError('source-repair-move-request-invalid')
+            args = (request['parent'], request['source'], request['destination'],
+                    request['parentIdentity'], request['entryIdentity'])
+            if action == 'source-repair-observe-move':
+                result['paths'] = observe_source_repair_move(*args)
+            else:
+                rename_source_entry(*args)
         elif action in ('source-repair-archive-create-or-resume', 'source-repair-archive-verify'):
             common = {'action', 'archiveParent', 'archiveLeaf', 'archiveParentIdentity',
                       'archiveIdentity', 'manifestBase64', 'manifestSha256'}

@@ -9,14 +9,6 @@ namespace Slipmat.MaintenanceRunner;
 /// <summary>Runs only preservation effects for a journal-bound repair under the stopped-service barrier.</summary>
 internal sealed class SourcePathRepairArchiveHost(SourcePathRepairJournal journal, LinuxMaintenanceBarrier barrier, string specificationPath)
 {
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
-    {
-        AllowDuplicateProperties = false,
-        RespectRequiredConstructorParameters = true,
-        RespectNullableAnnotations = true,
-        UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow,
-    };
-
     internal Task<string> ReserveArchiveAsync(CloudSourcePathRepairSnapshot expected, CancellationToken cancellationToken)
         => RunAsync(expected, ArchiveOperation.Reserve, cancellationToken);
 
@@ -40,11 +32,7 @@ internal sealed class SourcePathRepairArchiveHost(SourcePathRepairJournal journa
             throw new InvalidOperationException("source-repair-archive-intent-required");
 
         var plan = current.State.Plan;
-        var bytes = LinuxTrustedFile.Read(specificationPath, 64 * 1024);
-        if (!Convert.ToHexString(SHA256.HashData(bytes)).Equals(plan.Binding.HostSpecificationSha256, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("source-repair-host-specification-changed");
-        var specification = JsonSerializer.Deserialize<SourcePathRepairArchiveSpecification>(bytes, Json)
-            ?? throw new InvalidOperationException("source-repair-host-specification-invalid");
+        var specification = SourcePathRepairHostSpecification.Read(specificationPath, plan);
         // A second mount of the same device can disguise a source subtree as an archive path.
         if (specification.ArchiveParentIdentity.Device == plan.Binding.RootIdentity.Device
             && specification.ArchiveParentIdentity.MountId != plan.Binding.RootIdentity.MountId)
@@ -75,6 +63,26 @@ internal sealed class SourcePathRepairArchiveHost(SourcePathRepairJournal journa
     }
 }
 
-internal sealed record SourcePathRepairArchiveSpecification(string BootId, string MountNamespace,
+internal sealed record SourcePathRepairHostSpecification(string BootId, string MountNamespace,
     string PythonPath, string PythonSha256, string HelperPath, string HelperSha256, string ManifestPath,
-    string ArchiveParent, string ArchiveLeaf, CloudSourcePathRepairIdentity ArchiveParentIdentity);
+    string ArchiveParent, string ArchiveLeaf, CloudSourcePathRepairIdentity ArchiveParentIdentity,
+    Dictionary<string, CloudSourcePathRepairIdentity> MoveParents)
+{
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
+    {
+        AllowDuplicateProperties = false,
+        RespectRequiredConstructorParameters = true,
+        RespectNullableAnnotations = true,
+        UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow,
+    };
+
+    internal static SourcePathRepairHostSpecification Read(string specificationPath, CloudSourcePathRepairPlan plan)
+    {
+        var bytes = LinuxTrustedFile.Read(specificationPath, 64 * 1024);
+        if (!Convert.ToHexString(SHA256.HashData(bytes)).Equals(plan.Binding.HostSpecificationSha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("source-repair-host-specification-changed");
+        var specification = JsonSerializer.Deserialize<SourcePathRepairHostSpecification>(bytes, Json)
+            ?? throw new InvalidOperationException("source-repair-host-specification-invalid");
+        return specification;
+    }
+}

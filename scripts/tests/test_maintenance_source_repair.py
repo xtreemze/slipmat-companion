@@ -46,6 +46,91 @@ class SourceRepairRenameTests(unittest.TestCase):
                                            parent or self.identity(self.parent),
                                            entry or self.identity(self.parent / source, 'file'))
 
+    def move_request(self, action, **fields):
+        request = {
+            'action': action, 'parent': str(self.parent), 'source': 'source', 'destination': 'target',
+            'parentIdentity': self.identity(self.parent),
+            'entryIdentity': self.identity(self.parent / 'source', 'file'),
+        }
+        return request | fields
+
+    def dispatch(self, request):
+        return subprocess.run([sys.executable, '-I', str(MODULE)], input=json.dumps(request),
+                              text=True, capture_output=True, timeout=10, check=False)
+
+    def test_observe_and_rename_dispatch_track_forward_and_reverse(self):
+        source = self.parent / 'source'
+        source.write_bytes(b'version preserved')
+        observe = self.move_request('source-repair-observe-move')
+        rename = observe | {'action': 'source-repair-rename-move'}
+        steps = (
+            (observe, {'paths': {'source': 'expected', 'destination': 'missing'}}),
+            (rename, {}),
+            (observe, {'paths': {'source': 'missing', 'destination': 'expected'}}),
+            (rename | {'source': 'target', 'destination': 'source'}, {}),
+            (observe, {'paths': {'source': 'expected', 'destination': 'missing'}}),
+        )
+        for request, fields in steps:
+            result = self.dispatch(request)
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertEqual(json.loads(result.stdout), {'status': 'ok'} | fields)
+            self.assertEqual(result.stderr, '')
+        self.assertEqual(source.read_bytes(), b'version preserved')
+
+    def test_observe_foreign_inode_symlink_and_fifo_without_following(self):
+        source = self.parent / 'source'
+        source.write_bytes(b'original')
+        observe = self.move_request('source-repair-observe-move')
+        target = self.parent / 'target'
+        for create in (lambda: target.write_bytes(b'other'), lambda: target.symlink_to('source'),
+                       lambda: os.mkfifo(target)):
+            with self.subTest(create=create):
+                create()
+                result = self.dispatch(observe)
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertEqual(json.loads(result.stdout), {
+                    'status': 'ok', 'paths': {'source': 'expected', 'destination': 'foreign'},
+                })
+                target.unlink()
+        source.chmod(0o666)
+        result = self.dispatch(observe)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(json.loads(result.stdout)['paths'], {'source': 'foreign', 'destination': 'missing'})
+
+    def test_move_dispatch_rejects_unpinned_parent_extra_fields_and_occupied_target(self):
+        source = self.parent / 'source'
+        source.write_bytes(b'original')
+        target = self.parent / 'target'
+        target.write_bytes(b'preserve')
+        observe = self.move_request('source-repair-observe-move')
+        unpinned = observe['parentIdentity'] | {'inode': observe['parentIdentity']['inode'] + 1}
+        for request in (
+            observe | {'parentIdentity': unpinned}, observe | {'unexpected': True},
+            observe | {'action': 'source-repair-rename-move', 'parentIdentity': unpinned},
+            observe | {'action': 'source-repair-rename-move'},
+        ):
+            with self.subTest(request=request):
+                result = self.dispatch(request)
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertEqual(json.loads(result.stdout), {'status': 'blocked'})
+                self.assertEqual(result.stderr, '')
+        self.assertEqual(source.read_bytes(), b'original')
+        self.assertEqual(target.read_bytes(), b'preserve')
+
+    def test_observe_refuses_nonexact_alias_even_when_lookup_resolves_expected_inode(self):
+        (self.parent / 'source').write_bytes(b'original')
+        request = self.move_request('source-repair-observe-move')
+        real_exact = custody._exact_name_in_directory
+
+        def alias_listing(fd, name):
+            return name != 'source' and real_exact(fd, name)
+
+        with mock.patch.object(custody, '_exact_name_in_directory', side_effect=alias_listing):
+            paths = custody.observe_source_repair_move(
+                request['parent'], request['source'], request['destination'],
+                request['parentIdentity'], request['entryIdentity'])
+        self.assertEqual(paths, {'source': 'foreign', 'destination': 'missing'})
+
     def test_regular_file_moves_without_changing_content_or_identity(self):
         original = self.parent / 'source'
         original.write_bytes(b'exact local bytes')

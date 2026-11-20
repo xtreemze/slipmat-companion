@@ -100,9 +100,12 @@ readback must match that identity before any move can be authorized. If a crash
 occurs after directory creation but before that journal update, replay blocks
 and leaves the unbound directory for inspection. The Linux preservation host connects the journaled intent and root-owned,
 hash-pinned host specification to the archive helper. It checks the stopped
-service before and after each helper call. The source-repair command still
-needs to compose these pieces with admission, exact move observation and
-terminal verification.
+service before and after each helper call. The Linux move host observes both
+exact names under each pinned parent, verifies the expected prefix and archive,
+and applies only the move or restore index recorded in the current journal.
+A case alias or foreign identity is not treated as absence. The source-repair
+command still needs to compose these pieces with admission, target-mount
+capability checks and terminal verification.
 
 Tests exercise write-ahead ordering, preservation before moves, every synthetic
 forward/restore journal-effect crash boundary, pending rollback outcomes, foreign

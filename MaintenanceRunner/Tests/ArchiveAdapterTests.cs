@@ -72,8 +72,8 @@ internal static class ArchiveAdapterTests
         var boot = Guid.NewGuid().ToString();
         var specificationPath = Path.Combine(root, "source-repair.json");
         var manifestPath = Path.Combine(root, "manifest.json");
-        var specification = new SourcePathRepairArchiveSpecification(boot, ns, python, pythonHash, helper, helperHash,
-            manifestPath, root, "journal-archive", Identify(root));
+        var specification = new SourcePathRepairHostSpecification(boot, ns, python, pythonHash, helper, helperHash,
+            manifestPath, root, "journal-archive", Identify(root), new() { [""] = plan.Binding.RootIdentity });
         var specBytes = JsonSerializer.SerializeToUtf8Bytes(specification, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         LinuxTrustedFile.CreateNew(specificationPath, specBytes);
         LinuxTrustedFile.CreateNew(manifestPath, manifest);
@@ -128,7 +128,43 @@ internal static class ArchiveAdapterTests
             if (current is null || current.Revision != snapshot.Revision || current.Job.ConflictRecovery != job.ConflictRecovery
                 || current.Job.Phase != job.Phase)
                 throw new Exception("archive copy unexpectedly changed the journal");
+
+            var moveHost = new SourcePathRepairMoveHost(adapter, stopped, specificationPath);
+            await CheckPathsAsync(moveHost, snapshot, moved: false);
+            var stateBeforeMove = snapshot.State with
+            {
+                Phase = CloudSourcePathRepairPhase.MoveIntent,
+                Preservation = new(plan.Fingerprint, plan.PreservationManifestSha256, snapshot.State.ReservedArchiveIdentity!),
+            };
+            var intent = await adapter.CompareExchangeAsync(snapshot, stateBeforeMove, default)
+                ?? throw new Exception("move intent could not be journaled");
+            var move = new CloudSourcePathRepairDecision(CloudSourcePathRepairAction.Move, "fixture", MoveIndex: 0);
+            try
+            {
+                await moveHost.ExecuteAsync(snapshot, move, default);
+                throw new Exception("stale revision authorized a move");
+            }
+            catch (InvalidOperationException ex) when (ex.Message == "source-repair-move-journal-changed") { }
+            await moveHost.ExecuteAsync(intent, move, default);
+            await CheckPathsAsync(moveHost, intent, moved: true);
+            var restore = await adapter.CompareExchangeAsync(intent, intent.State with
+            {
+                Phase = CloudSourcePathRepairPhase.RestoreIntent, Cursor = 1, RollbackRequested = true,
+            }, default) ?? throw new Exception("restore intent could not be journaled");
+            await moveHost.ExecuteAsync(restore,
+                new(CloudSourcePathRepairAction.Restore, "fixture", MoveIndex: 0), default);
+            await CheckPathsAsync(moveHost, restore, moved: false);
+
         }
+    }
+
+    private static async Task CheckPathsAsync(SourcePathRepairMoveHost host, CloudSourcePathRepairSnapshot snapshot, bool moved)
+    {
+        var paths = await host.ObserveAsync(snapshot, default);
+        if (paths.Length != 1 || paths[0] != new CloudSourcePathRepairPathObservation(
+            moved ? CloudSourcePathRepairPathState.Missing : CloudSourcePathRepairPathState.Expected,
+            moved ? CloudSourcePathRepairPathState.Expected : CloudSourcePathRepairPathState.Missing))
+            throw new Exception("move observation did not match the physical path state");
     }
 
     private sealed class FixtureBarrier(LinuxBarrierSnapshot snapshot) : ILinuxBarrierQuery
