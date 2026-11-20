@@ -245,7 +245,7 @@ public static class CloudSourcePathRepairTransaction
             && left.RollbackRequested == right.RollbackRequested && left.Preservation == right.Preservation
             && left.Verification == right.Verification && left.ReservedArchiveIdentity == right.ReservedArchiveIdentity;
 
-    private static bool ValidState(CloudSourcePathRepairState? state)
+    internal static bool ValidState(CloudSourcePathRepairState? state)
     {
         if (state is null || !ValidPlan(state.Plan) || state.Cursor < 0 || state.Cursor > state.Plan.Moves.Length
             || state.Preservation is { } receipt && (!PreservationMatches(state.Plan, receipt)

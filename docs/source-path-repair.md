@@ -98,8 +98,11 @@ It checks the source again after copying. The transaction records the reservatio
 identity through whole-job compare-and-exchange before permitting copy. Verified
 readback must match that identity before any move can be authorized. If a crash
 occurs after directory creation but before that journal update, replay blocks
-and leaves the unbound directory for inspection. The production host adapter
-must connect these transitions to the existing archive helper.
+and leaves the unbound directory for inspection. The Linux preservation host connects the journaled intent and root-owned,
+hash-pinned host specification to the archive helper. It checks the stopped
+service before and after each helper call. The source-repair command still
+needs to compose these pieces with admission, exact move observation and
+terminal verification.
 
 Tests exercise write-ahead ordering, preservation before moves, every synthetic
 forward/restore journal-effect crash boundary, pending rollback outcomes, foreign

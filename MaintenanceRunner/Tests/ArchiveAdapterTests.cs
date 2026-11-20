@@ -60,8 +60,80 @@ internal static class ArchiveAdapterTests
             var archivePath = Path.Combine(root.FullName, "archive", "Album", "Track.flac");
             if (!(await File.ReadAllBytesAsync(archivePath)).SequenceEqual(contents))
                 throw new Exception("archive payload did not match source");
+            await ExerciseJournalHostAsync(root.FullName, python, pythonHash, helper, helperHash, manifest, plan);
         }
         finally { root.Delete(true); }
+    }
+
+    private static async Task ExerciseJournalHostAsync(string root, string python, string pythonHash,
+        string helper, string helperHash, byte[] manifest, CloudSourcePathRepairPlan plan)
+    {
+        const string ns = "mnt:[123]";
+        var boot = Guid.NewGuid().ToString();
+        var specificationPath = Path.Combine(root, "source-repair.json");
+        var manifestPath = Path.Combine(root, "manifest.json");
+        var specification = new SourcePathRepairArchiveSpecification(boot, ns, python, pythonHash, helper, helperHash,
+            manifestPath, root, "journal-archive", Identify(root));
+        var specBytes = JsonSerializer.SerializeToUtf8Bytes(specification, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        LinuxTrustedFile.CreateNew(specificationPath, specBytes);
+        LinuxTrustedFile.CreateNew(manifestPath, manifest);
+        var binding = plan.Binding with { HostSpecificationSha256 = Hash(specBytes) };
+        plan = plan with { Binding = binding };
+        plan = plan with { Fingerprint = CloudSourcePathRepairTransaction.Fingerprint(plan) };
+        var state = new CloudSourcePathRepairState(plan, CloudSourcePathRepairPhase.PreservationIntent);
+        var job = new CloudMigrationJob(binding.JobId, binding.ProfileId, binding.LibraryName,
+            CloudMigrationDirections.LocalToVfs, CloudMigrationPhases.Failed, "conflict-path-collision",
+            binding.LocalRoot, null, null, binding.RemoteName, binding.RemotePath, "", false, null,
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, SourcePathRepair: state);
+        var destination = Path.Combine(root, "journal-archive");
+        var journal = new CloudMigrationJournal(Path.Combine(root, "journal"));
+        await using (var lease = await journal.AcquireAsync())
+        {
+            await lease.CompareExchangeAsync(null, job);
+            var adapter = new SourcePathRepairJournal(lease);
+            var snapshot = await adapter.ReadAsync(binding.JobId, default) ?? throw new Exception("repair unavailable");
+            var active = new LinuxMaintenanceBarrier(new FixtureBarrier(new(true, true, "active", 123, 0, [123], boot, ns, ns)));
+            try
+            {
+                await new SourcePathRepairArchiveHost(adapter, active, specificationPath).ReserveArchiveAsync(snapshot, default);
+                throw new Exception("active service permitted archive reservation");
+            }
+            catch (InvalidOperationException ex) when (ex.Message == "maintenance-service-barrier-failed") { }
+            if (Directory.Exists(destination)) throw new Exception("failed barrier changed archive");
+            var stopped = new LinuxMaintenanceBarrier(new FixtureBarrier(new(true, true, "inactive", 0, 0, [], boot, ns, ns)));
+            try
+            {
+                await new SourcePathRepairArchiveHost(adapter, stopped, manifestPath).ReserveArchiveAsync(snapshot, default);
+                throw new Exception("unbound host specification permitted reservation");
+            }
+            catch (InvalidOperationException ex) when (ex.Message == "source-repair-host-specification-changed") { }
+            if (Directory.Exists(destination)) throw new Exception("unbound specification changed archive");
+            var host = new SourcePathRepairArchiveHost(adapter, stopped, specificationPath);
+            var identity = await host.ReserveArchiveAsync(snapshot, default);
+            if (await adapter.CompareExchangeAsync(snapshot, state with { ReservedArchiveIdentity = identity }, default) is null)
+                throw new Exception("archive reservation could not be journaled");
+            if (await adapter.CompareExchangeAsync(snapshot, state, default) is not null)
+                throw new Exception("stale revision replaced archive reservation");
+        }
+        await using (var lease = await journal.AcquireAsync())
+        {
+            var adapter = new SourcePathRepairJournal(lease);
+            var snapshot = await adapter.ReadAsync(binding.JobId, default) ?? throw new Exception("reservation missing after reopening journal");
+            var stopped = new LinuxMaintenanceBarrier(new FixtureBarrier(new(true, true, "inactive", 0, 0, [], boot, ns, ns)));
+            var host = new SourcePathRepairArchiveHost(adapter, stopped, specificationPath);
+            if (await host.CopyArchiveAsync(snapshot, default) != snapshot.State.ReservedArchiveIdentity
+                || await host.VerifyArchiveAsync(snapshot, default) != snapshot.State.ReservedArchiveIdentity)
+                throw new Exception("verified archive does not match the durable reservation");
+            var current = await lease.ReadAsync(binding.JobId);
+            if (current is null || current.Revision != snapshot.Revision || current.Job.ConflictRecovery != job.ConflictRecovery
+                || current.Job.Phase != job.Phase)
+                throw new Exception("archive copy unexpectedly changed the journal");
+        }
+    }
+
+    private sealed class FixtureBarrier(LinuxBarrierSnapshot snapshot) : ILinuxBarrierQuery
+    {
+        public Task<LinuxBarrierSnapshot> ReadAsync(CancellationToken cancellationToken) => Task.FromResult(snapshot);
     }
 
     private static string Hash(byte[] contents) => Convert.ToHexStringLower(SHA256.HashData(contents));
