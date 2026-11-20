@@ -86,6 +86,22 @@ public static class CustodyProcess
             throw new InvalidOperationException("mountpoint-identity-mismatch");
     }
 
+    internal static async Task ProbeNoReplaceAsync(SourcePathRepairHostSpecification specification,
+        CancellationToken cancellationToken)
+    {
+        var payload = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            action = "source-repair-probe-noreplace",
+            parent = specification.RenameProbePath,
+            parentIdentity = specification.RenameProbeIdentity,
+        }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var output = await InvokeAsync(specification.PythonPath, specification.PythonSha256, specification.HelperPath,
+            specification.HelperSha256, payload, cancellationToken).ConfigureAwait(false);
+        using var document = JsonDocument.Parse(output);
+        if (document.RootElement.GetProperty("status").GetString() != "ok")
+            throw new InvalidOperationException("source-repair-rename-probe-invalid");
+    }
+
     internal static async Task<CloudSourcePathRepairPathObservation?> MoveAsync(
         SourcePathRepairHostSpecification specification, CloudSourcePathRepairPlan plan, int index,
         bool execute, bool reverse, CancellationToken cancellationToken)

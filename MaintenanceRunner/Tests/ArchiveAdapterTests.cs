@@ -72,8 +72,9 @@ internal static class ArchiveAdapterTests
         var boot = Guid.NewGuid().ToString();
         var specificationPath = Path.Combine(root, "source-repair.json");
         var manifestPath = Path.Combine(root, "manifest.json");
+        var probePath = Directory.CreateDirectory(Path.Combine(root, "rename-probe")).FullName;
         var specification = new SourcePathRepairHostSpecification(boot, ns, python, pythonHash, helper, helperHash,
-            manifestPath, root, "journal-archive", Identify(root), new() { [""] = plan.Binding.RootIdentity });
+            manifestPath, root, "journal-archive", Identify(root), new() { [""] = plan.Binding.RootIdentity }, probePath, Identify(probePath));
         var specBytes = JsonSerializer.SerializeToUtf8Bytes(specification, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         LinuxTrustedFile.CreateNew(specificationPath, specBytes);
         LinuxTrustedFile.CreateNew(manifestPath, manifest);
@@ -130,6 +131,9 @@ internal static class ArchiveAdapterTests
                 throw new Exception("archive copy unexpectedly changed the journal");
 
             var moveHost = new SourcePathRepairMoveHost(adapter, stopped, specificationPath);
+            await moveHost.ProbeNoReplaceAsync(snapshot, default);
+            if (Directory.EnumerateFileSystemEntries(probePath).Any())
+                throw new Exception("rename probe left scratch files");
             await CheckPathsAsync(moveHost, snapshot, moved: false);
             var stateBeforeMove = snapshot.State with
             {

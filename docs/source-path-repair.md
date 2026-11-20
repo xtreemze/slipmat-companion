@@ -103,9 +103,11 @@ hash-pinned host specification to the archive helper. It checks the stopped
 service before and after each helper call. The Linux move host observes both
 exact names under each pinned parent, verifies the expected prefix and archive,
 and applies only the move or restore index recorded in the current journal.
-A case alias or foreign identity is not treated as absence. The source-repair
-command still needs to compose these pieces with admission, target-mount
-capability checks and terminal verification.
+A case alias or foreign identity is not treated as absence. Before renaming,
+the host proves occupied-target refusal and successful no-replace moves for
+both files and directories. This uses a pinned scratch directory on the source
+mount and outside the source and archive trees. The source-repair command
+still needs to compose these pieces with admission and terminal verification.
 
 Tests exercise write-ahead ordering, preservation before moves, every synthetic
 forward/restore journal-effect crash boundary, pending rollback outcomes, foreign

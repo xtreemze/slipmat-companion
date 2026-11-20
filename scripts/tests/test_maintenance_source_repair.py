@@ -131,6 +131,80 @@ class SourceRepairRenameTests(unittest.TestCase):
                 request['parentIdentity'], request['entryIdentity'])
         self.assertEqual(paths, {'source': 'foreign', 'destination': 'missing'})
 
+    def test_noreplace_probe_dispatch_requires_exact_fields_and_pinned_parent(self):
+        keeper = self.parent / 'keep'
+        keeper.write_bytes(b'outside the probe')
+        identity = self.identity(self.parent)
+        request = {'action': 'source-repair-probe-noreplace', 'parent': str(self.parent),
+                   'parentIdentity': identity}
+        for invalid in (request | {'unexpected': True},
+                        request | {'parentIdentity': identity | {'mountId': identity['mountId'] + 1}}):
+            with self.subTest(request=invalid):
+                result = self.dispatch(invalid)
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertEqual(json.loads(result.stdout), {'status': 'blocked'})
+        result = self.dispatch(request)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(json.loads(result.stdout), {'status': 'ok'})
+        self.assertEqual(result.stderr, '')
+        self.assertEqual(list(self.parent.iterdir()), [keeper])
+        self.assertEqual(keeper.read_bytes(), b'outside the probe')
+
+    def test_noreplace_probe_attempts_occupied_and_absent_targets_for_both_kinds(self):
+        attempts = []
+        rename = custody._rename_noreplace
+
+        def record(parent_fd, source, destination):
+            source_stat = os.stat(source, dir_fd=parent_fd, follow_symlinks=False)
+            try:
+                os.stat(destination, dir_fd=parent_fd, follow_symlinks=False)
+                occupied = True
+            except FileNotFoundError:
+                occupied = False
+            attempts.append((stat.S_IFMT(source_stat.st_mode), occupied))
+            return rename(parent_fd, source, destination)
+
+        with mock.patch.object(custody, '_rename_noreplace', side_effect=record):
+            custody.probe_source_repair_noreplace(str(self.parent), self.identity(self.parent))
+        self.assertEqual(attempts, [(stat.S_IFREG, True), (stat.S_IFREG, False),
+                                    (stat.S_IFDIR, True), (stat.S_IFDIR, False)])
+        self.assertEqual(list(self.parent.iterdir()), [])
+
+    def test_noreplace_probe_refuses_unsupported_and_unobserved_rename(self):
+        rename = custody._rename_noreplace
+
+        def pretend_success(parent_fd, source, destination):
+            try:
+                os.stat(destination, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                return
+            return rename(parent_fd, source, destination)
+
+        for failure, exception in ((OSError(errno.EINVAL, 'unsupported'), OSError),
+                                   (pretend_success, custody.CustodyError)):
+            with self.subTest(failure=failure):
+                with mock.patch.object(custody, '_rename_noreplace', side_effect=failure):
+                    with self.assertRaises(exception):
+                        custody.probe_source_repair_noreplace(str(self.parent), self.identity(self.parent))
+                self.assertEqual(list(self.parent.iterdir()), [])
+
+    def test_noreplace_probe_preserves_foreign_replacement_in_owned_name(self):
+        def inject_foreign(parent_fd, source, destination):
+            os.unlink(destination, dir_fd=parent_fd)
+            fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=parent_fd)
+            try:
+                os.write(fd, b'foreign replacement')
+            finally:
+                os.close(fd)
+            raise custody.CustodyError('destination-exists')
+
+        with mock.patch.object(custody, '_rename_noreplace', side_effect=inject_foreign):
+            with self.assertRaises((custody.CustodyError, OSError)):
+                custody.probe_source_repair_noreplace(str(self.parent), self.identity(self.parent))
+        leftover, = self.parent.iterdir()
+        foreign, = leftover.iterdir()
+        self.assertEqual(foreign.read_bytes(), b'foreign replacement')
+
     def test_regular_file_moves_without_changing_content_or_identity(self):
         original = self.parent / 'source'
         original.write_bytes(b'exact local bytes')

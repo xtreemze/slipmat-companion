@@ -16,6 +16,12 @@ internal sealed class SourcePathRepairMoveHost(SourcePathRepairJournal journal, 
         return observations;
     }
 
+    internal async Task ProbeNoReplaceAsync(CloudSourcePathRepairSnapshot expected, CancellationToken cancellationToken)
+    {
+        var (snapshot, specification) = await ReadBoundAsync(expected, cancellationToken).ConfigureAwait(false);
+        await ProbeNoReplaceAsync(snapshot.State.Plan, specification, cancellationToken).ConfigureAwait(false);
+    }
+
     internal async Task ExecuteAsync(CloudSourcePathRepairSnapshot expected, CloudSourcePathRepairDecision decision,
         CancellationToken cancellationToken)
     {
@@ -29,6 +35,7 @@ internal sealed class SourcePathRepairMoveHost(SourcePathRepairJournal journal, 
             || state.Preservation is null)
             throw new InvalidOperationException("source-repair-move-intent-required");
 
+        await ProbeNoReplaceAsync(state.Plan, specification, cancellationToken).ConfigureAwait(false);
         var archive = new SourcePathRepairArchiveHost(journal, barrier, specificationPath);
         await archive.VerifyArchiveAsync(snapshot, cancellationToken).ConfigureAwait(false);
         var paths = await ObservePathsAsync(state.Plan, specification, cancellationToken).ConfigureAwait(false);
@@ -59,6 +66,26 @@ internal sealed class SourcePathRepairMoveHost(SourcePathRepairJournal journal, 
             throw new InvalidOperationException("source-repair-move-root-changed");
         return (snapshot, SourcePathRepairHostSpecification.Read(specificationPath, plan));
     }
+
+    private async Task ProbeNoReplaceAsync(CloudSourcePathRepairPlan plan, SourcePathRepairHostSpecification specification,
+        CancellationToken cancellationToken)
+    {
+        var probe = specification.RenameProbeIdentity;
+        var path = specification.RenameProbePath;
+        var source = plan.Binding.LocalRoot;
+        var archive = Path.Combine(specification.ArchiveParent, specification.ArchiveLeaf);
+        if (!Path.IsPathFullyQualified(path) || Path.GetFullPath(path) != path || path == "/"
+            || PathsOverlap(path, source) || PathsOverlap(path, archive)
+            || probe.Device != plan.Binding.RootIdentity.Device || probe.MountId != plan.Binding.RootIdentity.MountId)
+            throw new InvalidOperationException("source-repair-rename-probe-unbound");
+        await VerifyBarrierAsync(specification, cancellationToken).ConfigureAwait(false);
+        await CustodyProcess.ProbeNoReplaceAsync(specification, cancellationToken).ConfigureAwait(false);
+        await VerifyBarrierAsync(specification, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static bool PathsOverlap(string first, string second)
+        => first == second || first.StartsWith(second + '/', StringComparison.Ordinal)
+            || second.StartsWith(first + '/', StringComparison.Ordinal);
 
     private Task VerifyBarrierAsync(SourcePathRepairHostSpecification specification, CancellationToken cancellationToken)
         => barrier.VerifyMaintenanceAsync("jellyfin.service", specification.BootId, specification.MountNamespace, cancellationToken);

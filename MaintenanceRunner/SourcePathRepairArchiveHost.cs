@@ -66,7 +66,8 @@ internal sealed class SourcePathRepairArchiveHost(SourcePathRepairJournal journa
 internal sealed record SourcePathRepairHostSpecification(string BootId, string MountNamespace,
     string PythonPath, string PythonSha256, string HelperPath, string HelperSha256, string ManifestPath,
     string ArchiveParent, string ArchiveLeaf, CloudSourcePathRepairIdentity ArchiveParentIdentity,
-    Dictionary<string, CloudSourcePathRepairIdentity> MoveParents)
+    Dictionary<string, CloudSourcePathRepairIdentity> MoveParents,
+    string RenameProbePath, CloudSourcePathRepairIdentity RenameProbeIdentity)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {

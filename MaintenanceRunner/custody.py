@@ -8,6 +8,7 @@ import os
 import stat
 import sys
 import unicodedata
+from contextlib import ExitStack
 
 class CustodyError(Exception):
     pass
@@ -112,15 +113,11 @@ def _open_source_repair_parent(parent):
         raise
 
 
-def _open_source_repair_move_parent(parent, source, destination, expected_parent, expected_entry):
+def _open_source_repair_pinned_parent(parent, expected_parent):
     if sys.platform != 'linux' or os.geteuid() != 0:
         raise CustodyError('linux-root-required')
-    _source_repair_leaf(source)
-    _source_repair_leaf(destination)
     _expected_identity(expected_parent)
-    _expected_identity(expected_entry, include_kind=True)
-    if (source == destination or not isinstance(parent, str)
-            or not os.path.isabs(parent) or os.path.realpath(parent) != parent):
+    if (not isinstance(parent, str) or not os.path.isabs(parent) or os.path.realpath(parent) != parent):
         raise CustodyError('invalid-parent-or-target')
     parent_fd = _open_source_repair_parent(parent)
     try:
@@ -135,6 +132,15 @@ def _open_source_repair_move_parent(parent, source, destination, expected_parent
     except BaseException:
         os.close(parent_fd)
         raise
+
+
+def _open_source_repair_move_parent(parent, source, destination, expected_parent, expected_entry):
+    _source_repair_leaf(source)
+    _source_repair_leaf(destination)
+    _expected_identity(expected_entry, include_kind=True)
+    if source == destination:
+        raise CustodyError('invalid-parent-or-target')
+    return _open_source_repair_pinned_parent(parent, expected_parent)
 
 
 def _observe_source_repair_leaf(parent_fd, name, expected_parent, expected_entry):
@@ -219,6 +225,86 @@ def rename_source_entry(parent, source, destination, expected_parent, expected_e
                 raise CustodyError('source-repair-commit-uncertain') from exc
         finally:
             os.close(source_fd)
+    finally:
+        os.close(parent_fd)
+
+
+def _probe_entry_identity(fd, kind):
+    info = os.fstat(fd)
+    return {'device': info.st_dev, 'inode': info.st_ino, 'mountId': _fd_mount_id(fd), 'kind': kind}
+
+
+def _probe_noreplace_kind(directory_fd, directory_identity, kind, pinned_entries, owned):
+    source, occupied, vacant = (kind + '-' + suffix for suffix in ('source', 'occupied', 'vacant'))
+    for name in (source, occupied):
+        if kind == 'directory':
+            os.mkdir(name, 0o700, dir_fd=directory_fd)
+            flags = os.O_RDONLY | os.O_DIRECTORY
+        else:
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        fd = os.open(name, flags | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600, dir_fd=directory_fd)
+        pinned_entries.callback(os.close, fd)
+        owned[name] = _probe_entry_identity(fd, kind)
+
+    def observe(name, expected):
+        return _observe_source_repair_leaf(directory_fd, name, directory_identity, expected)
+
+    if observe(source, owned[source]) != 'expected' or observe(occupied, owned[occupied]) != 'expected':
+        raise CustodyError('source-repair-noreplace-probe-entry-invalid')
+    try:
+        _rename_noreplace(directory_fd, source, occupied)
+    except CustodyError as exc:
+        if str(exc) != 'destination-exists':
+            raise
+    else:
+        raise CustodyError('source-repair-noreplace-occupied-target-accepted')
+
+    if (observe(source, owned[source]) != 'expected' or observe(occupied, owned[occupied]) != 'expected'
+            or observe(vacant, owned[source]) != 'missing'):
+        raise CustodyError('source-repair-noreplace-probe-entry-changed')
+    _rename_noreplace(directory_fd, source, vacant)
+    owned[vacant] = owned[source]
+    os.fsync(directory_fd)
+    if (observe(source, owned[source]) != 'missing' or observe(vacant, owned[vacant]) != 'expected'
+            or observe(occupied, owned[occupied]) != 'expected'):
+        raise CustodyError('source-repair-noreplace-commit-unobserved')
+
+
+def probe_source_repair_noreplace(parent, expected_parent):
+    """Prove no-replace on a pinned explicit scratch directory on the source mount.
+
+    The caller must establish exclusive scratch custody. If a name no longer
+    refers to a probe-created object, leave it in place and fail closed.
+    """
+    if parent == '/':
+        raise CustodyError('source-repair-noreplace-scratch-invalid')
+    parent_fd, _, _ = _open_source_repair_pinned_parent(parent, expected_parent)
+    try:
+        name = '.slipmat-noreplace-' + os.urandom(16).hex()
+        os.mkdir(name, 0o700, dir_fd=parent_fd)
+        directory_fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                               dir_fd=parent_fd)
+        try:
+            identity = _probe_entry_identity(directory_fd, 'directory')
+            if _observe_source_repair_leaf(parent_fd, name, expected_parent, identity) != 'expected':
+                raise CustodyError('source-repair-noreplace-scratch-changed')
+            owned = {}
+            with ExitStack() as pinned_entries:
+                try:
+                    for kind in ('file', 'directory'):
+                        _probe_noreplace_kind(directory_fd, identity, kind, pinned_entries, owned)
+                finally:
+                    for leaf, expected in owned.items():
+                        if _observe_source_repair_leaf(directory_fd, leaf, identity, expected) != 'expected':
+                            continue
+                        remove = os.unlink if expected['kind'] == 'file' else os.rmdir
+                        remove(leaf, dir_fd=directory_fd)
+                    if _observe_source_repair_leaf(parent_fd, name, expected_parent, identity) != 'expected':
+                        raise CustodyError('source-repair-noreplace-scratch-changed')
+                    os.rmdir(name, dir_fd=parent_fd)
+                    os.fsync(parent_fd)
+        finally:
+            os.close(directory_fd)
     finally:
         os.close(parent_fd)
 
@@ -909,6 +995,10 @@ def main():
                 result['paths'] = observe_source_repair_move(*args)
             else:
                 rename_source_entry(*args)
+        elif action == 'source-repair-probe-noreplace':
+            if set(request) != {'action', 'parent', 'parentIdentity'}:
+                raise CustodyError('source-repair-noreplace-request-invalid')
+            probe_source_repair_noreplace(request['parent'], request['parentIdentity'])
         elif action in ('source-repair-archive-create-or-resume', 'source-repair-archive-verify'):
             common = {'action', 'archiveParent', 'archiveLeaf', 'archiveParentIdentity',
                       'archiveIdentity', 'manifestBase64', 'manifestSha256'}
