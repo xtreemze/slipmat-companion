@@ -43,9 +43,10 @@ internal sealed class SourcePathRepairJournal(CloudMigrationJournalLease lease)
             || job.ConflictRecovery is { Status: not ("blocked" or "completed") })
             return null;
 
-        var binding = repair.Plan.Binding;
-        return binding.JobId == job.Id && binding.ProfileId == job.ProfileId && binding.LibraryName == job.LibraryName
-            && binding.LocalRoot == job.LocalPath && binding.RemoteName == job.RemoteName && binding.RemotePath == job.RemotePath
-            ? new(snapshot.Revision, repair) : null;
+        return MatchesJob(repair.Plan.Binding, job) ? new(snapshot.Revision, repair) : null;
     }
+
+    internal static bool MatchesJob(CloudSourcePathRepairBinding binding, CloudMigrationJob job)
+        => binding.JobId == job.Id && binding.ProfileId == job.ProfileId && binding.LibraryName == job.LibraryName
+            && binding.LocalRoot == job.LocalPath && binding.RemoteName == job.RemoteName && binding.RemotePath == job.RemotePath;
 }

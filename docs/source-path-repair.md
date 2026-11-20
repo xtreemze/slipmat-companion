@@ -1,10 +1,26 @@
 # Source-path repair foundation
 
 This draft contains the repair transaction, ownership guards and a Linux host
-adapter exercised against disposable files and a real journal. Admission and
-the production operator command are pending.
+adapter exercised against disposable files and a real journal. Read-only
+operator checks are available. Installing and proving the systemd guard and
+exposing the mutating operator command are pending.
 Do not edit a journal to manufacture an admitted repair. No source-path move is
 authorized by a diagnostic report or a terminal custody receipt alone.
+
+## Read-only runner checks
+
+`source-repair-startup ABSOLUTE_JOURNAL_DIRECTORY` reads the full journal
+inventory under the existing writer lock. It refuses service startup while
+any source repair still owns a job, including a job other than the original
+VFS maintenance job. It also refuses unreadable inventory. It allows valid
+terminal repair receipts without requiring a VFS promotion admission.
+
+`source-repair-check ABSOLUTE_JOURNAL_DIRECTORY JOB_ID ABSOLUTE_SPEC_PATH
+ABSOLUTE_APPROVAL_PATH` uses the stopped-service barrier to validate the
+reviewed plan, exact job revision, bound directories, full source metadata,
+namespace and selected content. The root-controlled approval JSON contains
+`expectedJournalRevision` and `plan`. The check does not reserve an archive,
+run the filesystem probe or change the journal.
 
 ## Purpose and owner
 

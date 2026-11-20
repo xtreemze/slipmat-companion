@@ -81,7 +81,12 @@ internal static class ArchiveAdapterTests
         var specBytes = JsonSerializer.SerializeToUtf8Bytes(specification, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         LinuxTrustedFile.CreateNew(specificationPath, specBytes);
         LinuxTrustedFile.CreateNew(manifestPath, manifest);
-        var binding = plan.Binding with { HostSpecificationSha256 = Hash(specBytes) };
+        var sourceMetadata = await CloudMigrationManifestBuilder.CaptureAsync(plan.Binding.LocalRoot);
+        var binding = plan.Binding with
+        {
+            HostSpecificationSha256 = Hash(specBytes),
+            Source = plan.Binding.Source with { ManifestSha256 = sourceMetadata.DigestSha256 },
+        };
         plan = plan with { Binding = binding };
         plan = plan with { Fingerprint = CloudSourcePathRepairTransaction.Fingerprint(plan) };
         var state = new CloudSourcePathRepairState(plan, entireTransaction
@@ -89,15 +94,40 @@ internal static class ArchiveAdapterTests
         var job = new CloudMigrationJob(binding.JobId, binding.ProfileId, binding.LibraryName,
             CloudMigrationDirections.LocalToVfs, CloudMigrationPhases.Failed, "conflict-path-collision",
             binding.LocalRoot, null, null, binding.RemoteName, binding.RemotePath, "", false, null,
-            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, SourcePathRepair: state);
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            ConflictRecovery: entireTransaction ? new(Guid.NewGuid().ToString("N"), "fixture",
+                CloudConflictRecoverySession.CompanionOnlyWriter, "blocked", DateTimeOffset.UtcNow,
+                Code: "conflict-path-collision", FailureStage: "listing-cloud") : null,
+            SourcePathRepair: entireTransaction ? null : state);
         var destination = Path.Combine(root, "journal-archive");
         var journal = new CloudMigrationJournal(Path.Combine(root, "journal"));
         if (entireTransaction)
         {
             await using var lease = await journal.AcquireAsync();
-            await lease.CompareExchangeAsync(null, job);
+            var initial = await lease.CompareExchangeAsync(null, job);
             var adapter = new SourcePathRepairJournal(lease);
             var barrier = new LinuxMaintenanceBarrier(new FixtureBarrier(new(true, true, "inactive", 0, 0, [], boot, ns, ns)));
+            var initialApproval = new SourcePathRepairAdmission.Approval(initial.Revision, plan);
+            var approvalPath = Path.Combine(root, "approval.json");
+            var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+            LinuxTrustedFile.CreateNew(approvalPath, JsonSerializer.SerializeToUtf8Bytes(initialApproval, json));
+            var staleApprovalPath = Path.Combine(root, "stale-approval.json");
+            LinuxTrustedFile.CreateNew(staleApprovalPath, JsonSerializer.SerializeToUtf8Bytes(
+                initialApproval with { ExpectedJournalRevision = new string('0', 64) }, json));
+            var admission = new SourcePathRepairAdmission(lease, barrier, specificationPath);
+            try
+            {
+                await admission.PrepareAsync(binding.JobId, staleApprovalPath, default);
+                throw new Exception("stale approval admitted the repair");
+            }
+            catch (InvalidOperationException ex) when (ex.Message == "source-repair-approval-revision-changed") { }
+            await admission.CheckAsync(binding.JobId, approvalPath, default);
+            if ((await lease.ReadAsync(binding.JobId))?.Revision != initial.Revision)
+                throw new Exception("admission check modified the journal");
+            await admission.PrepareAsync(binding.JobId, approvalPath, default);
+            var admitted = await lease.ReadAsync(binding.JobId);
+            if (admitted?.Job.ConflictRecovery != job.ConflictRecovery || admitted?.Job.Phase != job.Phase)
+                throw new Exception("admission rewrote original failure history");
             var operations = new SourcePathRepairOperations(adapter, barrier, specificationPath);
             var result = await operations.RunAsync(binding.JobId, default);
             var repaired = await adapter.ReadAsync(binding.JobId, default) ?? throw new Exception("repair state missing");

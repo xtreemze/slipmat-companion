@@ -11,11 +11,17 @@ internal static class Program
         var inspect = args.Length == 3 && args[0] == "inspect";
         var startup = args.Length == 4 && args[0] == "startup" && Path.IsPathFullyQualified(args[3]);
         var run = args.Length == 4 && args[0] == "run" && Path.IsPathFullyQualified(args[3]);
-        if ((!inspect && !run && !startup) || !Path.IsPathFullyQualified(args[1]) || !Guid.TryParseExact(args[2], "N", out _))
+        var sourceRepairStartup = args.Length == 2 && args[0] == "source-repair-startup";
+        var sourceRepairCheck = args.Length == 5 && args[0] == "source-repair-check"
+            && Path.IsPathFullyQualified(args[3]) && Path.IsPathFullyQualified(args[4]);
+        if ((!inspect && !run && !startup && !sourceRepairStartup && !sourceRepairCheck) || !Path.IsPathFullyQualified(args[1])
+            || (!sourceRepairStartup && !Guid.TryParseExact(args[2], "N", out _)))
         {
             Console.Error.WriteLine("Usage: Slipmat.MaintenanceRunner inspect ABSOLUTE_JOURNAL_DIRECTORY JOB_ID");
             Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner run ABSOLUTE_JOURNAL_DIRECTORY JOB_ID ABSOLUTE_SPEC_PATH");
             Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner startup ABSOLUTE_JOURNAL_DIRECTORY JOB_ID ABSOLUTE_SPEC_PATH");
+            Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner source-repair-startup ABSOLUTE_JOURNAL_DIRECTORY");
+            Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner source-repair-check ABSOLUTE_JOURNAL_DIRECTORY JOB_ID ABSOLUTE_SPEC_PATH ABSOLUTE_APPROVAL_PATH");
             return 2;
         }
         if (!OperatingSystem.IsLinux() || GetEffectiveUserId() != 0)
@@ -40,6 +46,34 @@ internal static class Program
             Console.CancelKeyPress += cancel;
             try
             {
+                if (sourceRepairStartup)
+                {
+                    cancellation.CancelAfter(TimeSpan.FromSeconds(10));
+                    await using var readOnlyLease = OpenExistingJournalLease(args[1]);
+                    var inventory = await readOnlyLease.ReadAllAsync(cancellation.Token).ConfigureAwait(false);
+                    var owningRepair = inventory.Any(snapshot => snapshot.Job.SourcePathRepairOwnsJob);
+                    Console.WriteLine(JsonSerializer.Serialize(new
+                    {
+                        status = owningRepair ? "blocked" : "source-repair-startup-clear",
+                        code = owningRepair ? "migration-source-repair-owned" : "no-owning-source-repair",
+                        execution = "not-requested",
+                    }));
+                    return owningRepair ? 1 : 0;
+                }
+                if (sourceRepairCheck)
+                {
+                    await using var readOnlyLease = OpenExistingJournalLease(args[1]);
+                    var admission = new SourcePathRepairAdmission(readOnlyLease,
+                        new LinuxMaintenanceBarrier(new LinuxSystemdBarrierQuery()), args[3]);
+                    await admission.CheckAsync(args[2], args[4], cancellation.Token).ConfigureAwait(false);
+                    Console.WriteLine(JsonSerializer.Serialize(new
+                    {
+                        status = "source-repair-preflight-verified",
+                        jobId = args[2],
+                        execution = "not-requested",
+                    }));
+                    return 0;
+                }
                 if (inspect) cancellation.CancelAfter(TimeSpan.FromSeconds(10));
                 await using var lease = await new CloudMigrationJournal(args[1]).AcquireAsync(cancellation.Token);
                 if (inspect)
@@ -127,6 +161,19 @@ internal static class Program
             Console.Error.WriteLine("Maintenance operation unavailable or blocked.");
             return 2;
         }
+    }
+
+    private static CloudMigrationJournalLease OpenExistingJournalLease(string journalDirectory)
+    {
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(journalDirectory));
+        CloudMigrationJournal.RejectLink(root);
+        var lockPath = Path.Combine(root, ".writer.lock");
+        CloudMigrationJournal.RejectLink(lockPath);
+        // Keep the canonical writer's lock mode without creating or writing any file.
+        var stream = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        if (stream.CanSeek) return new CloudMigrationJournalLease(root, stream);
+        stream.Dispose();
+        throw new IOException("migration-journal-lease-unavailable");
     }
 
     [DllImport("libc", EntryPoint = "geteuid")]
