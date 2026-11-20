@@ -94,8 +94,12 @@ Music, the offline runner must supply the admitted repair plan. The adapter
 derives the source root, pinned move identities, and manifest digest from that
 plan. The helper requires the manifest to include every descendant of each
 moved directory while allowing unrelated siblings outside those subtrees.
-It checks the source again after copying. The runner must persist the reservation
-identity before copy and record verified readback before authorizing moves.
+It checks the source again after copying. The transaction records the reservation
+identity through whole-job compare-and-exchange before permitting copy. Verified
+readback must match that identity before any move can be authorized. If a crash
+occurs after directory creation but before that journal update, replay blocks
+and leaves the unbound directory for inspection. The production host adapter
+must connect these transitions to the existing archive helper.
 
 Tests exercise write-ahead ordering, preservation before moves, every synthetic
 forward/restore journal-effect crash boundary, pending rollback outcomes, foreign

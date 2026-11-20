@@ -25,7 +25,7 @@ public sealed class CloudSourcePathRepairTransactionTests
         Assert.Equal(host.Snapshot.State.Plan.PreservationManifestSha256, state.Preservation!.ManifestSha256);
         Assert.Equal("verified-archive-instance", state.Preservation.ArchiveIdentity);
         Assert.Equal(CloudSourcePathRepairVerificationKind.Repaired, state.Verification!.Kind);
-        Assert.Equal(new[] { "preserve", "move-0", "move-1", "verify-repaired" }, host.Effects);
+        Assert.Equal(new[] { "reserve", "preserve", "move-0", "move-1", "verify-repaired" }, host.Effects);
     }
 
     [Fact]
@@ -40,9 +40,16 @@ public sealed class CloudSourcePathRepairTransactionTests
             await Assert.ThrowsAsync<TestCrash>(() => RunAsync(host));
             host.FreshProcess();
             var result = await RunAsync(host);
+            if (host.Snapshot.State.ReservedArchiveIdentity is null
+                && host.Archive.State == CloudSourcePathRepairArchiveState.Resumable)
+            {
+                Assert.Equal(CloudSourcePathRepairAction.Blocked, result.Action);
+                Assert.Equal(new[] { "reserve" }, host.Effects);
+                continue;
+            }
             Assert.Equal(CloudSourcePathRepairAction.Complete, result.Action);
             Assert.Equal(CloudSourcePathRepairPhase.Repaired, host.Snapshot.State.Phase);
-            Assert.Equal(new[] { "preserve", "move-0", "move-1" },
+            Assert.Equal(new[] { "reserve", "preserve", "move-0", "move-1" },
                 host.Effects.Where(effect => !effect.StartsWith("verify-", StringComparison.Ordinal)));
         }
     }
@@ -153,10 +160,26 @@ public sealed class CloudSourcePathRepairTransactionTests
     public async Task InterruptedImmutablePreservationCanResumeBeforeMoving()
     {
         var host = new FakeHost(MakePlan());
-        host.State(state => state with { Phase = CloudSourcePathRepairPhase.PreservationIntent });
-        host.Archive = new(CloudSourcePathRepairArchiveState.Resumable, "incomplete-owned-archive");
+        host.State(state => state with { Phase = CloudSourcePathRepairPhase.PreservationIntent,
+            ReservedArchiveIdentity = "verified-archive-instance" });
+        host.Archive = new(CloudSourcePathRepairArchiveState.Resumable, "verified-archive-instance");
         Assert.Equal(CloudSourcePathRepairAction.Complete, (await RunAsync(host)).Action);
         Assert.Equal(new[] { "preserve", "move-0", "move-1", "verify-repaired" }, host.Effects);
+    }
+
+    [Theory]
+    [InlineData(CloudSourcePathRepairArchiveState.Resumable)]
+    [InlineData(CloudSourcePathRepairArchiveState.Verified)]
+    public async Task ArchiveObservationCannotSubstituteForTheRecordedReservation(CloudSourcePathRepairArchiveState archiveState)
+    {
+        var plan = MakePlan();
+        var host = new FakeHost(plan);
+        host.State(state => state with { Phase = CloudSourcePathRepairPhase.PreservationIntent,
+            ReservedArchiveIdentity = "expected-archive" });
+        host.Archive = new(archiveState, "another-archive",
+            archiveState == CloudSourcePathRepairArchiveState.Verified ? plan.PreservationManifestSha256 : null);
+        Assert.Equal(CloudSourcePathRepairAction.Blocked, (await RunAsync(host)).Action);
+        Assert.Empty(host.Effects);
     }
 
     [Fact]
@@ -277,6 +300,19 @@ public sealed class CloudSourcePathRepairTransactionTests
             return Task.FromResult<CloudSourcePathRepairSnapshot?>(Snapshot);
         }
 
+        public Task<string> ReserveArchiveAsync(CloudSourcePathRepairSnapshot expected, CancellationToken ct)
+        {
+            Boundary();
+            Assert.Equal(Snapshot, expected);
+            Assert.Equal(CloudSourcePathRepairPhase.PreservationIntent, Snapshot.State.Phase);
+            Assert.Null(Snapshot.State.ReservedArchiveIdentity);
+            Assert.Equal(CloudSourcePathRepairArchiveState.Missing, Archive.State);
+            Archive = new(CloudSourcePathRepairArchiveState.Resumable, "verified-archive-instance");
+            Effects.Add("reserve");
+            Boundary();
+            return Task.FromResult(Archive.Identity!);
+        }
+
         public Task ExecuteAsync(CloudSourcePathRepairSnapshot expected, CloudSourcePathRepairDecision decision, CancellationToken ct)
         {
             Boundary();
@@ -286,6 +322,8 @@ public sealed class CloudSourcePathRepairTransactionTests
                 case CloudSourcePathRepairAction.Preserve:
                     Assert.Equal(CloudSourcePathRepairPhase.PreservationIntent, Snapshot.State.Phase);
                     Assert.DoesNotContain(true, _moved);
+                    Assert.NotNull(Snapshot.State.ReservedArchiveIdentity);
+                    Assert.Equal(Archive.Identity, Snapshot.State.ReservedArchiveIdentity);
                     Archive = new(CloudSourcePathRepairArchiveState.Verified, "verified-archive-instance", plan.PreservationManifestSha256);
                     Effects.Add("preserve");
                     break;

@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using System.Collections.Immutable;
 
 namespace Jellyfin.Plugin.AudioGateway.Models;
@@ -88,7 +89,8 @@ public sealed record CloudSourcePathRepairVerification(string PlanFingerprint, C
 /// </summary>
 public sealed record CloudSourcePathRepairState(CloudSourcePathRepairPlan Plan, CloudSourcePathRepairPhase Phase,
     int Cursor = 0, bool RollbackRequested = false, CloudSourcePathRepairPreservation? Preservation = null,
-    CloudSourcePathRepairVerification? Verification = null);
+    CloudSourcePathRepairVerification? Verification = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ReservedArchiveIdentity = null);
 
 /// <summary>Repair state and the revision of the entire authoritative migration job.</summary>
 public sealed record CloudSourcePathRepairSnapshot(string Revision, CloudSourcePathRepairState State);
@@ -154,6 +156,8 @@ public enum CloudSourcePathRepairAction
     VerifyOriginal,
     /// <summary>The verified terminal state has been observed under the lease.</summary>
     Complete,
+    /// <summary>Reserve an empty archive with no replacement and return its durable identity.</summary>
+    ReserveArchive,
 }
 
 /// <summary>One deterministic decision. MoveIndex applies only to a move or restore effect.</summary>
