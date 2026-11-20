@@ -2,8 +2,8 @@
 
 This draft contains the repair transaction, ownership guards and a Linux host
 adapter exercised against disposable files and a real journal. Read-only
-operator checks are available. Installing and proving the systemd guard and
-exposing the mutating operator command are pending.
+operator checks and explicitly requested offline execution are available.
+Installation and end-to-end proof on the production host are pending.
 Do not edit a journal to manufacture an admitted repair. No source-path move is
 authorized by a diagnostic report or a terminal custody receipt alone.
 
@@ -21,6 +21,31 @@ reviewed plan, exact job revision, bound directories, full source metadata,
 namespace and selected content. The root-controlled approval JSON contains
 `expectedJournalRevision` and `plan`. The check does not reserve an archive,
 run the filesystem probe or change the journal.
+
+## Offline execution
+
+`source-repair-run JOURNAL JOB_ID SPEC APPROVAL` admits the reviewed failed
+job and drives repair to a verified state. Omit `APPROVAL` to resume an
+already admitted job. `source-repair-rollback JOURNAL JOB_ID SPEC` records
+rollback and drives the original namespace verification. Use absolute paths
+for artifacts and invoke the installed `Slipmat.MaintenanceRunner` apphost.
+
+The commands require a root-controlled apphost, its managed assembly and
+runtime metadata, and the exact persistent drop-in at
+`/etc/systemd/system/jellyfin.service.d/90-slipmat-source-repair.conf`.
+Its contents are `[Service]` followed by
+`ExecStartPre=+ABSOLUTE_APPHOST source-repair-startup ABSOLUTE_JOURNAL`,
+each on its own LF-terminated line. Before masking for a real run,
+verify that systemd loaded that effective privileged hook and that failure
+propagates. A drop-in on disk does not establish effective ordering. Systemd
+skips loading drop-ins for a masked unit.
+
+Keep Jellyfin persistently masked throughout repair. The runner requires
+the on-disk mask, the manager's masked load and file states, no pending
+daemon reload, and no service processes. After a verified terminal result,
+check that the effective hook is still in force before starting Jellyfin.
+These commands perform the local source repair only. Cloud conflict recovery,
+content verification and VFS activation follow separately.
 
 ## Purpose and owner
 
@@ -124,7 +149,7 @@ A case alias or foreign identity is not treated as absence. Before renaming,
 the host proves occupied-target refusal and successful no-replace moves for
 both files and directories. This uses a pinned scratch directory on the source
 mount and outside the source and archive trees. The source-repair command
-still needs admission and startup-guard integration. The Linux transaction
+requires the persistent startup guard. The Linux transaction
 adapter verifies terminal custody by checking the exact full namespace and
 rehashing the preservation manifest selection at translated paths. Namespace
 SHA-256 covers UTF-8 byte-sorted relative paths, excluding the root. Each record

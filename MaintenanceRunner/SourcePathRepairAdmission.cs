@@ -22,6 +22,8 @@ internal sealed class SourcePathRepairAdmission(CloudMigrationJournalLease lease
         CancellationToken cancellationToken)
     {
         var (target, plan) = await ValidateAsync(jobId, approvalPath, cancellationToken).ConfigureAwait(false);
+        var specification = SourcePathRepairHostSpecification.Read(specificationPath, plan);
+        await SourcePathRepairMoveHost.ProbeNoReplaceAsync(plan, specification, barrier, cancellationToken).ConfigureAwait(false);
         var prepared = new CloudSourcePathRepairState(plan, CloudSourcePathRepairPhase.Prepared);
         var saved = await lease.CompareExchangeAsync(target, target.Job with { SourcePathRepair = prepared },
             cancellationToken).ConfigureAwait(false);

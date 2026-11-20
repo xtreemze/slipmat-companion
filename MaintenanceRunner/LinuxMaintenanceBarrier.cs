@@ -63,7 +63,7 @@ public sealed class LinuxSystemdBarrierQuery : ILinuxBarrierQuery
     {
         if (!OperatingSystem.IsLinux() || GetEffectiveUserId() != 0) throw new InvalidOperationException("linux-root-required");
         var trusted = await TrustedMaskAsync(cancellationToken).ConfigureAwait(false);
-        var output = await RunAsync("/usr/bin/systemctl", ["show", "jellyfin.service", "--property=ActiveState", "--property=MainPID", "--property=ControlPID", "--property=ControlGroup"], cancellationToken).ConfigureAwait(false);
+        var output = await RunAsync("/usr/bin/systemctl", ["show", "jellyfin.service", "--property=ActiveState", "--property=MainPID", "--property=ControlPID", "--property=ControlGroup", "--property=LoadState", "--property=UnitFileState", "--property=NeedDaemonReload"], cancellationToken).ConfigureAwait(false);
         var fields = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
@@ -83,7 +83,12 @@ public sealed class LinuxSystemdBarrierQuery : ILinuxBarrierQuery
                 foreach (var line in await File.ReadAllLinesAsync(file, cancellationToken).ConfigureAwait(false))
                     if (int.TryParse(line, out var pid) && pid > 0) pids.Add(pid); else throw new InvalidOperationException("invalid-cgroup-pid");
         }
-        return new(true, trusted, active, mainPid, controlPid, pids.Distinct().ToArray(),
+        if (!fields.TryGetValue("LoadState", out var loadState)
+            || !fields.TryGetValue("UnitFileState", out var unitFileState)
+            || !fields.TryGetValue("NeedDaemonReload", out var needReload))
+            throw new InvalidOperationException("systemd-query-invalid");
+        var effectiveMask = trusted && loadState == "masked" && unitFileState == "masked" && needReload == "no";
+        return new(true, effectiveMask, active, mainPid, controlPid, pids.Distinct().ToArray(),
             (await File.ReadAllTextAsync("/proc/sys/kernel/random/boot_id", cancellationToken).ConfigureAwait(false)).Trim(),
             new FileInfo("/proc/self/ns/mnt").LinkTarget ?? "", new FileInfo("/proc/1/ns/mnt").LinkTarget ?? "");
     }

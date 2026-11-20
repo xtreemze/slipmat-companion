@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Jellyfin.Plugin.AudioGateway.Services;
+using Jellyfin.Plugin.AudioGateway.Models;
 
 namespace Slipmat.MaintenanceRunner;
 
@@ -14,7 +15,11 @@ internal static class Program
         var sourceRepairStartup = args.Length == 2 && args[0] == "source-repair-startup";
         var sourceRepairCheck = args.Length == 5 && args[0] == "source-repair-check"
             && Path.IsPathFullyQualified(args[3]) && Path.IsPathFullyQualified(args[4]);
-        if ((!inspect && !run && !startup && !sourceRepairStartup && !sourceRepairCheck) || !Path.IsPathFullyQualified(args[1])
+        var sourceRepairRun = args.Length is 4 or 5 && args[0] == "source-repair-run"
+            && Path.IsPathFullyQualified(args[3]) && (args.Length == 4 || Path.IsPathFullyQualified(args[4]));
+        var sourceRepairRollback = args.Length == 4 && args[0] == "source-repair-rollback"
+            && Path.IsPathFullyQualified(args[3]);
+        if ((!inspect && !run && !startup && !sourceRepairStartup && !sourceRepairCheck && !sourceRepairRun && !sourceRepairRollback) || !Path.IsPathFullyQualified(args[1])
             || (!sourceRepairStartup && !Guid.TryParseExact(args[2], "N", out _)))
         {
             Console.Error.WriteLine("Usage: Slipmat.MaintenanceRunner inspect ABSOLUTE_JOURNAL_DIRECTORY JOB_ID");
@@ -22,6 +27,8 @@ internal static class Program
             Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner startup ABSOLUTE_JOURNAL_DIRECTORY JOB_ID ABSOLUTE_SPEC_PATH");
             Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner source-repair-startup ABSOLUTE_JOURNAL_DIRECTORY");
             Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner source-repair-check ABSOLUTE_JOURNAL_DIRECTORY JOB_ID ABSOLUTE_SPEC_PATH ABSOLUTE_APPROVAL_PATH");
+            Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner source-repair-run JOURNAL JOB_ID SPEC [APPROVAL]");
+            Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner source-repair-rollback JOURNAL JOB_ID SPEC");
             return 2;
         }
         if (!OperatingSystem.IsLinux() || GetEffectiveUserId() != 0)
@@ -73,6 +80,26 @@ internal static class Program
                         execution = "not-requested",
                     }));
                     return 0;
+                }
+                if (sourceRepairRun || sourceRepairRollback)
+                {
+                    var journalDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(args[1]));
+                    await using var repairLease = OpenExistingJournalLease(journalDirectory);
+                    var execution = new SourcePathRepairExecution(repairLease,
+                        new LinuxMaintenanceBarrier(new LinuxSystemdBarrierQuery()), args[3],
+                        () => SourcePathRepairStartupHook.VerifyInstalled(journalDirectory));
+                    var result = await execution.RunAsync(args[2], args.Length == 5 ? args[4] : null,
+                        sourceRepairRollback, cancellation.Token).ConfigureAwait(false);
+                    var current = await repairLease.ReadAsync(args[2], cancellation.Token).ConfigureAwait(false);
+                    var finished = result.Action == CloudSourcePathRepairAction.Complete;
+                    Console.WriteLine(JsonSerializer.Serialize(new
+                    {
+                        status = finished ? "stable" : "blocked",
+                        jobId = args[2],
+                        phase = current?.Job.SourcePathRepair?.Phase.ToString(),
+                        code = result.Code,
+                    }));
+                    return finished ? 0 : 1;
                 }
                 if (inspect) cancellation.CancelAfter(TimeSpan.FromSeconds(10));
                 await using var lease = await new CloudMigrationJournal(args[1]).AcquireAsync(cancellation.Token);

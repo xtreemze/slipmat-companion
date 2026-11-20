@@ -124,19 +124,30 @@ internal static class ArchiveAdapterTests
             await admission.CheckAsync(binding.JobId, approvalPath, default);
             if ((await lease.ReadAsync(binding.JobId))?.Revision != initial.Revision)
                 throw new Exception("admission check modified the journal");
-            await admission.PrepareAsync(binding.JobId, approvalPath, default);
+            const string runner = "/usr/local/libexec/Slipmat.MaintenanceRunner";
+            var journalPath = Path.Combine(root, "journal");
+            var expectedHook = SourcePathRepairStartupHook.ExpectedBytes(runner, journalPath);
+            var execution = new SourcePathRepairExecution(lease, barrier, specificationPath,
+                () => SourcePathRepairStartupHook.VerifyBytes(expectedHook, runner, journalPath));
+            try
+            {
+                var wrongHook = new SourcePathRepairExecution(lease, barrier, specificationPath,
+                    () => SourcePathRepairStartupHook.VerifyBytes(expectedHook, runner, journalPath + "-wrong"));
+                await wrongHook.RunAsync(binding.JobId, approvalPath, rollback: false, default);
+                throw new Exception("wrong journal hook permitted mutation");
+            }
+            catch (InvalidOperationException ex) when (ex.Message == "source-repair-startup-hook-mismatch") { }
+            if ((await lease.ReadAsync(binding.JobId))?.Revision != initial.Revision || Directory.Exists(destination))
+                throw new Exception("rejected startup hook changed custody");
+            var result = await execution.RunAsync(binding.JobId, approvalPath, rollback: false, default);
             var admitted = await lease.ReadAsync(binding.JobId);
             if (admitted?.Job.ConflictRecovery != job.ConflictRecovery || admitted?.Job.Phase != job.Phase)
                 throw new Exception("admission rewrote original failure history");
-            var operations = new SourcePathRepairOperations(adapter, barrier, specificationPath);
-            var result = await operations.RunAsync(binding.JobId, default);
             var repaired = await adapter.ReadAsync(binding.JobId, default) ?? throw new Exception("repair state missing");
             if (result.Action != CloudSourcePathRepairAction.Complete || repaired.State.Phase != CloudSourcePathRepairPhase.Repaired
                 || !Directory.Exists(Path.Combine(binding.LocalRoot, "Album-preserved")))
                 throw new Exception("Linux fixture did not reach verified repaired state");
-            if (await adapter.CompareExchangeAsync(repaired, repaired.State with { RollbackRequested = true }, default) is null)
-                throw new Exception("could not request fixture rollback");
-            result = await operations.RunAsync(binding.JobId, default);
+            result = await execution.RunAsync(binding.JobId, approvalPath: null, rollback: true, default);
             var rolledBack = await adapter.ReadAsync(binding.JobId, default) ?? throw new Exception("rollback state missing");
             if (result.Action != CloudSourcePathRepairAction.Complete || rolledBack.State.Phase != CloudSourcePathRepairPhase.RolledBack
                 || !Directory.Exists(Path.Combine(binding.LocalRoot, "Album")))
