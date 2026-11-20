@@ -86,6 +86,43 @@ public static class CustodyProcess
             throw new InvalidOperationException("mountpoint-identity-mismatch");
     }
 
+    internal static async Task VerifySourceTreeAsync(SourcePathRepairHostSpecification specification,
+        CloudSourcePathRepairPlan plan, bool repaired, CancellationToken cancellationToken)
+    {
+        var manifest = LinuxTrustedFile.Read(specification.ManifestPath, 4 * 1024 * 1024);
+        var payload = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            action = "source-repair-verify-tree",
+            sourceRoot = plan.Binding.LocalRoot,
+            sourceIdentity = plan.Binding.RootIdentity,
+            moves = plan.Moves.Select(move => new
+            {
+                move.Source,
+                move.Destination,
+                kind = MoveKind(move.Kind),
+                move.Identity,
+            }).ToArray(),
+            repaired,
+            manifestBase64 = Convert.ToBase64String(manifest),
+            manifestSha256 = plan.PreservationManifestSha256,
+            namespaceSha256 = repaired ? plan.TargetNamespaceSha256 : plan.Binding.Source.NamespaceSha256,
+        }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        if (payload.Length > 6 * 1024 * 1024)
+            throw new InvalidOperationException("source-repair-tree-request-too-large");
+        var output = await InvokeAsync(specification.PythonPath, specification.PythonSha256, specification.HelperPath,
+            specification.HelperSha256, payload, cancellationToken).ConfigureAwait(false);
+        using var document = JsonDocument.Parse(output);
+        if (document.RootElement.GetProperty("status").GetString() != "ok")
+            throw new InvalidOperationException("source-repair-tree-result-invalid");
+    }
+
+    private static string MoveKind(CloudSourcePathRepairKind kind) => kind switch
+    {
+        CloudSourcePathRepairKind.File => "file",
+        CloudSourcePathRepairKind.Directory => "directory",
+        _ => throw new InvalidOperationException("source-repair-move-kind-invalid"),
+    };
+
     internal static async Task ProbeNoReplaceAsync(SourcePathRepairHostSpecification specification,
         CancellationToken cancellationToken)
     {
@@ -127,7 +164,7 @@ public static class CustodyProcess
             entryIdentity = new
             {
                 device = move.Identity.Device, inode = move.Identity.Inode, mountId = move.Identity.MountId,
-                kind = move.Kind == CloudSourcePathRepairKind.Directory ? "directory" : "file",
+                kind = MoveKind(move.Kind),
             },
         }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         var output = await InvokeAsync(specification.PythonPath, specification.PythonSha256, specification.HelperPath,
@@ -182,12 +219,7 @@ public static class CustodyProcess
             request["moves"] = plan.Moves.Select(move => new
             {
                 move.Source,
-                kind = move.Kind switch
-                {
-                    CloudSourcePathRepairKind.File => "file",
-                    CloudSourcePathRepairKind.Directory => "directory",
-                    _ => throw new InvalidOperationException("source-repair-archive-request-invalid"),
-                },
+                kind = MoveKind(move.Kind),
                 move.Identity,
             }).ToArray();
         }

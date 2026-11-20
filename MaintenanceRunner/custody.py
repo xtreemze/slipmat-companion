@@ -730,6 +730,147 @@ def create_or_resume_source_repair_archive(source_root, expected_source_root, ar
                                         expected_archive, manifest_bytes, expected_manifest_sha256)
 
 
+def _terminal_repair_layout(children, moves, repaired, root_identity):
+    fields = {'source', 'destination', 'kind', 'identity'}
+    if (not isinstance(moves, list) or not 1 <= len(moves) <= 32
+            or any(not isinstance(move, dict) or set(move) != fields for move in moves)):
+        raise CustodyError('source-repair-terminal-moves-invalid')
+    _preservation_move_roots(children, [{key: value for key, value in move.items() if key != 'destination'}
+                                        for move in moves])
+    endpoints = set()
+    by_parent = {}
+    complete_subtrees = set()
+    for move in moves:
+        source, destination = move['source'], move['destination']
+        if not isinstance(destination, str) or not 0 < len(destination) <= 4096:
+            raise CustodyError('source-repair-terminal-moves-invalid')
+        parent, _, source_leaf = source.rpartition('/')
+        destination_parent, _, destination_leaf = destination.rpartition('/')
+        _source_repair_leaf(destination_leaf)
+        identity = move['identity'] | {'kind': move['kind']}
+        if (parent != destination_parent or source == destination or source in endpoints or destination in endpoints
+                or identity['device'] != root_identity['device'] or identity['mountId'] != root_identity['mountId']
+                or identity['inode'] == root_identity['inode']):
+            raise CustodyError('source-repair-terminal-moves-invalid')
+        endpoints.update((source, destination))
+        expected, absent = (destination_leaf, source_leaf) if repaired else (source_leaf, destination_leaf)
+        by_parent.setdefault(parent, []).append((expected, absent, identity))
+        if move['kind'] == 'directory':
+            complete_subtrees.add(destination if repaired else source)
+    for endpoint in endpoints:
+        pieces = endpoint.split('/')
+        if any('/'.join(pieces[:index]) in endpoints for index in range(1, len(pieces))):
+            raise CustodyError('source-repair-terminal-moves-invalid')
+    if not repaired:
+        return children, by_parent, complete_subtrees
+
+    relocated = {'': {}}
+    for entries in children.values():
+        for item in entries.values():
+            path = item['path']
+            for move in moves:
+                old = move['source']
+                if path == old or path.startswith(old + '/'):
+                    path = move['destination'] + path[len(old):]
+                    break
+            parent, _, leaf = path.rpartition('/')
+            siblings = relocated.setdefault(parent, {})
+            if leaf in siblings:
+                raise CustodyError('source-repair-terminal-manifest-collision')
+            siblings[leaf] = item
+            if item['kind'] == 'directory':
+                relocated.setdefault(path, {})
+    return relocated, by_parent, complete_subtrees
+
+
+def _scan_source_repair_tree(root_fd, root_identity, moves_by_parent, observed=None):
+    capture = observed is None
+    if capture:
+        observed = {'': _archive_snapshot(root_fd)}
+    count = total_path_bytes = 0
+
+    def walk(directory_fd, prefix, depth):
+        nonlocal count, total_path_bytes
+        before = observed[prefix]
+        if _archive_snapshot(directory_fd) != before:
+            raise CustodyError('source-repair-terminal-tree-changed')
+        if prefix in moves_by_parent:
+            parent = {'device': before[0], 'inode': before[1], 'mountId': before[7]}
+            for expected, absent, identity in moves_by_parent[prefix]:
+                if (_observe_source_repair_leaf(directory_fd, expected, parent, identity) != 'expected'
+                        or _observe_source_repair_leaf(directory_fd, absent, parent, identity) != 'missing'):
+                    raise CustodyError('source-repair-terminal-move-unverified')
+        for name in _archive_names(directory_fd):
+            path = prefix + '/' + name if prefix else name
+            encoded = path.encode('utf-8')
+            count += 1
+            total_path_bytes += len(encoded)
+            if (depth >= 128 or len(encoded) > 4096 or os.fsencode(name) != name.encode('utf-8')
+                    or count > 200_000 or total_path_bytes > 64 * 1024 * 1024):
+                raise CustodyError('source-repair-terminal-tree-limit')
+            fd = os.open(name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory_fd)
+            try:
+                snapshot = _archive_snapshot(fd)
+                is_directory = stat.S_ISDIR(snapshot[2])
+                if (snapshot[0] != root_identity['device'] or snapshot[7] != root_identity['mountId']
+                        or snapshot[3] != 0 or snapshot[2] & 0o022
+                        or not (is_directory or stat.S_ISREG(snapshot[2]))):
+                    raise CustodyError('source-repair-terminal-tree-invalid')
+                if capture:
+                    observed[path] = snapshot
+                elif observed.get(path) != snapshot:
+                    raise CustodyError('source-repair-terminal-tree-changed')
+                if is_directory:
+                    child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                                    dir_fd=directory_fd)
+                    try:
+                        walk(child, path, depth + 1)
+                    finally:
+                        os.close(child)
+            finally:
+                os.close(fd)
+        if _archive_snapshot(directory_fd) != before:
+            raise CustodyError('source-repair-terminal-tree-changed')
+
+    walk(root_fd, '', 0)
+    if count != len(observed) - 1 or any(parent not in observed for parent in moves_by_parent):
+        raise CustodyError('source-repair-terminal-tree-changed')
+    return observed
+
+
+def verify_source_repair_tree(source_root, source_identity, moves, repaired, manifest_bytes,
+                              expected_manifest_sha256, expected_namespace_sha256):
+    """Verify exact terminal paths and the reviewed preservation content under a caller-held barrier."""
+    if (type(repaired) is not bool or not isinstance(expected_namespace_sha256, str)
+            or len(expected_namespace_sha256) != 64
+            or any(ch not in '0123456789abcdefABCDEF' for ch in expected_namespace_sha256)):
+        raise CustodyError('source-repair-terminal-request-invalid')
+    root_fd, _, mount_id = _open_source_repair_pinned_parent(source_root, source_identity)
+    try:
+        original = _preservation_manifest(manifest_bytes, expected_manifest_sha256)
+        children, moves_by_parent, complete_subtrees = _terminal_repair_layout(original, moves, repaired, source_identity)
+        observed = _scan_source_repair_tree(root_fd, source_identity, moves_by_parent)
+        digest = hashlib.sha256()
+        for encoded, is_directory in sorted((path.encode('utf-8'), stat.S_ISDIR(info[2]))
+                                            for path, info in observed.items() if path):
+            digest.update(b'D\0' if is_directory else b'F\0')
+            digest.update(encoded)
+            digest.update(b'\0')
+        if digest.hexdigest() != expected_namespace_sha256.lower():
+            raise CustodyError('source-repair-terminal-namespace-mismatch')
+        _verify_archive_tree(root_fd, '', children, mount_id, observed, True,
+                             False, True, complete_subtrees)
+        _scan_source_repair_tree(root_fd, source_identity, moves_by_parent, observed)
+        named_root_fd, _, _ = _open_source_repair_pinned_parent(source_root, source_identity)
+        try:
+            if _archive_snapshot(named_root_fd) != observed['']:
+                raise CustodyError('source-repair-terminal-tree-changed')
+        finally:
+            os.close(named_root_fd)
+    finally:
+        os.close(root_fd)
+
+
 def inspect_empty_mountpoint(parent, source, expected_device, expected_mount_id, expected_inode=None):
     """Return descriptor-pinned identity only for the same private, empty, unmounted directory."""
     if sys.platform != 'linux' or os.geteuid() != 0:
@@ -966,11 +1107,26 @@ def remove_empty_projection(parent, source, marker, remote_name, remote_type, re
 def main():
     import base64
     import json
+
+    def unique_object(pairs):
+        result = dict(pairs)
+        if len(result) != len(pairs):
+            raise CustodyError('duplicate-custody-request-property')
+        return result
+
+    def decode_manifest(encoded):
+        if not isinstance(encoded, str) or len(encoded) > 5_600_000:
+            raise CustodyError('source-repair-preservation-manifest-too-large')
+        data = base64.b64decode(encoded, validate=True)
+        if len(data) > 4 * 1024 * 1024:
+            raise CustodyError('source-repair-preservation-manifest-too-large')
+        return data
+
     try:
         raw_request = sys.stdin.buffer.read(6 * 1024 * 1024 + 1)
         if len(raw_request) > 6 * 1024 * 1024:
             raise CustodyError('request-too-large')
-        request = json.loads(raw_request)
+        request = json.loads(raw_request, object_pairs_hook=unique_object)
         action = request['action']
         result = {'status': 'ok'}
         if action == 'rename':
@@ -999,17 +1155,20 @@ def main():
             if set(request) != {'action', 'parent', 'parentIdentity'}:
                 raise CustodyError('source-repair-noreplace-request-invalid')
             probe_source_repair_noreplace(request['parent'], request['parentIdentity'])
+        elif action == 'source-repair-verify-tree':
+            if set(request) != {'action', 'sourceRoot', 'sourceIdentity', 'moves', 'repaired',
+                                'manifestBase64', 'manifestSha256', 'namespaceSha256'}:
+                raise CustodyError('source-repair-terminal-request-invalid')
+            verify_source_repair_tree(request['sourceRoot'], request['sourceIdentity'], request['moves'],
+                                      request['repaired'], decode_manifest(request['manifestBase64']),
+                                      request['manifestSha256'], request['namespaceSha256'])
         elif action in ('source-repair-archive-create-or-resume', 'source-repair-archive-verify'):
             common = {'action', 'archiveParent', 'archiveLeaf', 'archiveParentIdentity',
                       'archiveIdentity', 'manifestBase64', 'manifestSha256'}
             expected = common | ({'sourceRoot', 'sourceIdentity', 'moves'} if action.endswith('create-or-resume') else set())
-            if (not isinstance(request, dict) or set(request) != expected
-                    or not isinstance(request['manifestBase64'], str)
-                    or len(request['manifestBase64']) > 5_600_000):
+            if set(request) != expected:
                 raise CustodyError('source-repair-archive-request-invalid')
-            manifest_bytes = base64.b64decode(request['manifestBase64'], validate=True)
-            if len(manifest_bytes) > 4 * 1024 * 1024:
-                raise CustodyError('source-repair-preservation-manifest-too-large')
+            manifest_bytes = decode_manifest(request['manifestBase64'])
             args = (request['archiveParent'], request['archiveLeaf'], request['archiveParentIdentity'],
                     request['archiveIdentity'], manifest_bytes, request['manifestSha256'])
             if action == 'source-repair-archive-verify':
@@ -1023,7 +1182,7 @@ def main():
             raise CustodyError('unknown-action')
         print(json.dumps(result, separators=(',', ':')))
         return 0
-    except (KeyError, ValueError, TypeError, OSError, CustodyError):
+    except (KeyError, ValueError, TypeError, RecursionError, OSError, CustodyError):
         print('{"status":"blocked"}')
         return 2
 

@@ -34,10 +34,10 @@ internal static class ArchiveAdapterTests
             var parentId = Identify(root.FullName);
             var binding = new CloudSourcePathRepairBinding(Guid.NewGuid().ToString("N"), Guid.NewGuid(), Guid.NewGuid(), "Music",
                 "profile", source.FullName, "remote", "Music", Identify(source.FullName),
-                new(1, Hash(manifest), 1, contents.Length, Hash(manifest)), Hash(manifest));
+                new(1, Hash(manifest), 1, contents.Length, NamespaceHash("Album")), Hash(manifest));
             var plan = new CloudSourcePathRepairPlan(1, binding,
                 [new(CloudSourcePathRepairKind.Directory, "Album", "Album-preserved", Identify(album.FullName))],
-                Hash(manifest), Hash([42]), "");
+                Hash(manifest), NamespaceHash("Album-preserved"), "");
             plan = plan with { Fingerprint = CloudSourcePathRepairTransaction.Fingerprint(plan) };
             var pythonHash = Hash(await File.ReadAllBytesAsync(python));
             var helperHash = Hash(await File.ReadAllBytesAsync(helper));
@@ -61,12 +61,15 @@ internal static class ArchiveAdapterTests
             if (!(await File.ReadAllBytesAsync(archivePath)).SequenceEqual(contents))
                 throw new Exception("archive payload did not match source");
             await ExerciseJournalHostAsync(root.FullName, python, pythonHash, helper, helperHash, manifest, plan);
+            var transactionRoot = Directory.CreateDirectory(Path.Combine(root.FullName, "transaction")).FullName;
+            await ExerciseJournalHostAsync(transactionRoot, python, pythonHash, helper, helperHash, manifest, plan, entireTransaction: true);
+
         }
         finally { root.Delete(true); }
     }
 
     private static async Task ExerciseJournalHostAsync(string root, string python, string pythonHash,
-        string helper, string helperHash, byte[] manifest, CloudSourcePathRepairPlan plan)
+        string helper, string helperHash, byte[] manifest, CloudSourcePathRepairPlan plan, bool entireTransaction = false)
     {
         const string ns = "mnt:[123]";
         var boot = Guid.NewGuid().ToString();
@@ -81,13 +84,35 @@ internal static class ArchiveAdapterTests
         var binding = plan.Binding with { HostSpecificationSha256 = Hash(specBytes) };
         plan = plan with { Binding = binding };
         plan = plan with { Fingerprint = CloudSourcePathRepairTransaction.Fingerprint(plan) };
-        var state = new CloudSourcePathRepairState(plan, CloudSourcePathRepairPhase.PreservationIntent);
+        var state = new CloudSourcePathRepairState(plan, entireTransaction
+            ? CloudSourcePathRepairPhase.Prepared : CloudSourcePathRepairPhase.PreservationIntent);
         var job = new CloudMigrationJob(binding.JobId, binding.ProfileId, binding.LibraryName,
             CloudMigrationDirections.LocalToVfs, CloudMigrationPhases.Failed, "conflict-path-collision",
             binding.LocalRoot, null, null, binding.RemoteName, binding.RemotePath, "", false, null,
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, SourcePathRepair: state);
         var destination = Path.Combine(root, "journal-archive");
         var journal = new CloudMigrationJournal(Path.Combine(root, "journal"));
+        if (entireTransaction)
+        {
+            await using var lease = await journal.AcquireAsync();
+            await lease.CompareExchangeAsync(null, job);
+            var adapter = new SourcePathRepairJournal(lease);
+            var barrier = new LinuxMaintenanceBarrier(new FixtureBarrier(new(true, true, "inactive", 0, 0, [], boot, ns, ns)));
+            var operations = new SourcePathRepairOperations(adapter, barrier, specificationPath);
+            var result = await operations.RunAsync(binding.JobId, default);
+            var repaired = await adapter.ReadAsync(binding.JobId, default) ?? throw new Exception("repair state missing");
+            if (result.Action != CloudSourcePathRepairAction.Complete || repaired.State.Phase != CloudSourcePathRepairPhase.Repaired
+                || !Directory.Exists(Path.Combine(binding.LocalRoot, "Album-preserved")))
+                throw new Exception("Linux fixture did not reach verified repaired state");
+            if (await adapter.CompareExchangeAsync(repaired, repaired.State with { RollbackRequested = true }, default) is null)
+                throw new Exception("could not request fixture rollback");
+            result = await operations.RunAsync(binding.JobId, default);
+            var rolledBack = await adapter.ReadAsync(binding.JobId, default) ?? throw new Exception("rollback state missing");
+            if (result.Action != CloudSourcePathRepairAction.Complete || rolledBack.State.Phase != CloudSourcePathRepairPhase.RolledBack
+                || !Directory.Exists(Path.Combine(binding.LocalRoot, "Album")))
+                throw new Exception("Linux fixture did not verify rollback");
+            return;
+        }
         await using (var lease = await journal.AcquireAsync())
         {
             await lease.CompareExchangeAsync(null, job);
@@ -175,6 +200,9 @@ internal static class ArchiveAdapterTests
     {
         public Task<LinuxBarrierSnapshot> ReadAsync(CancellationToken cancellationToken) => Task.FromResult(snapshot);
     }
+
+    private static string NamespaceHash(string directory)
+        => Hash(System.Text.Encoding.UTF8.GetBytes($"D\0{directory}\0F\0{directory}/Track.flac\0"));
 
     private static string Hash(byte[] contents) => Convert.ToHexStringLower(SHA256.HashData(contents));
 

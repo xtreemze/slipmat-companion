@@ -441,6 +441,121 @@ class PreservationReadbackTests(unittest.TestCase):
                                                     parent or self.identity(self.parent),
                                                     archive or self.identity(self.archive), data, digest)
 
+    def terminal_fixture(self):
+        source = self.parent / 'music'
+        entries = [
+            ('library', 'directory', None),
+            ('library/Album', 'directory', None),
+            ('library/Album/Empty', 'directory', None),
+            ('library/Album/é.flac', 'file', b'audio one'),
+            ('Track.flac', 'file', b'audio two'),
+            ('track.flac', 'file', b'audio retained'),
+            ('unselected skip', 'directory', None),
+        ]
+        selected = []
+        for path, kind, data in entries:
+            target = source / path
+            item = {'path': path, 'kind': kind}
+            if kind == 'directory':
+                target.mkdir(parents=True)
+            else:
+                target.write_bytes(data)
+                item |= {'size': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+            if path != 'unselected skip':
+                selected.append(item)
+        moves = [{'source': before, 'destination': after, 'kind': kind,
+                  'identity': self.identity(source / before)} for before, after, kind in
+                 [('library/Album', 'library/Album preserved', 'directory'),
+                  ('Track.flac', 'Track preserved.flac', 'file')]]
+        rows = [(path, kind) for path, kind, _ in entries]
+        return source, moves, selected, rows
+
+    def terminal_request(self, source, moves, selected, rows, repaired=False):
+        data, digest = self.manifest(selected)
+        records = [(path.encode('utf-8'), kind[0].upper().encode('ascii')) for path, kind in rows]
+        namespace = hashlib.sha256(b''.join(kind + b'\0' + path + b'\0' for path, kind in sorted(records)))
+        return {'action': 'source-repair-verify-tree', 'sourceRoot': str(source),
+                'sourceIdentity': self.identity(source), 'moves': moves, 'repaired': repaired,
+                'manifestBase64': base64.b64encode(data).decode('ascii'), 'manifestSha256': digest,
+                'namespaceSha256': namespace.hexdigest()}
+
+    def dispatch_terminal(self, request, expected='ok'):
+        payload = json.dumps(request) if isinstance(request, dict) else request
+        result = subprocess.run([sys.executable, '-I', str(MODULE)], input=payload,
+                                text=True, capture_output=True, timeout=10, check=False)
+        self.assertEqual(result.returncode, 0 if expected == 'ok' else 2, result.stdout)
+        self.assertEqual(json.loads(result.stdout), {'status': expected})
+        self.assertEqual(result.stderr, '')
+
+    def test_terminal_verifies_exact_original_and_repaired_namespace_and_contents(self):
+        source, moves, selected, rows = self.terminal_fixture()
+        original = self.terminal_request(source, moves, selected, rows)
+        self.dispatch_terminal(original)
+
+        for move in moves:
+            (source / move['source']).rename(source / move['destination'])
+        after = [
+            ('library', 'directory'),
+            ('library/Album preserved', 'directory'),
+            ('library/Album preserved/Empty', 'directory'),
+            ('library/Album preserved/é.flac', 'file'),
+            ('Track preserved.flac', 'file'),
+            ('track.flac', 'file'),
+            ('unselected skip', 'directory'),
+        ]
+        repaired = self.terminal_request(source, moves, selected, after, repaired=True)
+        self.dispatch_terminal(repaired)
+        self.dispatch_terminal(original, 'blocked')
+        (source / 'track.flac').write_bytes(b'other retained')
+        self.dispatch_terminal(repaired, 'blocked')
+
+    def test_terminal_refuses_namespace_omissions_and_unbound_move_identities(self):
+        source, moves, selected, rows = self.terminal_fixture()
+        request = self.terminal_request(source, moves, selected, rows)
+        self.dispatch_terminal(request | {'unexpected': 'field'}, 'blocked')
+        self.dispatch_terminal(request | {'repaired': 0}, 'blocked')
+        self.dispatch_terminal('{"repaired":false,' + json.dumps(request)[1:], 'blocked')
+        (source / 'unselected skip').rmdir()
+        self.dispatch_terminal(request, 'blocked')
+        (source / 'unselected skip').mkdir()
+        omitted = [item for item in selected if not item['path'].endswith('Empty')]
+        self.dispatch_terminal(self.terminal_request(source, moves, omitted, rows), 'blocked')
+        (source / 'Track.flac').rename(source / 'replacement-original')
+        (source / 'Track.flac').write_bytes(b'audio two')
+        (source / 'replacement-original').unlink()
+        self.dispatch_terminal(request, 'blocked')
+
+    def test_terminal_refuses_unselected_special_entry_even_with_matching_file_digest_record(self):
+        source, moves, selected, rows = self.terminal_fixture()
+        for add in (lambda path: path.symlink_to('Track.flac'), os.mkfifo):
+            with self.subTest(add=add):
+                path = source / 'foreign'
+                add(path)
+                request = self.terminal_request(source, moves, selected, rows + [('foreign', 'file')])
+                self.dispatch_terminal(request, 'blocked')
+                path.unlink()
+
+    def test_terminal_rejects_unselected_metadata_drift_during_selected_content_read(self):
+        source, moves, selected, rows = self.terminal_fixture()
+        unrelated = source / 'unrelated.txt'
+        unrelated.write_bytes(b'original')
+        before = unrelated.stat()
+        request = self.terminal_request(source, moves, selected, rows + [('unrelated.txt', 'file')])
+        verify_payloads = custody._verify_archive_tree
+
+        def change_after_read(directory_fd, prefix, *args, **kwargs):
+            verify_payloads(directory_fd, prefix, *args, **kwargs)
+            if not prefix:
+                unrelated.write_bytes(b'modified')
+                os.utime(unrelated, ns=(before.st_atime_ns, before.st_mtime_ns - 1_000_000_000))
+
+        with mock.patch.object(custody, '_verify_archive_tree', side_effect=change_after_read):
+            with self.assertRaisesRegex(custody.CustodyError, 'source-repair-terminal-tree-changed'):
+                custody.verify_source_repair_tree(str(source), request['sourceIdentity'], moves, False,
+                                                  base64.b64decode(request['manifestBase64']),
+                                                  request['manifestSha256'], request['namespaceSha256'])
+        self.assertEqual(unrelated.read_bytes(), b'modified')
+
     def test_complete_readback_including_empty_directory_and_case_distinct_files(self):
         (self.archive / 'empty').mkdir()
         (self.archive / 'Track.flac').write_bytes(b'upper')

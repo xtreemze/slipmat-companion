@@ -18,6 +18,13 @@ internal sealed class SourcePathRepairArchiveHost(SourcePathRepairJournal journa
     internal Task<string> VerifyArchiveAsync(CloudSourcePathRepairSnapshot expected, CancellationToken cancellationToken)
         => RunAsync(expected, ArchiveOperation.Verify, cancellationToken);
 
+    internal string? InspectArchive(CloudSourcePathRepairPlan plan)
+    {
+        var specification = SourcePathRepairHostSpecification.Read(specificationPath, plan);
+        var identity = LinuxTrustedFile.TryInspectDirectory(Path.Combine(specification.ArchiveParent, specification.ArchiveLeaf));
+        return identity is null ? null : FormattableString.Invariant($"{identity.Device}:{identity.Inode}:{identity.MountId}");
+    }
+
     private enum ArchiveOperation { Reserve, Copy, Verify }
 
     private async Task<string> RunAsync(CloudSourcePathRepairSnapshot expected, ArchiveOperation operation, CancellationToken cancellationToken)

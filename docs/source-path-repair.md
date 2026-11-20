@@ -1,7 +1,8 @@
 # Source-path repair foundation
 
-This is an unwired contract and ownership-guard candidate. It does not add an
-admission endpoint, operator command, filesystem adapter, or production repair.
+This draft contains the repair transaction, ownership guards and a Linux host
+adapter exercised against disposable files and a real journal. Admission and
+the production operator command are pending.
 Do not edit a journal to manufacture an admitted repair. No source-path move is
 authorized by a diagnostic report or a terminal custody receipt alone.
 
@@ -107,7 +108,13 @@ A case alias or foreign identity is not treated as absence. Before renaming,
 the host proves occupied-target refusal and successful no-replace moves for
 both files and directories. This uses a pinned scratch directory on the source
 mount and outside the source and archive trees. The source-repair command
-still needs to compose these pieces with admission and terminal verification.
+still needs admission and startup-guard integration. The Linux transaction
+adapter verifies terminal custody by checking the exact full namespace and
+rehashing the preservation manifest selection at translated paths. Namespace
+SHA-256 covers UTF-8 byte-sorted relative paths, excluding the root. Each record
+is the byte `D` for a directory or `F` for a file, a NUL, the UTF-8 path and a
+final NUL. Empty directories are included. The staged preservation archive
+is read back separately.
 
 Tests exercise write-ahead ordering, preservation before moves, every synthetic
 forward/restore journal-effect crash boundary, pending rollback outcomes, foreign
