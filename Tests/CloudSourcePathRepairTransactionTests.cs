@@ -183,6 +183,21 @@ public sealed class CloudSourcePathRepairTransactionTests
     }
 
     [Fact]
+    public async Task PreservationReceiptCannotAuthorizeMoveOrReleaseOwnershipWithoutReservation()
+    {
+        var host = new FakeHost(MakePlan());
+        host.SetMovingPrefix(0, CloudSourcePathRepairPhase.MoveIntent, inFlightApplied: false);
+        host.State(state => state with { ReservedArchiveIdentity = null });
+        Assert.Equal(CloudSourcePathRepairAction.Blocked, (await RunAsync(host)).Action);
+        Assert.Empty(host.Effects);
+
+        var completed = new FakeHost(MakePlan());
+        Assert.Equal(CloudSourcePathRepairAction.Complete, (await RunAsync(completed)).Action);
+        Assert.False(CloudSourcePathRepairTransaction.HasStableReceipt(
+            completed.Snapshot.State with { ReservedArchiveIdentity = null }));
+    }
+
+    [Fact]
     public async Task StartupOwnershipFailsClosedForUnknownTamperedAndUnverifiedTerminalState()
     {
         var host = new FakeHost(MakePlan());
@@ -274,6 +289,7 @@ public sealed class CloudSourcePathRepairTransactionTests
         {
             Archive = new(CloudSourcePathRepairArchiveState.Verified, "verified-archive-instance", plan.PreservationManifestSha256);
             State(state => state with { Phase = phase, Cursor = prefix,
+                ReservedArchiveIdentity = Archive.Identity,
                 Preservation = new(plan.Fingerprint, plan.PreservationManifestSha256, Archive.Identity!) });
             for (var i = 0; i < prefix + (inFlightApplied ? 1 : 0); i++) _moved[i] = true;
         }

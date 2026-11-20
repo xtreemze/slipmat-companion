@@ -248,10 +248,10 @@ public static class CloudSourcePathRepairTransaction
     private static bool ValidState(CloudSourcePathRepairState? state)
     {
         if (state is null || !ValidPlan(state.Plan) || state.Cursor < 0 || state.Cursor > state.Plan.Moves.Length
-            || state.Preservation is { } receipt && !PreservationMatches(state.Plan, receipt)) return false;
+            || state.Preservation is { } receipt && (!PreservationMatches(state.Plan, receipt)
+                || receipt.ArchiveIdentity != state.ReservedArchiveIdentity)) return false;
         if (state.ReservedArchiveIdentity is { } reservation
-            && (!ValidLabel(reservation) || state.Phase == CloudSourcePathRepairPhase.Prepared
-                || (state.Preservation is { } verified && verified.ArchiveIdentity != reservation))) return false;
+            && (!ValidLabel(reservation) || state.Phase == CloudSourcePathRepairPhase.Prepared)) return false;
         var total = state.Plan.Moves.Length;
         var preserving = state.Preservation is not null;
         var verifying = state.Verification is not null;
