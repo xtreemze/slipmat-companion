@@ -36,16 +36,22 @@ runtime metadata, and the exact persistent drop-in at
 Its contents are `[Service]` followed by
 `ExecStartPre=+ABSOLUTE_APPHOST source-repair-startup ABSOLUTE_JOURNAL`,
 each on its own LF-terminated line. Before masking for a real run,
-verify that systemd loaded that effective privileged hook and that failure
-propagates. A drop-in on disk does not establish effective ordering. Systemd
-skips loading drop-ins for a masked unit.
+run `source-repair-check-hook ABSOLUTE_JOURNAL_DIRECTORY` while Jellyfin is
+stopped and unmasked. This checks the effective privileged argv and requires
+failure propagation. Systemd skips loading drop-ins for a masked unit.
 
 Keep Jellyfin persistently masked throughout repair. The runner requires
 the on-disk mask, the manager's masked load and file states, no pending
 daemon reload, and no service processes. After a verified terminal result,
-check that the effective hook is still in force before starting Jellyfin.
-These commands perform the local source repair only. Cloud conflict recovery,
-content verification and VFS activation follow separately.
+run `source-repair-check-hook` again while unmasked and stopped before starting
+Jellyfin.
+These commands perform the local source repair only. After a verified repair,
+request archive-and-repair again through Companion. The first request creates
+a new attempt and preserves the original pre-plan failure record and artifacts.
+A subsequent retry resumes the new attempt. Once cloud recovery has been
+admitted, the offline source rollback command refuses the job because the
+cloud side may already depend on the repaired namespace. Cloud content
+verification and VFS activation follow separately.
 
 ## Purpose and owner
 

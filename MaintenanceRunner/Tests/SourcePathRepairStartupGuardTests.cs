@@ -8,6 +8,7 @@ internal static class SourcePathRepairStartupGuardTests
 {
     public static async Task Run(CloudMigrationJob basis)
     {
+        VerifyEffectiveSystemdHook();
         if (!OperatingSystem.IsLinux() || Environment.UserName != "root") return;
         var root = Path.Combine("/root", "source-repair-startup-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -49,6 +50,67 @@ internal static class SourcePathRepairStartupGuardTests
             await VerifyInventoryGuardAsync(Path.Combine(root, "inventory"), basis);
         }
         finally { Directory.Delete(root, recursive: true); }
+    }
+
+    private static void VerifyEffectiveSystemdHook()
+    {
+        const string runner = "/usr/local/libexec/Slipmat.MaintenanceRunner";
+        const string journal = "/var/lib/slipmat/migration";
+        // busctl --system --json=short get-property … ExecStartPreEx on systemd 259.
+        const string reply = """
+            {"type":"a(sasasttttuii)","data":[["/usr/local/libexec/Slipmat.MaintenanceRunner",["/usr/local/libexec/Slipmat.MaintenanceRunner","source-repair-startup","/var/lib/slipmat/migration"],["privileged"],0,0,0,0,0,0,0]]}
+            """;
+        SourcePathRepairEffectiveStartupHook.VerifyCommands(reply, runner, journal);
+        var alongsideExistingHook = reply.Replace("\"data\":[[", """
+            "data":[["/usr/bin/true",["/usr/bin/true"],[],0,0,0,0,0,0,0],[
+            """, StringComparison.Ordinal);
+        SourcePathRepairEffectiveStartupHook.VerifyCommands(alongsideExistingHook, runner, journal);
+
+        using var parsed = JsonDocument.Parse(reply);
+        var hook = parsed.RootElement.GetProperty("data")[0].GetRawText();
+        foreach (var invalid in new[]
+        {
+            """{"type":"a(sasasttttuii)","data":[]}""",
+            reply.Replace("a(sasasttttuii)", "a(sasbttttuii)", StringComparison.Ordinal),
+            reply.Replace("\"privileged\"", "", StringComparison.Ordinal),
+            reply.Replace("\"privileged\"", "\"ignore-failure\",\"privileged\"", StringComparison.Ordinal),
+            reply.Replace("\"privileged\"", "\"no-setuid\"", StringComparison.Ordinal),
+            reply.Replace("\"privileged\"", "\"privileged\",\"via-shell\"", StringComparison.Ordinal),
+            reply.Replace(journal, journal + "-other", StringComparison.Ordinal),
+            reply.Replace("\"source-repair-startup\",", "\"source-repair-startup\",\"extra\",", StringComparison.Ordinal),
+            reply.Replace(hook, hook + "," + hook, StringComparison.Ordinal),
+            reply.Replace("\"data\":", "\"data\":[],\"data\":", StringComparison.Ordinal),
+            reply.Replace(",0,0,0,0,0,0,0", ",0,0,0,0,0,0,\"wrong\"", StringComparison.Ordinal),
+        })
+        {
+            ExpectInvalid(() => SourcePathRepairEffectiveStartupHook.VerifyCommands(invalid, runner, journal),
+                "source-repair-effective-hook-mismatch");
+        }
+
+        const string stopped = "Id=jellyfin.service\nLoadState=loaded\nActiveState=inactive\nJob=\nNeedDaemonReload=no\nMainPID=0\nControlPID=0\n";
+        SourcePathRepairEffectiveStartupHook.VerifyStoppedState(stopped);
+        foreach (var invalid in new[]
+        {
+            stopped.Replace("jellyfin.service", "other.service", StringComparison.Ordinal),
+            stopped.Replace("LoadState=loaded", "LoadState=masked", StringComparison.Ordinal),
+            stopped.Replace("ActiveState=inactive", "ActiveState=activating", StringComparison.Ordinal),
+            stopped.Replace("Job=\n", "Job=123\n", StringComparison.Ordinal),
+            stopped.Replace("NeedDaemonReload=no", "NeedDaemonReload=yes", StringComparison.Ordinal),
+            stopped.Replace("MainPID=0", "MainPID=123", StringComparison.Ordinal),
+            stopped.Replace("ControlPID=0\n", "", StringComparison.Ordinal),
+            stopped + "ControlPID=0\n",
+        })
+        {
+            ExpectInvalid(() => SourcePathRepairEffectiveStartupHook.VerifyStoppedState(invalid),
+                "source-repair-hook-unit-not-stopped");
+        }
+    }
+
+    private static void ExpectInvalid(Action verify, string code)
+    {
+        try { verify(); }
+        catch (InvalidOperationException ex) when (ex.Message == code) { return; }
+        throw new Exception($"Effective source repair startup hook accepted a failed {code} check");
     }
 
     private static async Task VerifyInventoryGuardAsync(string root, CloudMigrationJob basis)

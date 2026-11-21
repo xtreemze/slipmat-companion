@@ -13,19 +13,21 @@ internal static class Program
         var startup = args.Length == 4 && args[0] == "startup" && Path.IsPathFullyQualified(args[3]);
         var run = args.Length == 4 && args[0] == "run" && Path.IsPathFullyQualified(args[3]);
         var sourceRepairStartup = args.Length == 2 && args[0] == "source-repair-startup";
+        var sourceRepairCheckHook = args.Length == 2 && args[0] == "source-repair-check-hook";
         var sourceRepairCheck = args.Length == 5 && args[0] == "source-repair-check"
             && Path.IsPathFullyQualified(args[3]) && Path.IsPathFullyQualified(args[4]);
         var sourceRepairRun = args.Length is 4 or 5 && args[0] == "source-repair-run"
             && Path.IsPathFullyQualified(args[3]) && (args.Length == 4 || Path.IsPathFullyQualified(args[4]));
         var sourceRepairRollback = args.Length == 4 && args[0] == "source-repair-rollback"
             && Path.IsPathFullyQualified(args[3]);
-        if ((!inspect && !run && !startup && !sourceRepairStartup && !sourceRepairCheck && !sourceRepairRun && !sourceRepairRollback) || !Path.IsPathFullyQualified(args[1])
-            || (!sourceRepairStartup && !Guid.TryParseExact(args[2], "N", out _)))
+        if ((!inspect && !run && !startup && !sourceRepairStartup && !sourceRepairCheckHook && !sourceRepairCheck && !sourceRepairRun && !sourceRepairRollback) || !Path.IsPathFullyQualified(args[1])
+            || (!sourceRepairStartup && !sourceRepairCheckHook && !Guid.TryParseExact(args[2], "N", out _)))
         {
             Console.Error.WriteLine("Usage: Slipmat.MaintenanceRunner inspect ABSOLUTE_JOURNAL_DIRECTORY JOB_ID");
             Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner run ABSOLUTE_JOURNAL_DIRECTORY JOB_ID ABSOLUTE_SPEC_PATH");
             Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner startup ABSOLUTE_JOURNAL_DIRECTORY JOB_ID ABSOLUTE_SPEC_PATH");
             Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner source-repair-startup ABSOLUTE_JOURNAL_DIRECTORY");
+            Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner source-repair-check-hook ABSOLUTE_JOURNAL_DIRECTORY");
             Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner source-repair-check ABSOLUTE_JOURNAL_DIRECTORY JOB_ID ABSOLUTE_SPEC_PATH ABSOLUTE_APPROVAL_PATH");
             Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner source-repair-run JOURNAL JOB_ID SPEC [APPROVAL]");
             Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner source-repair-rollback JOURNAL JOB_ID SPEC");
@@ -53,6 +55,20 @@ internal static class Program
             Console.CancelKeyPress += cancel;
             try
             {
+                if (sourceRepairCheckHook)
+                {
+                    var journalDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(args[1]));
+                    await using var readOnlyLease = OpenExistingJournalLease(journalDirectory);
+                    _ = await readOnlyLease.ReadAllAsync(cancellation.Token).ConfigureAwait(false);
+                    await SourcePathRepairEffectiveStartupHook.VerifyAsync(journalDirectory, cancellation.Token)
+                        .ConfigureAwait(false);
+                    Console.WriteLine(JsonSerializer.Serialize(new
+                    {
+                        status = "source-repair-effective-hook-verified",
+                        execution = "not-requested",
+                    }));
+                    return 0;
+                }
                 if (sourceRepairStartup)
                 {
                     cancellation.CancelAfter(TimeSpan.FromSeconds(10));

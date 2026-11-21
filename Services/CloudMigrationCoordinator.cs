@@ -304,12 +304,22 @@ public sealed class CloudMigrationCoordinator
             await ValidateRecoveryBindingsAsync(job, cancellationToken).ConfigureAwait(false);
             if (ContainsReparsePoint(job.LocalPath))
                 throw new InvalidOperationException("source-reparse-point-unsupported");
-            var attempt = existing?.AttemptId ?? Guid.NewGuid().ToString("N");
+            // A verified source repair changes the namespace. Preserve the old
+            // failed session and use fresh sidecars and archive paths exactly once.
+            var restartAfterRepair = job.SourcePathRepair?.Phase == CloudSourcePathRepairPhase.Repaired
+                && job.PriorConflictRecovery is null;
+            if (restartAfterRepair && existing is not
+                { Status: "blocked", Code: "conflict-path-collision", FailureStage: "listing-cloud", Plan: null, Cursor: null })
+                throw new InvalidOperationException("conflict-recovery-prior-attempt-invalid");
+            if (job.PriorConflictRecovery is { } prior && (existing is null || existing.AttemptId == prior.AttemptId
+                    || job.SourcePathRepair?.Phase != CloudSourcePathRepairPhase.Repaired))
+                throw new InvalidOperationException("conflict-recovery-prior-attempt-invalid");
+            var attempt = restartAfterRepair ? Guid.NewGuid().ToString("N") : existing?.AttemptId ?? Guid.NewGuid().ToString("N");
             CloudMigrationStore.RejectRecoverySourceOverlap(job.LocalPath, _store.ConflictRecoveryDirectory(job.Id, attempt));
             var firstSegment = job.RemotePath.Split('/')[0];
             if (string.IsNullOrWhiteSpace(firstSegment) || firstSegment is "." or "..")
                 throw new InvalidOperationException("conflict-recovery-root-unsupported");
-            var session = existing is null
+            var session = existing is null || restartAfterRepair
                 ? new CloudConflictRecoverySession(attempt,
                     firstSegment + "-recovery-archives/" + job.Id + "/" + attempt,
                     request.WriterPolicy, "queued", DateTimeOffset.UtcNow)
@@ -319,6 +329,7 @@ public sealed class CloudMigrationCoordinator
                 Phase = CloudMigrationPhases.QueuedConflictRecovery,
                 Code = "conflict-recovery-queued",
                 ConflictRecovery = session,
+                PriorConflictRecovery = restartAfterRepair ? existing : job.PriorConflictRecovery,
                 Verification = null,
                 UpdatedAt = DateTimeOffset.UtcNow,
             };

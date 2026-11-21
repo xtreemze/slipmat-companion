@@ -27,6 +27,59 @@ public partial class CloudMigrationRecoveryTests
     }
 
     [Fact]
+    public async Task VerifiedRepairStartsFreshConflictAttemptAndRetainsTheOriginalFailure()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var job = fixture.Job;
+        var stable = StableRepair(job);
+        var plan = stable.Plan;
+        var oldAttempt = new CloudConflictRecoverySession(Guid.NewGuid().ToString("N"), "Slipmat-recovery-archives/prior",
+            CloudConflictRecoverySession.CompanionOnlyWriter, "blocked", DateTimeOffset.UtcNow,
+            Code: "conflict-path-collision", FailureStage: "listing-cloud",
+            Progress: new("listing-cloud", 10, 0, 0, DateTimeOffset.UtcNow, TotalIsKnown: false));
+        var repaired = stable with
+        {
+            Phase = CloudSourcePathRepairPhase.Repaired,
+            Cursor = plan.Moves.Length,
+            RollbackRequested = false,
+            ReservedArchiveIdentity = "archive-fixture",
+            Preservation = new(plan.Fingerprint, plan.PreservationManifestSha256, "archive-fixture"),
+            Verification = new(plan.Fingerprint, CloudSourcePathRepairVerificationKind.Repaired,
+                plan.TargetNamespaceSha256, plan.PreservationManifestSha256),
+        };
+        var blocked = job with { Code = "conflict-path-collision", ConflictRecovery = oldAttempt, SourcePathRepair = repaired };
+        var original = (await fixture.Store.GetSnapshotAsync(job.Id))!;
+        await using (var lease = await fixture.Store.AcquireRecoveryLeaseAsync(default))
+            await lease.CompareExchangeAsync(original, blocked);
+
+        var request = new CloudConflictRecoveryRequest(job.ManifestDigestSha256!,
+            CloudConflictRecoverySession.CompanionOnlyWriter);
+        var queued = await fixture.Coordinator.RequestConflictRecoveryAsync(job.Id, request);
+        Assert.Equal(oldAttempt, queued.PriorConflictRecovery);
+        Assert.NotEqual(oldAttempt.AttemptId, queued.ConflictRecovery!.AttemptId);
+        Assert.NotEqual(oldAttempt.ArchiveRoot, queued.ConflictRecovery.ArchiveRoot);
+        Assert.Null(queued.ConflictRecovery.Plan);
+        Assert.Null(queued.ConflictRecovery.Cursor);
+        Assert.Equal(job.ManifestDigestSha256, queued.ManifestDigestSha256);
+
+        Assert.True(fixture.Queue.Reader.TryRead(out _));
+        fixture.Queue.Complete(job.Id);
+        var current = (await fixture.Store.GetSnapshotAsync(job.Id))!;
+        await using (var lease = await fixture.Store.AcquireRecoveryLeaseAsync(default))
+            await lease.CompareExchangeAsync(current, current.Job with
+            {
+                Phase = CloudMigrationPhases.Failed,
+                ConflictRecovery = current.Job.ConflictRecovery! with { Status = "blocked", Code = "conflict-host-unavailable" },
+            });
+        var retried = await fixture.Coordinator.RequestConflictRecoveryAsync(job.Id, request);
+        Assert.Equal(queued.ConflictRecovery.AttemptId, retried.ConflictRecovery!.AttemptId);
+        Assert.Equal(oldAttempt, (await fixture.Store.GetAsync(job.Id))!.PriorConflictRecovery);
+        var historyError = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Store.SaveAsync(retried with { PriorConflictRecovery = null }));
+        Assert.Equal("migration-conflict-recovery-history-owned", historyError.Message);
+    }
+
+    [Fact]
     public async Task OrdinaryWritersCannotAdmitOrClearRepairOwnership()
     {
         using var fixture = await Fixture.CreateAsync();

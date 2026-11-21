@@ -40,6 +40,7 @@ internal sealed class SourcePathRepairJournal(CloudMigrationJournalLease lease)
             || !CloudSourcePathRepairTransaction.ValidState(repair)
             || job.Direction != CloudMigrationDirections.LocalToVfs
             || job.Maintenance is not null || job.MaintenanceAdmission is not null
+            || job.PriorConflictRecovery is not null
             || job.ConflictRecovery is { Status: not ("blocked" or "completed") })
             return null;
 
