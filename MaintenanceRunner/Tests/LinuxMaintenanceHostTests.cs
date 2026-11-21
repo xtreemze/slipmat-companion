@@ -45,6 +45,8 @@ internal static class LinuxMaintenanceHostTests
             var job = admittedJob with
             {
                 LocalPath = localPath,
+                Phase = CloudMigrationPhases.ReadyToFinalize,
+                BackupPath = backupPath,
                 Maintenance = intent,
                 MaintenanceAdmission = admission,
             };

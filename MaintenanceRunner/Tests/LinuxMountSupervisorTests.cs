@@ -4,6 +4,7 @@ internal static class LinuxMountSupervisorTests
 {
     public static async Task Run(HostSpecification spec)
     {
+        await DelayedCancellation(spec);
         var expected = new MountInstance(1, spec.BootId, spec.MountNamespace, 44, 0, 22, "fuse.rclone", "remote:path");
         var safety = new Safety();
         var backend = new Backend(expected);
@@ -53,6 +54,47 @@ internal static class LinuxMountSupervisorTests
         catch (InvalidOperationException ex) when (ex.Message == "mountpoint-identity-mismatch") { }
         if (backend.Unmounts != 3) throw new Exception($"replacement mountpoint was not rejected after unmount: unmounts={backend.Unmounts}");
         if (backend.Mount is not null) throw new Exception("replacement mount unexpectedly remains mounted after rejection");
+    }
+
+    private static async Task DelayedCancellation(HostSpecification spec)
+    {
+        var expected = new MountInstance(1, spec.BootId, spec.MountNamespace, 44, 0, 22, "fuse.rclone", "remote:path");
+        var safety = new Safety { Identity = new DirectoryIdentity(spec.Source.Path, spec.Source.Device, 99, spec.Parent.MountId) };
+        var backend = new DelayedBackend(expected);
+        using var cancellation = new CancellationTokenSource();
+        var operation = new LinuxMountSupervisor(safety, backend).MountAsync(spec, "remote:path", cancellation.Token);
+        await backend.Started.Task;
+        cancellation.Cancel();
+        if (operation.IsCompleted) throw new Exception("cancellation abandoned the pending start helper");
+        backend.Release.SetResult();
+        try { await operation; throw new Exception("canceled mount accepted"); }
+        catch (OperationCanceledException) { }
+        if (!backend.StartSettled || !backend.ObservedAfterStart || backend.Unmounts != 0)
+            throw new Exception("canceled start was not settled and observed without cleanup");
+    }
+
+    private sealed class DelayedBackend(MountInstance expected) : IMountSystemBackend
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool StartSettled { get; private set; }
+        public bool ObservedAfterStart { get; private set; }
+        public int Unmounts { get; private set; }
+        public Task<bool> UnitAbsentAsync(string unit, CancellationToken ct) => Task.FromResult(true);
+        public Task<bool> UnitStoppedAsync(string unit, CancellationToken ct) => Task.FromResult(false);
+        public Task<ManagedMountProcess?> GetManagedProcessAsync(string unit, HostSpecification spec, string remoteSpec, CancellationToken ct) => Task.FromResult<ManagedMountProcess?>(null);
+        public Task<MountInstance?> InspectAsync(HostSpecification spec, CancellationToken ct)
+        {
+            if (StartSettled) ObservedAfterStart = true;
+            return Task.FromResult(StartSettled ? expected : null);
+        }
+        public async Task StartAsync(HostSpecification spec, string unit, string remoteSpec, CancellationToken ct)
+        {
+            Started.SetResult();
+            await Release.Task.WaitAsync(ct);
+            StartSettled = true;
+        }
+        public Task UnmountAsync(string path, CancellationToken ct) { Unmounts++; return Task.CompletedTask; }
     }
 
     private sealed class Safety : IMountSafetyBoundary

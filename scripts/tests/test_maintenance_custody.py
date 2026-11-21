@@ -4,6 +4,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 MODULE = pathlib.Path(__file__).resolve().parents[2] / 'MaintenanceRunner' / 'custody.py'
 spec = importlib.util.spec_from_file_location('custody', MODULE)
@@ -11,6 +12,34 @@ custody = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(custody)
 
 class CustodyTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == 'linux' and os.geteuid() == 0, 'requires Linux root')
+    def test_capability_probe_uses_only_new_empty_directories(self):
+        with tempfile.TemporaryDirectory(dir='/root') as tmp:
+            media = pathlib.Path(tmp) / 'existing-media'
+            media.write_bytes(b'preserve')
+            custody.probe_noreplace(tmp)
+            self.assertEqual(media.read_bytes(), b'preserve')
+            self.assertEqual([p.name for p in pathlib.Path(tmp).iterdir()], ['existing-media'])
+
+    @unittest.skipUnless(sys.platform == 'linux' and os.geteuid() == 0, 'requires Linux root')
+    def test_unsupported_capability_blocks_and_preserves_media(self):
+        with tempfile.TemporaryDirectory(dir='/root') as tmp:
+            media = pathlib.Path(tmp) / 'existing-media'
+            media.write_bytes(b'preserve')
+            with mock.patch.object(custody, 'rename_directory', side_effect=OSError(22, 'unsupported')):
+                with self.assertRaises(OSError):
+                    custody.probe_noreplace(tmp)
+            self.assertEqual(media.read_bytes(), b'preserve')
+            self.assertEqual([p.name for p in pathlib.Path(tmp).iterdir()], ['existing-media'])
+
+    @unittest.skipUnless(sys.platform == 'linux' and os.geteuid() == 0, 'requires Linux root')
+    def test_capability_probe_rejects_writable_parent_before_creating_anything(self):
+        with tempfile.TemporaryDirectory(dir='/root') as tmp:
+            os.chmod(tmp, 0o777)
+            with self.assertRaises(custody.CustodyError):
+                custody.probe_noreplace(tmp)
+            self.assertEqual(list(pathlib.Path(tmp).iterdir()), [])
+
     def test_invalid_leaves_are_rejected(self):
         for value in ('', '.', '..', 'a/b', '\x00'):
             with self.assertRaises(custody.CustodyError): custody._leaf(value)

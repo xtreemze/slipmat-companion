@@ -91,7 +91,7 @@ public sealed record HostSpecification(
             || ServiceUid == 0 || ServiceGid == 0 || !Canonical(PythonPath) || !IsValidHash(PythonSha256)
             || !Canonical(CustodyHelperPath) || !IsValidHash(CustodyHelperSha256) || !Canonical(CachePath)
             || CacheMaxSizeGiB <= 0 || CacheMaxAgeHours <= 0 || CacheMinFreeGiB < 0 || VerificationBudgetMinutes is < 1 or > 10080
-            || !ValidConfig(Profile) || !ValidConfig(Policy) || Profile.Path == Policy.Path
+            || !ValidConfig(Profile) || !ValidConfig(Policy) || !CacheIsSeparate() || Profile.Path == Policy.Path
             || Profile.OriginalSnapshotPath == Policy.OriginalSnapshotPath
             || Profile.OriginalSnapshotPath == Profile.Path || Policy.OriginalSnapshotPath == Policy.Path
             || admission.LibraryId == Guid.Empty || !Guid.TryParse(intent.Custody.LibraryId, out var libraryId) || libraryId != admission.LibraryId
@@ -104,6 +104,19 @@ public sealed record HostSpecification(
             || !string.Equals(Policy.BeforeHash, admission.OptionsSha256, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("invalid-host-specification");
     }
+
+    // rclone writes within its cache. Keep it outside retained media and protected
+    // inputs, and do not let a cache ancestor contain any of those paths.
+    private bool CacheIsSeparate()
+    {
+        var protectedPaths = new[] { Source.Path, BackupPath,
+            Path.GetDirectoryName(Profile.OriginalSnapshotPath), Path.GetDirectoryName(Policy.OriginalSnapshotPath),
+            Profile.Path, Policy.Path, RclonePath, RcloneConfigPath, PythonPath, CustodyHelperPath };
+        return protectedPaths.All(path => path is not null && !Overlaps(CachePath, path));
+    }
+    private static bool Overlaps(string left, string right)
+        => left == right || left.StartsWith(right.TrimEnd('/') + "/", StringComparison.Ordinal)
+            || right.StartsWith(left.TrimEnd('/') + "/", StringComparison.Ordinal);
 
     private static bool Canonical(string? path) => !string.IsNullOrWhiteSpace(path) && Path.IsPathFullyQualified(path)
         && Path.GetFullPath(path) == path && path != "/" && !path.Contains('\0');

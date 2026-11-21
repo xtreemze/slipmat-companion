@@ -7,6 +7,10 @@ namespace Slipmat.MaintenanceRunner;
 /// <summary>Invokes the root-controlled descriptor-pinned custody helper with bounded JSON input.</summary>
 public static class CustodyProcess
 {
+    /// <summary>Check no-replace rename and directory durability with new empty probe directories only.</summary>
+    public static async Task ProbeNoReplaceAsync(HostSpecification spec, CancellationToken cancellationToken)
+        => _ = await InvokeAsync(spec, new { action = "probe-noreplace", parent = spec.Parent.Path }, cancellationToken).ConfigureAwait(false);
+
     /// <summary>The caller must hold the journal lease and revalidate host barrier immediately before invocation.</summary>
     public static async Task RenameAsync(HostSpecification spec, string source, string destination, CancellationToken cancellationToken)
     {
@@ -34,16 +38,27 @@ public static class CustodyProcess
     {
         var source = Path.GetFileName(spec.Source.Path);
         if (!IsLeaf(source)) throw new InvalidOperationException("invalid-custody-leaf");
-        _ = await InvokeAsync(spec, new { action = "remove-empty-projection", parent = spec.Parent.Path, source,
-            marker = source + ".slipmat-rclone-cloud-mount.json", remoteName, remoteType, remotePath }, cancellationToken).ConfigureAwait(false);
+        _ = await InvokeAsync(spec, new
+        {
+            action = "remove-empty-projection",
+            parent = spec.Parent.Path,
+            source,
+            marker = source + ".slipmat-rclone-cloud-mount.json",
+            remoteName,
+            remoteType,
+            remotePath
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     public static async Task<DirectoryIdentity> CreateEmptyMountpointAsync(HostSpecification spec, CancellationToken cancellationToken)
     {
         var identity = await InvokeIdentityAsync(spec, new
         {
-            action = "create-empty-mountpoint", parent = spec.Parent.Path,
-            source = Path.GetFileName(spec.Source.Path), device = spec.Source.Device, mountId = spec.Parent.MountId,
+            action = "create-empty-mountpoint",
+            parent = spec.Parent.Path,
+            source = Path.GetFileName(spec.Source.Path),
+            device = spec.Source.Device,
+            mountId = spec.Parent.MountId,
         }, cancellationToken).ConfigureAwait(false);
         ValidateMountpoint(spec, identity);
         return identity;
@@ -54,9 +69,12 @@ public static class CustodyProcess
         ValidateMountpoint(spec, expected);
         var actual = await InvokeIdentityAsync(spec, new
         {
-            action = "verify-empty-mountpoint", parent = spec.Parent.Path,
-            source = Path.GetFileName(spec.Source.Path), device = expected.Device,
-            mountId = expected.MountId, inode = expected.Inode,
+            action = "verify-empty-mountpoint",
+            parent = spec.Parent.Path,
+            source = Path.GetFileName(spec.Source.Path),
+            device = expected.Device,
+            mountId = expected.MountId,
+            inode = expected.Inode,
         }, cancellationToken).ConfigureAwait(false);
         if (actual != expected) throw new InvalidOperationException("mountpoint-identity-mismatch");
     }

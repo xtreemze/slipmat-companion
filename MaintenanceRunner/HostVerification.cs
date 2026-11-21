@@ -49,7 +49,12 @@ public static class HostVerification
         }
         catch
         {
+            // The caller holds the migration journal lease. Do not release it
+            // while a cancelled verifier can still read the source or remote.
             try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+            // Cancellation also applies to the original wait, not to reaping
+            // the owned process after termination has been requested.
+            await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
             throw;
         }
         if (process.ExitCode != 0) throw new InvalidOperationException("download-verification-failed");

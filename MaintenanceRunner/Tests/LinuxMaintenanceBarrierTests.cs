@@ -35,6 +35,7 @@ internal static class LinuxMaintenanceBarrierTests
                 File.WriteAllBytes(helperPath, File.ReadAllBytes(Path.GetFullPath("MaintenanceRunner/custody.py")));
                 var testSpec = spec with
                 {
+                    CachePath = "/sys",
                     Parent = parent,
                     Source = new(sourcePath, parent.Device, 123, parent.MountId),
                     BackupPath = Path.Combine(root, "music.backup"),
