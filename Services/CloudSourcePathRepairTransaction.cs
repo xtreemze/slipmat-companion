@@ -25,6 +25,9 @@ public interface ICloudSourcePathRepairOperations
     Task<CloudSourcePathRepairSnapshot?> CompareExchangeAsync(CloudSourcePathRepairSnapshot expected,
         CloudSourcePathRepairState replacement, CancellationToken cancellationToken);
 
+    /// <summary>Exclusively create an empty archive and return its durable identity. Never adopt an existing directory.</summary>
+    Task<string> ReserveArchiveAsync(CloudSourcePathRepairSnapshot expected, CancellationToken cancellationToken);
+
     /// <summary>
     /// Perform exactly the admitted effect under the lease. Preservation is immutable and can resume
     /// only an owned archive. Move and restore require atomic no-replace and durable directory
@@ -91,6 +94,18 @@ public static class CloudSourcePathRepairTransaction
             {
                 var next = await operations.CompareExchangeAsync(current, decision.NextState!, cancellationToken).ConfigureAwait(false);
                 if (!ValidSnapshot(next) || next!.Revision == current.Revision || !SameState(decision.NextState!, next.State))
+                    return Block("source-repair-job-revision-changed");
+                current = next;
+                continue;
+            }
+
+            if (decision.Action == CloudSourcePathRepairAction.ReserveArchive)
+            {
+                var identity = await operations.ReserveArchiveAsync(current, cancellationToken).ConfigureAwait(false);
+                if (!ValidLabel(identity)) return Block("source-repair-archive-reservation-invalid");
+                var replacement = current.State with { ReservedArchiveIdentity = identity };
+                var next = await operations.CompareExchangeAsync(current, replacement, cancellationToken).ConfigureAwait(false);
+                if (!ValidSnapshot(next) || next!.Revision == current.Revision || !SameState(replacement, next.State))
                     return Block("source-repair-job-revision-changed");
                 current = next;
                 continue;
@@ -168,7 +183,8 @@ public static class CloudSourcePathRepairTransaction
                 : CloudSourcePathRepairPhase.Moving, 0);
         }
         return state.RollbackRequested ? Persist(state, CloudSourcePathRepairPhase.VerifyOriginalIntent, 0)
-            : Act(CloudSourcePathRepairAction.Preserve);
+            : Act(state.ReservedArchiveIdentity is null ? CloudSourcePathRepairAction.ReserveArchive
+                : CloudSourcePathRepairAction.Preserve);
     }
 
     private static CloudSourcePathRepairDecision BeginRestore(CloudSourcePathRepairState state, int prefix)
@@ -227,12 +243,15 @@ public static class CloudSourcePathRepairTransaction
     private static bool SameState(CloudSourcePathRepairState left, CloudSourcePathRepairState right)
         => SameDigest(left.Plan.Fingerprint, right.Plan.Fingerprint) && left.Phase == right.Phase && left.Cursor == right.Cursor
             && left.RollbackRequested == right.RollbackRequested && left.Preservation == right.Preservation
-            && left.Verification == right.Verification;
+            && left.Verification == right.Verification && left.ReservedArchiveIdentity == right.ReservedArchiveIdentity;
 
-    private static bool ValidState(CloudSourcePathRepairState? state)
+    internal static bool ValidState(CloudSourcePathRepairState? state)
     {
         if (state is null || !ValidPlan(state.Plan) || state.Cursor < 0 || state.Cursor > state.Plan.Moves.Length
-            || state.Preservation is { } receipt && !PreservationMatches(state.Plan, receipt)) return false;
+            || state.Preservation is { } receipt && (!PreservationMatches(state.Plan, receipt)
+                || receipt.ArchiveIdentity != state.ReservedArchiveIdentity)) return false;
+        if (state.ReservedArchiveIdentity is { } reservation
+            && (!ValidLabel(reservation) || state.Phase == CloudSourcePathRepairPhase.Prepared)) return false;
         var total = state.Plan.Moves.Length;
         var preserving = state.Preservation is not null;
         var verifying = state.Verification is not null;
@@ -261,12 +280,14 @@ public static class CloudSourcePathRepairTransaction
         if (state.Preservation is { } receipt)
             return archive.State == CloudSourcePathRepairArchiveState.Verified && archive.Identity == receipt.ArchiveIdentity
                 && SameDigest(archive.ManifestSha256, receipt.ManifestSha256);
+        if (state.ReservedArchiveIdentity is not { } reservation)
+            return archive.State == CloudSourcePathRepairArchiveState.Missing
+                && archive.Identity is null && archive.ManifestSha256 is null;
+        if (archive.Identity != reservation) return false;
         return archive.State switch
         {
-            CloudSourcePathRepairArchiveState.Missing => archive.Identity is null && archive.ManifestSha256 is null,
-            CloudSourcePathRepairArchiveState.Resumable => ValidLabel(archive.Identity) && archive.ManifestSha256 is null,
-            CloudSourcePathRepairArchiveState.Verified => state.Phase == CloudSourcePathRepairPhase.PreservationIntent
-                && ValidLabel(archive.Identity) && SameDigest(archive.ManifestSha256, state.Plan.PreservationManifestSha256),
+            CloudSourcePathRepairArchiveState.Resumable => archive.ManifestSha256 is null,
+            CloudSourcePathRepairArchiveState.Verified => SameDigest(archive.ManifestSha256, state.Plan.PreservationManifestSha256),
             _ => false,
         };
     }
@@ -288,7 +309,7 @@ public static class CloudSourcePathRepairTransaction
         };
     }
 
-    private static bool ValidPlan(CloudSourcePathRepairPlan? plan)
+    internal static bool ValidPlan(CloudSourcePathRepairPlan? plan)
     {
         if (plan is null || plan.SchemaVersion != 1 || plan.Binding is not { } binding
             || !Guid.TryParseExact(binding.JobId, "N", out var jobId) || jobId == Guid.Empty

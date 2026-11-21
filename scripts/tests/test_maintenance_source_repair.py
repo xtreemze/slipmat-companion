@@ -1,5 +1,6 @@
 """Disposable Linux custody proof for one exact source-path rename primitive."""
 import importlib.util
+import base64
 import contextlib
 import errno
 import hashlib
@@ -7,6 +8,7 @@ import json
 import os
 import pathlib
 import stat
+import subprocess
 import sys
 import tempfile
 import types
@@ -43,6 +45,165 @@ class SourceRepairRenameTests(unittest.TestCase):
         return custody.rename_source_entry(str(self.parent), source, destination,
                                            parent or self.identity(self.parent),
                                            entry or self.identity(self.parent / source, 'file'))
+
+    def move_request(self, action, **fields):
+        request = {
+            'action': action, 'parent': str(self.parent), 'source': 'source', 'destination': 'target',
+            'parentIdentity': self.identity(self.parent),
+            'entryIdentity': self.identity(self.parent / 'source', 'file'),
+        }
+        return request | fields
+
+    def dispatch(self, request):
+        return subprocess.run([sys.executable, '-I', str(MODULE)], input=json.dumps(request),
+                              text=True, capture_output=True, timeout=10, check=False)
+
+    def test_observe_and_rename_dispatch_track_forward_and_reverse(self):
+        source = self.parent / 'source'
+        source.write_bytes(b'version preserved')
+        observe = self.move_request('source-repair-observe-move')
+        rename = observe | {'action': 'source-repair-rename-move'}
+        steps = (
+            (observe, {'paths': {'source': 'expected', 'destination': 'missing'}}),
+            (rename, {}),
+            (observe, {'paths': {'source': 'missing', 'destination': 'expected'}}),
+            (rename | {'source': 'target', 'destination': 'source'}, {}),
+            (observe, {'paths': {'source': 'expected', 'destination': 'missing'}}),
+        )
+        for request, fields in steps:
+            result = self.dispatch(request)
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertEqual(json.loads(result.stdout), {'status': 'ok'} | fields)
+            self.assertEqual(result.stderr, '')
+        self.assertEqual(source.read_bytes(), b'version preserved')
+
+    def test_observe_foreign_inode_symlink_and_fifo_without_following(self):
+        source = self.parent / 'source'
+        source.write_bytes(b'original')
+        observe = self.move_request('source-repair-observe-move')
+        target = self.parent / 'target'
+        for create in (lambda: target.write_bytes(b'other'), lambda: target.symlink_to('source'),
+                       lambda: os.mkfifo(target)):
+            with self.subTest(create=create):
+                create()
+                result = self.dispatch(observe)
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertEqual(json.loads(result.stdout), {
+                    'status': 'ok', 'paths': {'source': 'expected', 'destination': 'foreign'},
+                })
+                target.unlink()
+        source.chmod(0o666)
+        result = self.dispatch(observe)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(json.loads(result.stdout)['paths'], {'source': 'foreign', 'destination': 'missing'})
+
+    def test_move_dispatch_rejects_unpinned_parent_extra_fields_and_occupied_target(self):
+        source = self.parent / 'source'
+        source.write_bytes(b'original')
+        target = self.parent / 'target'
+        target.write_bytes(b'preserve')
+        observe = self.move_request('source-repair-observe-move')
+        unpinned = observe['parentIdentity'] | {'inode': observe['parentIdentity']['inode'] + 1}
+        for request in (
+            observe | {'parentIdentity': unpinned}, observe | {'unexpected': True},
+            observe | {'action': 'source-repair-rename-move', 'parentIdentity': unpinned},
+            observe | {'action': 'source-repair-rename-move'},
+        ):
+            with self.subTest(request=request):
+                result = self.dispatch(request)
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertEqual(json.loads(result.stdout), {'status': 'blocked'})
+                self.assertEqual(result.stderr, '')
+        self.assertEqual(source.read_bytes(), b'original')
+        self.assertEqual(target.read_bytes(), b'preserve')
+
+    def test_observe_refuses_nonexact_alias_even_when_lookup_resolves_expected_inode(self):
+        (self.parent / 'source').write_bytes(b'original')
+        request = self.move_request('source-repair-observe-move')
+        real_exact = custody._exact_name_in_directory
+
+        def alias_listing(fd, name):
+            return name != 'source' and real_exact(fd, name)
+
+        with mock.patch.object(custody, '_exact_name_in_directory', side_effect=alias_listing):
+            paths = custody.observe_source_repair_move(
+                request['parent'], request['source'], request['destination'],
+                request['parentIdentity'], request['entryIdentity'])
+        self.assertEqual(paths, {'source': 'foreign', 'destination': 'missing'})
+
+    def test_noreplace_probe_dispatch_requires_exact_fields_and_pinned_parent(self):
+        keeper = self.parent / 'keep'
+        keeper.write_bytes(b'outside the probe')
+        identity = self.identity(self.parent)
+        request = {'action': 'source-repair-probe-noreplace', 'parent': str(self.parent),
+                   'parentIdentity': identity}
+        for invalid in (request | {'unexpected': True},
+                        request | {'parentIdentity': identity | {'mountId': identity['mountId'] + 1}}):
+            with self.subTest(request=invalid):
+                result = self.dispatch(invalid)
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertEqual(json.loads(result.stdout), {'status': 'blocked'})
+        result = self.dispatch(request)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(json.loads(result.stdout), {'status': 'ok'})
+        self.assertEqual(result.stderr, '')
+        self.assertEqual(list(self.parent.iterdir()), [keeper])
+        self.assertEqual(keeper.read_bytes(), b'outside the probe')
+
+    def test_noreplace_probe_attempts_occupied_and_absent_targets_for_both_kinds(self):
+        attempts = []
+        rename = custody._rename_noreplace
+
+        def record(parent_fd, source, destination):
+            source_stat = os.stat(source, dir_fd=parent_fd, follow_symlinks=False)
+            try:
+                os.stat(destination, dir_fd=parent_fd, follow_symlinks=False)
+                occupied = True
+            except FileNotFoundError:
+                occupied = False
+            attempts.append((stat.S_IFMT(source_stat.st_mode), occupied))
+            return rename(parent_fd, source, destination)
+
+        with mock.patch.object(custody, '_rename_noreplace', side_effect=record):
+            custody.probe_source_repair_noreplace(str(self.parent), self.identity(self.parent))
+        self.assertEqual(attempts, [(stat.S_IFREG, True), (stat.S_IFREG, False),
+                                    (stat.S_IFDIR, True), (stat.S_IFDIR, False)])
+        self.assertEqual(list(self.parent.iterdir()), [])
+
+    def test_noreplace_probe_refuses_unsupported_and_unobserved_rename(self):
+        rename = custody._rename_noreplace
+
+        def pretend_success(parent_fd, source, destination):
+            try:
+                os.stat(destination, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                return
+            return rename(parent_fd, source, destination)
+
+        for failure, exception in ((OSError(errno.EINVAL, 'unsupported'), OSError),
+                                   (pretend_success, custody.CustodyError)):
+            with self.subTest(failure=failure):
+                with mock.patch.object(custody, '_rename_noreplace', side_effect=failure):
+                    with self.assertRaises(exception):
+                        custody.probe_source_repair_noreplace(str(self.parent), self.identity(self.parent))
+                self.assertEqual(list(self.parent.iterdir()), [])
+
+    def test_noreplace_probe_preserves_foreign_replacement_in_owned_name(self):
+        def inject_foreign(parent_fd, source, destination):
+            os.unlink(destination, dir_fd=parent_fd)
+            fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=parent_fd)
+            try:
+                os.write(fd, b'foreign replacement')
+            finally:
+                os.close(fd)
+            raise custody.CustodyError('destination-exists')
+
+        with mock.patch.object(custody, '_rename_noreplace', side_effect=inject_foreign):
+            with self.assertRaises((custody.CustodyError, OSError)):
+                custody.probe_source_repair_noreplace(str(self.parent), self.identity(self.parent))
+        leftover, = self.parent.iterdir()
+        foreign, = leftover.iterdir()
+        self.assertEqual(foreign.read_bytes(), b'foreign replacement')
 
     def test_regular_file_moves_without_changing_content_or_identity(self):
         original = self.parent / 'source'
@@ -280,6 +441,121 @@ class PreservationReadbackTests(unittest.TestCase):
                                                     parent or self.identity(self.parent),
                                                     archive or self.identity(self.archive), data, digest)
 
+    def terminal_fixture(self):
+        source = self.parent / 'music'
+        entries = [
+            ('library', 'directory', None),
+            ('library/Album', 'directory', None),
+            ('library/Album/Empty', 'directory', None),
+            ('library/Album/é.flac', 'file', b'audio one'),
+            ('Track.flac', 'file', b'audio two'),
+            ('track.flac', 'file', b'audio retained'),
+            ('unselected skip', 'directory', None),
+        ]
+        selected = []
+        for path, kind, data in entries:
+            target = source / path
+            item = {'path': path, 'kind': kind}
+            if kind == 'directory':
+                target.mkdir(parents=True)
+            else:
+                target.write_bytes(data)
+                item |= {'size': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+            if path != 'unselected skip':
+                selected.append(item)
+        moves = [{'source': before, 'destination': after, 'kind': kind,
+                  'identity': self.identity(source / before)} for before, after, kind in
+                 [('library/Album', 'library/Album preserved', 'directory'),
+                  ('Track.flac', 'Track preserved.flac', 'file')]]
+        rows = [(path, kind) for path, kind, _ in entries]
+        return source, moves, selected, rows
+
+    def terminal_request(self, source, moves, selected, rows, repaired=False):
+        data, digest = self.manifest(selected)
+        records = [(path.encode('utf-8'), kind[0].upper().encode('ascii')) for path, kind in rows]
+        namespace = hashlib.sha256(b''.join(kind + b'\0' + path + b'\0' for path, kind in sorted(records)))
+        return {'action': 'source-repair-verify-tree', 'sourceRoot': str(source),
+                'sourceIdentity': self.identity(source), 'moves': moves, 'repaired': repaired,
+                'manifestBase64': base64.b64encode(data).decode('ascii'), 'manifestSha256': digest,
+                'namespaceSha256': namespace.hexdigest()}
+
+    def dispatch_terminal(self, request, expected='ok'):
+        payload = json.dumps(request) if isinstance(request, dict) else request
+        result = subprocess.run([sys.executable, '-I', str(MODULE)], input=payload,
+                                text=True, capture_output=True, timeout=10, check=False)
+        self.assertEqual(result.returncode, 0 if expected == 'ok' else 2, result.stdout)
+        self.assertEqual(json.loads(result.stdout), {'status': expected})
+        self.assertEqual(result.stderr, '')
+
+    def test_terminal_verifies_exact_original_and_repaired_namespace_and_contents(self):
+        source, moves, selected, rows = self.terminal_fixture()
+        original = self.terminal_request(source, moves, selected, rows)
+        self.dispatch_terminal(original)
+
+        for move in moves:
+            (source / move['source']).rename(source / move['destination'])
+        after = [
+            ('library', 'directory'),
+            ('library/Album preserved', 'directory'),
+            ('library/Album preserved/Empty', 'directory'),
+            ('library/Album preserved/é.flac', 'file'),
+            ('Track preserved.flac', 'file'),
+            ('track.flac', 'file'),
+            ('unselected skip', 'directory'),
+        ]
+        repaired = self.terminal_request(source, moves, selected, after, repaired=True)
+        self.dispatch_terminal(repaired)
+        self.dispatch_terminal(original, 'blocked')
+        (source / 'track.flac').write_bytes(b'other retained')
+        self.dispatch_terminal(repaired, 'blocked')
+
+    def test_terminal_refuses_namespace_omissions_and_unbound_move_identities(self):
+        source, moves, selected, rows = self.terminal_fixture()
+        request = self.terminal_request(source, moves, selected, rows)
+        self.dispatch_terminal(request | {'unexpected': 'field'}, 'blocked')
+        self.dispatch_terminal(request | {'repaired': 0}, 'blocked')
+        self.dispatch_terminal('{"repaired":false,' + json.dumps(request)[1:], 'blocked')
+        (source / 'unselected skip').rmdir()
+        self.dispatch_terminal(request, 'blocked')
+        (source / 'unselected skip').mkdir()
+        omitted = [item for item in selected if not item['path'].endswith('Empty')]
+        self.dispatch_terminal(self.terminal_request(source, moves, omitted, rows), 'blocked')
+        (source / 'Track.flac').rename(source / 'replacement-original')
+        (source / 'Track.flac').write_bytes(b'audio two')
+        (source / 'replacement-original').unlink()
+        self.dispatch_terminal(request, 'blocked')
+
+    def test_terminal_refuses_unselected_special_entry_even_with_matching_file_digest_record(self):
+        source, moves, selected, rows = self.terminal_fixture()
+        for add in (lambda path: path.symlink_to('Track.flac'), os.mkfifo):
+            with self.subTest(add=add):
+                path = source / 'foreign'
+                add(path)
+                request = self.terminal_request(source, moves, selected, rows + [('foreign', 'file')])
+                self.dispatch_terminal(request, 'blocked')
+                path.unlink()
+
+    def test_terminal_rejects_unselected_metadata_drift_during_selected_content_read(self):
+        source, moves, selected, rows = self.terminal_fixture()
+        unrelated = source / 'unrelated.txt'
+        unrelated.write_bytes(b'original')
+        before = unrelated.stat()
+        request = self.terminal_request(source, moves, selected, rows + [('unrelated.txt', 'file')])
+        verify_payloads = custody._verify_archive_tree
+
+        def change_after_read(directory_fd, prefix, *args, **kwargs):
+            verify_payloads(directory_fd, prefix, *args, **kwargs)
+            if not prefix:
+                unrelated.write_bytes(b'modified')
+                os.utime(unrelated, ns=(before.st_atime_ns, before.st_mtime_ns - 1_000_000_000))
+
+        with mock.patch.object(custody, '_verify_archive_tree', side_effect=change_after_read):
+            with self.assertRaisesRegex(custody.CustodyError, 'source-repair-terminal-tree-changed'):
+                custody.verify_source_repair_tree(str(source), request['sourceIdentity'], moves, False,
+                                                  base64.b64decode(request['manifestBase64']),
+                                                  request['manifestSha256'], request['namespaceSha256'])
+        self.assertEqual(unrelated.read_bytes(), b'modified')
+
     def test_complete_readback_including_empty_directory_and_case_distinct_files(self):
         (self.archive / 'empty').mkdir()
         (self.archive / 'Track.flac').write_bytes(b'upper')
@@ -361,6 +637,191 @@ class PreservationReadbackTests(unittest.TestCase):
                 with mock.patch.object(custody.os, 'read', side_effect=AssertionError('payload read')):
                     with self.assertRaises(custody.CustodyError):
                         self.verify(data, hashlib.sha256(data).hexdigest())
+
+    def planned_moves(self, source, data):
+        return [{'source': entry['path'], 'kind': entry['kind'],
+                 'identity': self.identity(source / entry['path'])}
+                for entry in json.loads(data)['entries'] if '/' not in entry['path']]
+
+    def test_move_requires_complete_subtree_and_pinned_identity_before_reservation(self):
+        self.archive.rmdir()
+        source = self.parent / 'source'
+        album = source / 'artist' / 'album'
+        (album / 'nested').mkdir(parents=True)
+        (album / 'nested' / 'track').write_bytes(b'kept')
+        (source / 'artist' / 'unrelated').mkdir()
+        entries = [{'path': path, 'kind': 'directory'} for path in
+                   ('artist', 'artist/album', 'artist/album/nested')]
+        move = {'source': 'artist/album', 'kind': 'directory', 'identity': self.identity(album)}
+
+        def reserve(manifest_entries, moves):
+            data, digest = self.manifest(manifest_entries)
+            return custody.create_or_resume_source_repair_archive(
+                str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
+                None, data, digest, moves)
+
+        with self.assertRaises(custody.CustodyError):
+            reserve(entries, [move])
+        entries.append({'path': 'artist/album/nested/track', 'kind': 'file', 'size': 4,
+                        'sha256': hashlib.sha256(b'kept').hexdigest()})
+        with self.assertRaises(custody.CustodyError):
+            reserve(entries, [move | {'identity': move['identity'] | {'inode': move['identity']['inode'] + 1}}])
+        with self.assertRaises(custody.CustodyError):
+            reserve(entries, [move | {'source': 'artist/missing'}])
+        self.assertFalse(self.archive.exists())
+        self.assertEqual(reserve(entries, [move]), self.identity(self.archive))
+
+    def test_moved_subtree_drift_after_copy_revokes_receipt(self):
+        source = self.parent / 'source'
+        album = source / 'album'
+        album.mkdir(parents=True)
+        data, digest = self.manifest([{'path': 'album', 'kind': 'directory'}])
+        copy = custody._copy_archive_tree
+
+        def add_unreviewed_child(*args):
+            copy(*args)
+            if args[2] == '':
+                (album / 'new-file').write_bytes(b'unreviewed')
+
+        with mock.patch.object(custody, '_copy_archive_tree', side_effect=add_unreviewed_child):
+            with self.assertRaises(custody.CustodyError):
+                custody.create_or_resume_source_repair_archive(
+                    str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
+                    self.identity(self.archive), data, digest, self.planned_moves(source, data))
+        self.assertEqual((album / 'new-file').read_bytes(), b'unreviewed')
+
+    def test_reserve_then_copy_and_independent_readback(self):
+        self.archive.rmdir()
+        source = self.parent / 'source'
+        source.mkdir()
+        (source / 'empty').mkdir()
+        (source / 'Track.flac').write_bytes(b'upper')
+        (source / 'track.flac').write_bytes(b'lower')
+        (source / 'unrelated.flac').write_bytes(b'outside the preservation subset')
+        (source / 'other').mkdir()
+        entries = [{'path': 'empty', 'kind': 'directory'},
+                   {'path': 'Track.flac', 'kind': 'file', 'size': 5,
+                    'sha256': hashlib.sha256(b'upper').hexdigest()},
+                   {'path': 'track.flac', 'kind': 'file', 'size': 5,
+                    'sha256': hashlib.sha256(b'lower').hexdigest()}]
+        data, digest = self.manifest(entries)
+        reserve = custody.create_or_resume_source_repair_archive(
+            str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
+            None, data, digest, self.planned_moves(source, data))
+        self.assertEqual(reserve, self.identity(self.archive))
+        self.assertEqual(list(self.archive.iterdir()), [])
+        with self.assertRaises(custody.CustodyError):
+            custody.create_or_resume_source_repair_archive(
+                str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
+                None, data, digest, self.planned_moves(source, data))
+        copied = custody.create_or_resume_source_repair_archive(
+            str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
+            reserve, data, digest, self.planned_moves(source, data))
+        self.assertEqual(copied, reserve)
+        self.assertEqual(self.verify(data, digest, archive=reserve), reserve)
+        self.assertEqual((source / 'Track.flac').read_bytes(), b'upper')
+        self.assertFalse((self.archive / 'unrelated.flac').exists())
+
+    def test_interrupted_copy_resumes_completed_files_without_replacing_them(self):
+        source = self.parent / 'source'
+        source.mkdir()
+        (source / 'one').write_bytes(b'one')
+        (source / 'two').write_bytes(b'two')
+        entries = [{'path': name, 'kind': 'file', 'size': len(name),
+                    'sha256': hashlib.sha256(name.encode()).hexdigest()} for name in ('one', 'two')]
+        data, digest = self.manifest(entries)
+        archive_id = self.identity(self.archive)
+        real_open = custody.os.open
+
+        def fail_before_second(path, flags, *args, **kwargs):
+            if path == 'two' and flags & os.O_CREAT:
+                raise OSError('injected interruption')
+            return real_open(path, flags, *args, **kwargs)
+
+        with mock.patch.object(custody.os, 'open', side_effect=fail_before_second):
+            with self.assertRaises(OSError):
+                custody.create_or_resume_source_repair_archive(
+                    str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
+                    archive_id, data, digest, self.planned_moves(source, data))
+        first = self.archive / 'one'
+        self.assertEqual(first.read_bytes(), b'one')
+        first_id = self.identity(first)
+        custody.create_or_resume_source_repair_archive(
+            str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
+            archive_id, data, digest, self.planned_moves(source, data))
+        self.assertEqual(self.identity(first), first_id)
+        self.assertEqual(self.verify(data, digest, archive=archive_id), archive_id)
+
+    def test_foreign_partial_file_blocks_without_overwrite(self):
+        source = self.parent / 'source'
+        source.mkdir()
+        (source / 'track').write_bytes(b'original')
+        (self.archive / 'track').write_bytes(b'foreign!')
+        entries = [{'path': 'track', 'kind': 'file', 'size': 8,
+                    'sha256': hashlib.sha256(b'original').hexdigest()}]
+        data, digest = self.manifest(entries)
+        with self.assertRaises(custody.CustodyError):
+            custody.create_or_resume_source_repair_archive(
+                str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
+                self.identity(self.archive), data, digest, self.planned_moves(source, data))
+        self.assertEqual((self.archive / 'track').read_bytes(), b'foreign!')
+        self.assertEqual((source / 'track').read_bytes(), b'original')
+
+    def test_mid_file_write_stall_keeps_partial_and_blocks_resume(self):
+        source = self.parent / 'source'
+        source.mkdir()
+        payload = b'a' * (1024 * 1024 + 1)
+        (source / 'track').write_bytes(payload)
+        data, digest = self.manifest([{'path': 'track', 'kind': 'file', 'size': len(payload),
+                                      'sha256': hashlib.sha256(payload).hexdigest()}])
+        archive_id = self.identity(self.archive)
+        actual_write = custody.os.write
+        writes = 0
+
+        def stalled_write(fd, chunk):
+            nonlocal writes
+            writes += 1
+            return 0 if writes == 2 else actual_write(fd, chunk)
+
+        with mock.patch.object(custody.os, 'write', side_effect=stalled_write):
+            with self.assertRaises(OSError):
+                custody.create_or_resume_source_repair_archive(
+                    str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
+                    archive_id, data, digest, self.planned_moves(source, data))
+        partial = self.archive / 'track'
+        self.assertEqual(partial.stat().st_size, 1024 * 1024)
+        with self.assertRaises(custody.CustodyError):
+            custody.create_or_resume_source_repair_archive(
+                str(source), self.identity(source), str(self.parent), 'archive', self.identity(self.parent),
+                archive_id, data, digest, self.planned_moves(source, data))
+        self.assertEqual(partial.stat().st_size, 1024 * 1024)
+
+    def test_archive_dispatch_rejects_extra_fields_and_verifies_exact_request(self):
+        source = self.parent / 'source'
+        source.mkdir()
+        (source / 'track').write_bytes(b'kept')
+        data, digest = self.manifest([{'path': 'track', 'kind': 'file', 'size': 4,
+                                      'sha256': hashlib.sha256(b'kept').hexdigest()}])
+        request = {'action': 'source-repair-archive-create-or-resume', 'sourceRoot': str(source),
+                   'sourceIdentity': self.identity(source), 'moves': self.planned_moves(source, data), 'archiveParent': str(self.parent),
+                   'archiveLeaf': 'archive', 'archiveParentIdentity': self.identity(self.parent),
+                   'archiveIdentity': self.identity(self.archive),
+                   'manifestBase64': base64.b64encode(data).decode('ascii'), 'manifestSha256': digest}
+
+        def invoke(value):
+            completed = subprocess.run([sys.executable, str(MODULE)], input=json.dumps(value).encode(),
+                                       capture_output=True, check=False)
+            return completed.returncode, json.loads(completed.stdout)
+
+        invalid = request | {'unreviewed': True}
+        self.assertEqual(invoke(invalid), (2, {'status': 'blocked'}))
+        self.assertFalse((self.archive / 'track').exists())
+        code, output = invoke(request)
+        self.assertEqual(code, 0)
+        self.assertEqual(output['identity'], request['archiveIdentity'])
+        verify = {key: value for key, value in request.items() if key not in ('sourceRoot', 'sourceIdentity', 'moves')}
+        verify['action'] = 'source-repair-archive-verify'
+        self.assertEqual(invoke(verify), (0, {'status': 'ok', 'identity': request['archiveIdentity']}))
 
 
 if __name__ == '__main__':

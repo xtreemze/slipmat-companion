@@ -1,9 +1,57 @@
 # Source-path repair foundation
 
-This is an unwired contract and ownership-guard candidate. It does not add an
-admission endpoint, operator command, filesystem adapter, or production repair.
+This draft contains the repair transaction, ownership guards and a Linux host
+adapter exercised against disposable files and a real journal. Read-only
+operator checks and explicitly requested offline execution are available.
+Installation and end-to-end proof on the production host are pending.
 Do not edit a journal to manufacture an admitted repair. No source-path move is
 authorized by a diagnostic report or a terminal custody receipt alone.
+
+## Read-only runner checks
+
+`source-repair-startup ABSOLUTE_JOURNAL_DIRECTORY` reads the full journal
+inventory under the existing writer lock. It refuses service startup while
+any source repair still owns a job, including a job other than the original
+VFS maintenance job. It also refuses unreadable inventory. It allows valid
+terminal repair receipts without requiring a VFS promotion admission.
+
+`source-repair-check ABSOLUTE_JOURNAL_DIRECTORY JOB_ID ABSOLUTE_SPEC_PATH
+ABSOLUTE_APPROVAL_PATH` uses the stopped-service barrier to validate the
+reviewed plan, exact job revision, bound directories, full source metadata,
+namespace and selected content. The root-controlled approval JSON contains
+`expectedJournalRevision` and `plan`. The check does not reserve an archive,
+run the filesystem probe or change the journal.
+
+## Offline execution
+
+`source-repair-run JOURNAL JOB_ID SPEC APPROVAL` admits the reviewed failed
+job and drives repair to a verified state. Omit `APPROVAL` to resume an
+already admitted job. `source-repair-rollback JOURNAL JOB_ID SPEC` records
+rollback and drives the original namespace verification. Use absolute paths
+for artifacts and invoke the installed `Slipmat.MaintenanceRunner` apphost.
+
+The commands require a root-controlled apphost, its managed assembly and
+runtime metadata, and the exact persistent drop-in at
+`/etc/systemd/system/jellyfin.service.d/90-slipmat-source-repair.conf`.
+Its contents are `[Service]` followed by
+`ExecStartPre=+ABSOLUTE_APPHOST source-repair-startup ABSOLUTE_JOURNAL`,
+each on its own LF-terminated line. Before masking for a real run,
+run `source-repair-check-hook ABSOLUTE_JOURNAL_DIRECTORY` while Jellyfin is
+stopped and unmasked. This checks the effective privileged argv and requires
+failure propagation. Systemd skips loading drop-ins for a masked unit.
+
+Keep Jellyfin persistently masked throughout repair. The runner requires
+the on-disk mask, the manager's masked load and file states, no pending
+daemon reload, and no service processes. After a verified terminal result,
+run `source-repair-check-hook` again while unmasked and stopped before starting
+Jellyfin.
+These commands perform the local source repair only. After a verified repair,
+request archive-and-repair again through Companion. The first request creates
+a new attempt and preserves the original pre-plan failure record and artifacts.
+A subsequent retry resumes the new attempt. Once cloud recovery has been
+admitted, the offline source rollback command refuses the job because the
+cloud side may already depend on the repaired namespace. Cloud content
+verification and VFS activation follow separately.
 
 ## Purpose and owner
 
@@ -84,9 +132,36 @@ plan-bound SHA-256 digest, plus pinned identities for the archive and its parent
 Schema 1 records the complete tree, including empty directories, with file
 sizes, SHA-256 digests and aggregate counts. Readback checks exact stored names,
 rejects links and special entries, and verifies every file after a complete
-metadata pass. Its caller must establish exclusive archive custody. The runner
-still needs to create the preservation copy and bind the verifier's result to
-the journal before authorizing moves.
+metadata pass. Its caller must establish exclusive archive custody.
+
+The custody helper can reserve a new empty archive directory, then copy using
+the reserved identity. A subsequent request revalidates completed files before
+continuing. An unknown directory or incomplete file blocks resume without
+overwriting it. The copy can select a subset of the source. Before it can handle
+Music, the offline runner must supply the admitted repair plan. The adapter
+derives the source root, pinned move identities, and manifest digest from that
+plan. The helper requires the manifest to include every descendant of each
+moved directory while allowing unrelated siblings outside those subtrees.
+It checks the source again after copying. The transaction records the reservation
+identity through whole-job compare-and-exchange before permitting copy. Verified
+readback must match that identity before any move can be authorized. If a crash
+occurs after directory creation but before that journal update, replay blocks
+and leaves the unbound directory for inspection. The Linux preservation host connects the journaled intent and root-owned,
+hash-pinned host specification to the archive helper. It checks the stopped
+service before and after each helper call. The Linux move host observes both
+exact names under each pinned parent, verifies the expected prefix and archive,
+and applies only the move or restore index recorded in the current journal.
+A case alias or foreign identity is not treated as absence. Before renaming,
+the host proves occupied-target refusal and successful no-replace moves for
+both files and directories. This uses a pinned scratch directory on the source
+mount and outside the source and archive trees. The source-repair command
+requires the persistent startup guard. The Linux transaction
+adapter verifies terminal custody by checking the exact full namespace and
+rehashing the preservation manifest selection at translated paths. Namespace
+SHA-256 covers UTF-8 byte-sorted relative paths, excluding the root. Each record
+is the byte `D` for a directory or `F` for a file, a NUL, the UTF-8 path and a
+final NUL. Empty directories are included. The staged preservation archive
+is read back separately.
 
 Tests exercise write-ahead ordering, preservation before moves, every synthetic
 forward/restore journal-effect crash boundary, pending rollback outcomes, foreign

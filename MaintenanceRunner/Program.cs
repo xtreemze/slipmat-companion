@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Jellyfin.Plugin.AudioGateway.Services;
+using Jellyfin.Plugin.AudioGateway.Models;
 
 namespace Slipmat.MaintenanceRunner;
 
@@ -11,11 +12,25 @@ internal static class Program
         var inspect = args.Length == 3 && args[0] == "inspect";
         var startup = args.Length == 4 && args[0] == "startup" && Path.IsPathFullyQualified(args[3]);
         var run = args.Length == 4 && args[0] == "run" && Path.IsPathFullyQualified(args[3]);
-        if ((!inspect && !run && !startup) || !Path.IsPathFullyQualified(args[1]) || !Guid.TryParseExact(args[2], "N", out _))
+        var sourceRepairStartup = args.Length == 2 && args[0] == "source-repair-startup";
+        var sourceRepairCheckHook = args.Length == 2 && args[0] == "source-repair-check-hook";
+        var sourceRepairCheck = args.Length == 5 && args[0] == "source-repair-check"
+            && Path.IsPathFullyQualified(args[3]) && Path.IsPathFullyQualified(args[4]);
+        var sourceRepairRun = args.Length is 4 or 5 && args[0] == "source-repair-run"
+            && Path.IsPathFullyQualified(args[3]) && (args.Length == 4 || Path.IsPathFullyQualified(args[4]));
+        var sourceRepairRollback = args.Length == 4 && args[0] == "source-repair-rollback"
+            && Path.IsPathFullyQualified(args[3]);
+        if ((!inspect && !run && !startup && !sourceRepairStartup && !sourceRepairCheckHook && !sourceRepairCheck && !sourceRepairRun && !sourceRepairRollback) || !Path.IsPathFullyQualified(args[1])
+            || (!sourceRepairStartup && !sourceRepairCheckHook && !Guid.TryParseExact(args[2], "N", out _)))
         {
             Console.Error.WriteLine("Usage: Slipmat.MaintenanceRunner inspect ABSOLUTE_JOURNAL_DIRECTORY JOB_ID");
             Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner run ABSOLUTE_JOURNAL_DIRECTORY JOB_ID ABSOLUTE_SPEC_PATH");
             Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner startup ABSOLUTE_JOURNAL_DIRECTORY JOB_ID ABSOLUTE_SPEC_PATH");
+            Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner source-repair-startup ABSOLUTE_JOURNAL_DIRECTORY");
+            Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner source-repair-check-hook ABSOLUTE_JOURNAL_DIRECTORY");
+            Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner source-repair-check ABSOLUTE_JOURNAL_DIRECTORY JOB_ID ABSOLUTE_SPEC_PATH ABSOLUTE_APPROVAL_PATH");
+            Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner source-repair-run JOURNAL JOB_ID SPEC [APPROVAL]");
+            Console.Error.WriteLine("   or: Slipmat.MaintenanceRunner source-repair-rollback JOURNAL JOB_ID SPEC");
             return 2;
         }
         if (!OperatingSystem.IsLinux() || GetEffectiveUserId() != 0)
@@ -40,6 +55,68 @@ internal static class Program
             Console.CancelKeyPress += cancel;
             try
             {
+                if (sourceRepairCheckHook)
+                {
+                    var journalDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(args[1]));
+                    await using var readOnlyLease = OpenExistingJournalLease(journalDirectory);
+                    _ = await readOnlyLease.ReadAllAsync(cancellation.Token).ConfigureAwait(false);
+                    await SourcePathRepairEffectiveStartupHook.VerifyAsync(journalDirectory, cancellation.Token)
+                        .ConfigureAwait(false);
+                    Console.WriteLine(JsonSerializer.Serialize(new
+                    {
+                        status = "source-repair-effective-hook-verified",
+                        execution = "not-requested",
+                    }));
+                    return 0;
+                }
+                if (sourceRepairStartup)
+                {
+                    cancellation.CancelAfter(TimeSpan.FromSeconds(10));
+                    await using var readOnlyLease = OpenExistingJournalLease(args[1]);
+                    var inventory = await readOnlyLease.ReadAllAsync(cancellation.Token).ConfigureAwait(false);
+                    var owningRepair = inventory.Any(snapshot => snapshot.Job.SourcePathRepairOwnsJob);
+                    Console.WriteLine(JsonSerializer.Serialize(new
+                    {
+                        status = owningRepair ? "blocked" : "source-repair-startup-clear",
+                        code = owningRepair ? "migration-source-repair-owned" : "no-owning-source-repair",
+                        execution = "not-requested",
+                    }));
+                    return owningRepair ? 1 : 0;
+                }
+                if (sourceRepairCheck)
+                {
+                    await using var readOnlyLease = OpenExistingJournalLease(args[1]);
+                    var admission = new SourcePathRepairAdmission(readOnlyLease,
+                        new LinuxMaintenanceBarrier(new LinuxSystemdBarrierQuery()), args[3]);
+                    await admission.CheckAsync(args[2], args[4], cancellation.Token).ConfigureAwait(false);
+                    Console.WriteLine(JsonSerializer.Serialize(new
+                    {
+                        status = "source-repair-preflight-verified",
+                        jobId = args[2],
+                        execution = "not-requested",
+                    }));
+                    return 0;
+                }
+                if (sourceRepairRun || sourceRepairRollback)
+                {
+                    var journalDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(args[1]));
+                    await using var repairLease = OpenExistingJournalLease(journalDirectory);
+                    var execution = new SourcePathRepairExecution(repairLease,
+                        new LinuxMaintenanceBarrier(new LinuxSystemdBarrierQuery()), args[3],
+                        () => SourcePathRepairStartupHook.VerifyInstalled(journalDirectory));
+                    var result = await execution.RunAsync(args[2], args.Length == 5 ? args[4] : null,
+                        sourceRepairRollback, cancellation.Token).ConfigureAwait(false);
+                    var current = await repairLease.ReadAsync(args[2], cancellation.Token).ConfigureAwait(false);
+                    var finished = result.Action == CloudSourcePathRepairAction.Complete;
+                    Console.WriteLine(JsonSerializer.Serialize(new
+                    {
+                        status = finished ? "stable" : "blocked",
+                        jobId = args[2],
+                        phase = current?.Job.SourcePathRepair?.Phase.ToString(),
+                        code = result.Code,
+                    }));
+                    return finished ? 0 : 1;
+                }
                 if (inspect) cancellation.CancelAfter(TimeSpan.FromSeconds(10));
                 await using var lease = await new CloudMigrationJournal(args[1]).AcquireAsync(cancellation.Token);
                 if (inspect)
@@ -127,6 +204,19 @@ internal static class Program
             Console.Error.WriteLine("Maintenance operation unavailable or blocked.");
             return 2;
         }
+    }
+
+    private static CloudMigrationJournalLease OpenExistingJournalLease(string journalDirectory)
+    {
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(journalDirectory));
+        CloudMigrationJournal.RejectLink(root);
+        var lockPath = Path.Combine(root, ".writer.lock");
+        CloudMigrationJournal.RejectLink(lockPath);
+        // Keep the canonical writer's lock mode without creating or writing any file.
+        var stream = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        if (stream.CanSeek) return new CloudMigrationJournalLease(root, stream);
+        stream.Dispose();
+        throw new IOException("migration-journal-lease-unavailable");
     }
 
     [DllImport("libc", EntryPoint = "geteuid")]

@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Jellyfin.Plugin.AudioGateway.Models;
+using Jellyfin.Plugin.AudioGateway.Services;
 
 namespace Slipmat.MaintenanceRunner;
 
@@ -84,21 +86,185 @@ public static class CustodyProcess
             throw new InvalidOperationException("mountpoint-identity-mismatch");
     }
 
-    private static async Task<string> InvokeAsync(HostSpecification spec, object request, CancellationToken cancellationToken)
+    internal static async Task VerifySourceTreeAsync(SourcePathRepairHostSpecification specification,
+        CloudSourcePathRepairPlan plan, bool repaired, CancellationToken cancellationToken)
     {
-        CheckHash(spec.PythonPath, spec.PythonSha256, 128 * 1024 * 1024);
-        CheckHash(spec.CustodyHelperPath, spec.CustodyHelperSha256, 1024 * 1024);
-        var info = new ProcessStartInfo(spec.PythonPath) { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        var manifest = LinuxTrustedFile.Read(specification.ManifestPath, 4 * 1024 * 1024);
+        var payload = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            action = "source-repair-verify-tree",
+            sourceRoot = plan.Binding.LocalRoot,
+            sourceIdentity = plan.Binding.RootIdentity,
+            moves = plan.Moves.Select(move => new
+            {
+                move.Source,
+                move.Destination,
+                kind = MoveKind(move.Kind),
+                move.Identity,
+            }).ToArray(),
+            repaired,
+            manifestBase64 = Convert.ToBase64String(manifest),
+            manifestSha256 = plan.PreservationManifestSha256,
+            namespaceSha256 = repaired ? plan.TargetNamespaceSha256 : plan.Binding.Source.NamespaceSha256,
+        }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        if (payload.Length > 6 * 1024 * 1024)
+            throw new InvalidOperationException("source-repair-tree-request-too-large");
+        var output = await InvokeAsync(specification.PythonPath, specification.PythonSha256, specification.HelperPath,
+            specification.HelperSha256, payload, cancellationToken).ConfigureAwait(false);
+        using var document = JsonDocument.Parse(output);
+        if (document.RootElement.GetProperty("status").GetString() != "ok")
+            throw new InvalidOperationException("source-repair-tree-result-invalid");
+    }
+
+    private static string MoveKind(CloudSourcePathRepairKind kind) => kind switch
+    {
+        CloudSourcePathRepairKind.File => "file",
+        CloudSourcePathRepairKind.Directory => "directory",
+        _ => throw new InvalidOperationException("source-repair-move-kind-invalid"),
+    };
+
+    internal static async Task ProbeNoReplaceAsync(SourcePathRepairHostSpecification specification,
+        CancellationToken cancellationToken)
+    {
+        var payload = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            action = "source-repair-probe-noreplace",
+            parent = specification.RenameProbePath,
+            parentIdentity = specification.RenameProbeIdentity,
+        }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var output = await InvokeAsync(specification.PythonPath, specification.PythonSha256, specification.HelperPath,
+            specification.HelperSha256, payload, cancellationToken).ConfigureAwait(false);
+        using var document = JsonDocument.Parse(output);
+        if (document.RootElement.GetProperty("status").GetString() != "ok")
+            throw new InvalidOperationException("source-repair-rename-probe-invalid");
+    }
+
+    internal static async Task<CloudSourcePathRepairPathObservation?> MoveAsync(
+        SourcePathRepairHostSpecification specification, CloudSourcePathRepairPlan plan, int index,
+        bool execute, bool reverse, CancellationToken cancellationToken)
+    {
+        var move = plan.Moves[index];
+        var split = move.Source.LastIndexOf('/');
+        var relativeParent = split < 0 ? "" : move.Source[..split];
+        if (!specification.MoveParents.TryGetValue(relativeParent, out var parentIdentity)
+            || parentIdentity.Device != plan.Binding.RootIdentity.Device
+            || parentIdentity.MountId != plan.Binding.RootIdentity.MountId
+            || (relativeParent.Length == 0 && parentIdentity != plan.Binding.RootIdentity))
+            throw new InvalidOperationException("source-repair-move-parent-unbound");
+        var parent = relativeParent.Length == 0 ? plan.Binding.LocalRoot : Path.Combine(plan.Binding.LocalRoot, relativeParent);
+        var source = Path.GetFileName(move.Source);
+        var destination = Path.GetFileName(move.Destination);
+        var payload = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            action = execute ? "source-repair-rename-move" : "source-repair-observe-move",
+            parent,
+            source = reverse ? destination : source,
+            destination = reverse ? source : destination,
+            parentIdentity,
+            entryIdentity = new
+            {
+                device = move.Identity.Device, inode = move.Identity.Inode, mountId = move.Identity.MountId,
+                kind = MoveKind(move.Kind),
+            },
+        }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var output = await InvokeAsync(specification.PythonPath, specification.PythonSha256, specification.HelperPath,
+            specification.HelperSha256, payload, cancellationToken).ConfigureAwait(false);
+        using var document = JsonDocument.Parse(output);
+        var result = document.RootElement;
+        if (result.GetProperty("status").GetString() != "ok")
+            throw new InvalidOperationException("source-repair-move-result-invalid");
+        if (execute) return null;
+        var paths = result.GetProperty("paths");
+        return new(ParsePathState(paths.GetProperty("source")), ParsePathState(paths.GetProperty("destination")));
+    }
+
+    private static CloudSourcePathRepairPathState ParsePathState(JsonElement value) => value.GetString() switch
+    {
+        "expected" => CloudSourcePathRepairPathState.Expected,
+        "missing" => CloudSourcePathRepairPathState.Missing,
+        "foreign" => CloudSourcePathRepairPathState.Foreign,
+        _ => throw new InvalidOperationException("source-repair-move-result-invalid"),
+    };
+
+    // The offline transaction must bind these inputs to the journal and hold the host barrier.
+    internal static async Task<CloudSourcePathRepairIdentity> ArchiveAsync(
+        string pythonPath, string pythonSha256, string helperPath, string helperSha256,
+        string archiveParent, string archiveLeaf, CloudSourcePathRepairIdentity archiveParentIdentity,
+        CloudSourcePathRepairIdentity? archiveIdentity, byte[] manifest, string manifestSha256,
+        CloudSourcePathRepairPlan? plan, CancellationToken cancellationToken)
+    {
+        var copy = plan is not null;
+        if (copy && !CloudSourcePathRepairTransaction.ValidPlan(plan))
+            throw new InvalidOperationException("source-repair-archive-plan-invalid");
+        if ((!copy && archiveIdentity is null)
+            || (plan is not null && !string.Equals(plan.PreservationManifestSha256, manifestSha256, StringComparison.OrdinalIgnoreCase))
+            || manifest.Length is 0 or > 4 * 1024 * 1024 || !HostSpecification.IsValidHash(manifestSha256)
+            || !Convert.ToHexString(SHA256.HashData(manifest)).Equals(manifestSha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("source-repair-archive-request-invalid");
+
+        var request = new Dictionary<string, object?>
+        {
+            ["action"] = copy ? "source-repair-archive-create-or-resume" : "source-repair-archive-verify",
+            ["archiveParent"] = archiveParent,
+            ["archiveLeaf"] = archiveLeaf,
+            ["archiveParentIdentity"] = archiveParentIdentity,
+            ["archiveIdentity"] = archiveIdentity,
+            ["manifestBase64"] = Convert.ToBase64String(manifest),
+            ["manifestSha256"] = manifestSha256,
+        };
+        if (plan is not null)
+        {
+            request["sourceRoot"] = plan.Binding.LocalRoot;
+            request["sourceIdentity"] = plan.Binding.RootIdentity;
+            request["moves"] = plan.Moves.Select(move => new
+            {
+                move.Source,
+                kind = MoveKind(move.Kind),
+                move.Identity,
+            }).ToArray();
+        }
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var payload = JsonSerializer.SerializeToUtf8Bytes(request, options);
+        if (payload.Length > 6 * 1024 * 1024)
+            throw new InvalidOperationException("source-repair-archive-request-too-large");
+        var output = await InvokeAsync(pythonPath, pythonSha256, helperPath, helperSha256, payload,
+            cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var document = JsonDocument.Parse(output);
+            if (document.RootElement.GetProperty("status").GetString() != "ok") throw new JsonException();
+            var actual = document.RootElement.GetProperty("identity").Deserialize<CloudSourcePathRepairIdentity>(options);
+            if (actual.Inode == 0 || actual.MountId <= 0 || (archiveIdentity.HasValue && archiveIdentity.Value != actual))
+                throw new JsonException();
+            return actual;
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException)
+        {
+            throw new InvalidOperationException("source-repair-archive-identity-invalid", ex);
+        }
+    }
+
+    private static Task<string> InvokeAsync(HostSpecification spec, object request, CancellationToken cancellationToken)
+        => InvokeAsync(spec.PythonPath, spec.PythonSha256, spec.CustodyHelperPath, spec.CustodyHelperSha256,
+            JsonSerializer.SerializeToUtf8Bytes(request), cancellationToken);
+
+    private static async Task<string> InvokeAsync(string pythonPath, string pythonSha256, string helperPath,
+        string helperSha256, byte[] request, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        CheckHash(pythonPath, pythonSha256, 128 * 1024 * 1024);
+        CheckHash(helperPath, helperSha256, 1024 * 1024);
+        var info = new ProcessStartInfo(pythonPath) { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
         info.Environment.Clear();
         info.Environment["PATH"] = "/usr/bin:/bin";
         info.ArgumentList.Add("-I");
-        info.ArgumentList.Add(spec.CustodyHelperPath);
+        info.ArgumentList.Add(helperPath);
         using var process = Process.Start(info) ?? throw new InvalidOperationException("custody-helper-start-failed");
         try
         {
             var output = process.StandardOutput.ReadToEndAsync(cancellationToken);
             var error = process.StandardError.BaseStream.CopyToAsync(Stream.Null, cancellationToken);
-            await JsonSerializer.SerializeAsync(process.StandardInput.BaseStream, request, cancellationToken: cancellationToken).ConfigureAwait(false);
+            await process.StandardInput.BaseStream.WriteAsync(request, cancellationToken).ConfigureAwait(false);
             process.StandardInput.Close();
             await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
             await Task.WhenAll(output, error).ConfigureAwait(false);
@@ -108,6 +274,9 @@ public static class CustodyProcess
         catch
         {
             try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+            // The caller may release the journal lease when we return. Wait for the
+            // helper to exit even if the original request was canceled.
+            await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
             throw;
         }
     }

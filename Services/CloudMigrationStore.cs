@@ -175,6 +175,9 @@ public sealed class CloudMigrationStore
 
     private static void RequireUnchangedSourceRepair(CloudMigrationJob? current, CloudMigrationJob replacement)
     {
+        if (!JsonSerializer.SerializeToUtf8Bytes(current?.PriorConflictRecovery, JsonOptions)
+                .AsSpan().SequenceEqual(JsonSerializer.SerializeToUtf8Bytes(replacement.PriorConflictRecovery, JsonOptions)))
+            throw new InvalidOperationException("migration-conflict-recovery-history-owned");
         if (current?.SourcePathRepairOwnsJob == true || replacement.SourcePathRepairOwnsJob
             || !JsonSerializer.SerializeToUtf8Bytes(current?.SourcePathRepair, JsonOptions)
                 .AsSpan().SequenceEqual(JsonSerializer.SerializeToUtf8Bytes(replacement.SourcePathRepair, JsonOptions)))
